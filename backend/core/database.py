@@ -131,6 +131,11 @@ class DatabaseManager:
                 "echo": settings.debug,
             }
 
+            # Supabase's transaction pooler does not support asyncpg prepared
+            # statement caching. Disable it only for asyncpg PostgreSQL engines.
+            if make_url(database_url).drivername == "postgresql+asyncpg":
+                engine_kwargs["connect_args"] = {"statement_cache_size": 0}
+
             # Check if we're in a Lambda environment
             is_lambda = bool(
                 os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
