@@ -8,6 +8,8 @@ const apiClient = axios.create({
   },
 });
 
+const storageDownloadUrls = new Map<string, Promise<string | null>>();
+
 apiClient.interceptors.request.use((config) => {
   const token = getStoredAuthToken();
   if (token) {
@@ -316,13 +318,26 @@ export async function getStorageDownloadUrl(
   bucketName: string,
   objectKey: string
 ): Promise<string | null> {
-  const response = await apiClient.post(apiUrl('/api/v1/storage/download-url'), {
-    bucket_name: bucketName,
-    object_key: objectKey,
-  });
+  const cacheKey = `${bucketName}:${objectKey}`;
+  const existing = storageDownloadUrls.get(cacheKey);
+  if (existing) return existing;
 
-  const downloadUrl = response.data?.download_url as string | undefined;
-  return downloadUrl || null;
+  const request = apiClient
+    .get(apiUrl('/api/v1/storage/download'), {
+      params: {
+        bucket_name: bucketName,
+        object_key: objectKey,
+      },
+      responseType: 'blob',
+    })
+    .then((response) => URL.createObjectURL(response.data as Blob))
+    .catch((error) => {
+      storageDownloadUrls.delete(cacheKey);
+      throw error;
+    });
+
+  storageDownloadUrls.set(cacheKey, request);
+  return request;
 }
 
 // API helpers

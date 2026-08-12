@@ -1,7 +1,8 @@
 import logging
+from datetime import datetime, timezone
 
 from dependencies.auth import get_admin_user, get_current_user
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Response, status
 from schemas.auth import UserResponse
 from schemas.storage import (
     BucketListResponse,
@@ -152,7 +153,7 @@ async def upload_file_direct(
     _current_user: UserResponse = Depends(get_current_user),
 ):
     """
-    Upload a file to Supabase Storage through the backend.
+    Upload a file to the configured storage backend through the backend.
     """
     try:
         request = FileUpDownRequest(bucket_name=bucket_name, object_key=object_key)
@@ -173,6 +174,63 @@ async def upload_file_direct(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to upload file: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
+
+
+@router.get("/download")
+async def download_file_direct(
+    bucket_name: str,
+    object_key: str,
+):
+    """
+    Download a file from the configured storage backend through the backend.
+    """
+    try:
+        request = FileUpDownRequest(bucket_name=bucket_name, object_key=object_key)
+        service = StorageService()
+        file_bytes = await service.download_file(request.bucket_name, request.object_key)
+        metadata = await service.get_file_metadata(request.bucket_name, request.object_key)
+        return Response(
+            content=file_bytes,
+            media_type=metadata.get("mime_type") or "application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{metadata.get('file_name') or request.object_key}\"",
+            },
+        )
+    except ValueError as e:
+        logger.error(f"Invalid download request: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to download file: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
+
+
+@router.post("/google-drive-test")
+async def google_drive_test(_current_user: UserResponse = Depends(get_admin_user)):
+    """
+    Test Google Drive authentication, upload, and delete operations.
+    """
+    try:
+        service = StorageService()
+        test_bucket = "google-drive-debug"
+        test_name = f"test-upload-{int(datetime.now(timezone.utc).timestamp())}.txt"
+        file_bytes = b"Google Drive integration test"
+
+        object_key = await service.upload_file(test_bucket, test_name, file_bytes, "text/plain")
+        metadata = await service.get_file_metadata(test_bucket, object_key)
+        await service.delete_object(ObjectRequest(bucket_name=test_bucket, object_key=object_key))
+
+        return {
+            "success": True,
+            "drive_file_id": metadata.get("drive_file_id"),
+            "file_name": metadata.get("file_name"),
+            "mime_type": metadata.get("mime_type"),
+        }
+    except ValueError as e:
+        logger.error(f"Google Drive test failed: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Google Drive test failed: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
 
 

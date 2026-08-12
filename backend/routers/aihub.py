@@ -11,9 +11,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from schemas.aihub import GenImgRequest, GenImgResponse, GenTxtRequest
 from services.aihub import AIHubService, InvalidImageInputError
-from sse_starlette.sse import EventSourceResponse
 
 logger = logging.getLogger(__name__)
+
+try:
+    from sse_starlette.sse import EventSourceResponse
+except ImportError:
+    EventSourceResponse = None
 
 
 def _try_extract_message_from_dict(data: dict) -> str | None:
@@ -112,6 +116,12 @@ async def generate_text(
 
         # Decide response mode based on the `stream` parameter
         if request.stream:
+            if EventSourceResponse is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="SSE streaming is unavailable. Install sse_starlette to enable stream=true.",
+                )
+
             # Streaming response - wrap content in JSON for SSE
             async def event_generator():
                 try:

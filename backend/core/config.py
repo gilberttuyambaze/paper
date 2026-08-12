@@ -1,7 +1,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
@@ -9,9 +9,10 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(REPO_ROOT / ".env", override=False)
-load_dotenv(REPO_ROOT / ".env.local", override=True)
+BASE_DIR = Path(__file__).resolve().parents[1]
+
+load_dotenv(BASE_DIR / ".env", override=False)
+load_dotenv(BASE_DIR / ".env.local", override=True)
 
 
 class Settings(BaseSettings):
@@ -58,9 +59,24 @@ class Settings(BaseSettings):
     def frontend_url(self) -> str:
         return os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
+    google_drive_enabled: bool = False
+    google_drive_folder_id: Optional[str] = None
+    google_service_account_json_base64: Optional[str] = None
+
     class Config:
         case_sensitive = False
         extra = "ignore"
+
+    @field_validator("google_drive_enabled", mode="before")
+    @classmethod
+    def normalize_google_drive_enabled(cls, value: Any) -> bool:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        return bool(value)
 
     def __getattr__(self, name: str) -> Any:
         """

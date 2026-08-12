@@ -5,6 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.papers import Papers
+from services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +14,45 @@ logger = logging.getLogger(__name__)
 class PapersService:
     """Service layer for Papers operations"""
 
+    DEFAULT_STORAGE_BUCKET = "papers"
+
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _attach_storage_metadata(self, data: Dict[str, Any]) -> None:
+        if not data:
+            return
+
+        storage = StorageService()
+
+        if data.get("file_key"):
+            try:
+                metadata = await storage.get_file_metadata(self.DEFAULT_STORAGE_BUCKET, data["file_key"])
+                data["file_drive_file_id"] = metadata.get("drive_file_id")
+                data["file_storage_provider"] = metadata.get("storage_provider")
+                data["file_name"] = metadata.get("file_name")
+                data["file_size"] = metadata.get("file_size")
+                data["file_mime_type"] = metadata.get("mime_type")
+            except Exception as exc:
+                logger.warning("Could not attach file metadata for paper file_key=%s: %s", data.get("file_key"), exc)
+
+        if data.get("solution_key"):
+            try:
+                metadata = await storage.get_file_metadata(self.DEFAULT_STORAGE_BUCKET, data["solution_key"])
+                data["solution_drive_file_id"] = metadata.get("drive_file_id")
+                data["solution_storage_provider"] = metadata.get("storage_provider")
+                data["solution_file_name"] = metadata.get("file_name")
+                data["solution_file_size"] = metadata.get("file_size")
+                data["solution_mime_type"] = metadata.get("mime_type")
+            except Exception as exc:
+                logger.warning("Could not attach solution metadata for paper solution_key=%s: %s", data.get("solution_key"), exc)
 
     async def create(self, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Papers]:
         """Create a new papers"""
         try:
             if user_id:
                 data['user_id'] = user_id
+            await self._attach_storage_metadata(data)
             obj = Papers(**data)
             self.db.add(obj)
             await self.db.commit()

@@ -35,6 +35,14 @@ export async function loadRuntimeConfig(timeoutMs = CONFIG_TIMEOUT_MS): Promise<
   const fallback = getDefaultConfig();
 
   try {
+    // A deployed split frontend already has a safe, explicit backend URL at build
+    // time. Avoid a blocking runtime probe (and a second same-origin fallback
+    // probe) before the application can render.
+    if (fallback.API_BASE_URL) {
+      applyRuntimeConfig(fallback);
+      return fallback;
+    }
+
     const envApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
     const configUrls: string[] = [];
 

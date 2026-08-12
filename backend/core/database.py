@@ -112,14 +112,19 @@ class DatabaseManager:
                 logger.info("Database already initialized")
                 return
 
-        if not settings.database_url:
-            logger.error("No database URL provided. DATABASE_URL environment variable must be set.")
-            raise ValueError("DATABASE_URL environment variable is required")
+        local_database_url = os.getenv("LOCAL_DATABASE_URL", "").strip()
+        if local_database_url:
+            logger.info("Using local database override from LOCAL_DATABASE_URL")
+            database_url = self._normalize_async_database_url(local_database_url)
+        else:
+            if not settings.database_url:
+                logger.error("No database URL provided. DATABASE_URL environment variable must be set.")
+                raise ValueError("DATABASE_URL environment variable is required")
 
-        try:
             logger.info("Normalizing database URL for async compatibility...")
             database_url = self._normalize_async_database_url(settings.database_url)
 
+        try:
             logger.info("Creating async database engine...")
             # Configure engine based on environment (Lambda vs non-Lambda)
             engine_kwargs = {

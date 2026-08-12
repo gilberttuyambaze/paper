@@ -32,7 +32,9 @@ export function RuntimeConfigProvider({
   children,
 }: RuntimeConfigProviderProps) {
   const [config, setConfig] = useState<RuntimeConfig>(() => getDefaultConfig());
-  const [status, setStatus] = useState<RuntimeConfigStatus>('loading');
+  const [status, setStatus] = useState<RuntimeConfigStatus>(() =>
+    getDefaultConfig().API_BASE_URL ? 'ready' : 'loading'
+  );
   const [isFallbackConfig, setIsFallbackConfig] = useState(false);
 
   useEffect(() => {

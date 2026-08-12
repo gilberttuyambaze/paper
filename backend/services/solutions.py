@@ -5,6 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.solutions import Solutions
+from services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +14,34 @@ logger = logging.getLogger(__name__)
 class SolutionsService:
     """Service layer for Solutions operations"""
 
+    DEFAULT_STORAGE_BUCKET = "papers"
+
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _attach_storage_metadata(self, data: Dict[str, Any]) -> None:
+        if not data:
+            return
+
+        storage = StorageService()
+
+        if data.get("file_key"):
+            try:
+                metadata = await storage.get_file_metadata(self.DEFAULT_STORAGE_BUCKET, data["file_key"])
+                data["drive_file_id"] = metadata.get("drive_file_id")
+                data["storage_provider"] = metadata.get("storage_provider")
+                data["file_name"] = metadata.get("file_name")
+                data["file_size"] = metadata.get("file_size")
+                data["mime_type"] = metadata.get("mime_type")
+            except Exception as exc:
+                logger.warning("Could not attach file metadata for solution file_key=%s: %s", data.get("file_key"), exc)
 
     async def create(self, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Solutions]:
         """Create a new solutions"""
         try:
             if user_id:
                 data['user_id'] = user_id
+            await self._attach_storage_metadata(data)
             obj = Solutions(**data)
             self.db.add(obj)
             await self.db.commit()

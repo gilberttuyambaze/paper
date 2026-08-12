@@ -345,12 +345,12 @@ def serve_frontend() -> Dict[str, Any]:
         <body>
             <h1>Unknown Application</h1>
             <p>Service has been successfully deployed and is running on AWS Lambda.</p>
-            <p>The homepage is missing. Please verify that <code>app/frontend/index.html</code> exists and
+            <p>The homepage is missing. Please verify that <code>frontend/index.html</code> exists and
              that no other <code>index.html</code> files are interfering with the build output
               at <code>dist/index.html</code>.</p>
             <script>
                 console.error('INDEX_HTML_PATH_ERROR: Service has been successfully deployed and is running on'
-                + ' AWS Lambda, but the homepage is missing. Please verify that app/frontend/index.html exists'
+                + ' AWS Lambda, but the homepage is missing. Please verify that frontend/index.html exists'
                 + ' and that no other index.html files are interfering with the build output at dist/index.html.');
             </script>
         </body>
