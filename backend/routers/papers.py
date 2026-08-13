@@ -206,11 +206,9 @@ async def query_paperss(
         raise
     except Exception as e:
         logger.error(f"Error querying paperss: {str(e)}", exc_info=True)
-        try:
-            logger.warning("Falling back to mock papers data for public listing")
-            return _load_mock_papers(query_dict=query_dict, sort=sort, skip=skip, limit=limit)
-        except Exception:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        # Do not mask database failures with a mock-file error. The chained
+        # exception and traceback keep the operational cause available in logs.
+        raise HTTPException(status_code=500, detail="Failed to query papers") from e
 
 
 @router.get("/all", response_model=PapersListResponse)
@@ -248,11 +246,9 @@ async def query_paperss_all(
         raise
     except Exception as e:
         logger.error(f"Error querying paperss: {str(e)}", exc_info=True)
-        try:
-            logger.warning("Falling back to mock papers data for public listing")
-            return _load_mock_papers(query_dict=query_dict, sort=sort, skip=skip, limit=limit)
-        except Exception:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        # Do not mask database failures with a mock-file error. The chained
+        # exception and traceback keep the operational cause available in logs.
+        raise HTTPException(status_code=500, detail="Failed to query papers") from e
 
 
 @router.get("/{id}", response_model=PapersResponse)

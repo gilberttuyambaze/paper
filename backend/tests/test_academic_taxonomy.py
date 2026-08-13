@@ -70,14 +70,18 @@ def test_academic_migration_preserves_legacy_rows(tmp_path):
     database = create_engine(f"sqlite:///{tmp_path / 'audit.db'}")
     initial = _migration("f97c229ef883_auto_update.py")
     academic = _migration("a2b8c1d93f41_add_academic_taxonomy_fields.py")
+    paper_repair = _migration("c1e8f4a2b7d3_add_papers_academic_columns.py")
     with database.begin() as connection:
         _upgrade(connection, initial)
         connection.execute(text("INSERT INTO user_profiles (user_id, display_name, role) VALUES ('legacy-user', 'Legacy User', 'normal')"))
         connection.execute(text("INSERT INTO papers (user_id, title, course_code, course_name, college, department, year, paper_type, verification_status) VALUES ('legacy-user', 'Legacy', 'LEG101', 'Legacy Course', 'Legacy College', 'Legacy Department', 2025, 'Exam', 'unverified')"))
         _upgrade(connection, academic)
+        _upgrade(connection, paper_repair)
         assert connection.execute(text("SELECT display_name FROM user_profiles WHERE user_id = 'legacy-user'")).scalar_one() == "Legacy User"
         assert connection.execute(text("SELECT title FROM papers WHERE title = 'Legacy'")).scalar_one() == "Legacy"
     columns = {column["name"]: column for column in inspect(database).get_columns("papers")}
-    assert all(columns[name]["nullable"] for name in ("institution_id", "campus_id", "college_id", "school_id", "academic_department_id", "programme_id", "semester", "examination_session"))
+    expected_paper_columns = ("institution_id", "campus_id", "college_id", "school_id", "academic_department_id", "programme_id", "programme_submission_id", "programme_name_other", "programme_name_normalized", "academic_programme_status", "semester", "examination_session")
+    assert all(columns[name]["nullable"] for name in expected_paper_columns)
+    assert columns["programme_submission_id"]["type"].python_type is int
     profile_columns = {column["name"]: column for column in inspect(database).get_columns("user_profiles")}
     assert all(profile_columns[name]["nullable"] for name in ("institution_id", "campus_id", "college_id", "school_id", "academic_department_id", "programme_id"))
