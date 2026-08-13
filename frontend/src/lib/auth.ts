@@ -76,12 +76,36 @@ function isTokenExpiredOrInvalid(token: string): boolean {
   return exp <= now;
 }
 
-function normalizeAuthError(error: unknown, fallbackMessage: string): Error {
+export function normalizeAuthError(error: unknown, fallbackMessage: string): Error {
   if (!axios.isAxiosError(error)) {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    if (message.includes('timeout') || message.includes('aborted')) {
+      return new Error('The request timed out. Please try again.');
+    }
     return new Error(fallbackMessage);
   }
 
-  const detail = error.response?.data?.detail;
+  const responseData = error.response?.data;
+  const detail = responseData?.detail;
+  const detailObject = detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : null;
+  const code = typeof detailObject?.code === 'string' ? detailObject.code : '';
+  const safeDetailMessage = typeof detailObject?.message === 'string' ? detailObject.message : '';
+
+  const knownMessages: Record<string, string> = {
+    invalid_credentials: 'Incorrect email or password. Please check your details and try again.',
+    email_not_found: 'No account was found with that email address.',
+    password_incorrect: 'Incorrect email or password. Please check your details and try again.',
+    email_already_registered: 'This email is already registered. Try signing in instead.',
+    registration_validation_failed: 'Please review the highlighted account details and try again.',
+    account_link_required: 'An account already exists for this email. Sign in with your password to link Google securely.',
+    account_suspended: 'Your account is currently suspended. Please contact an administrator.',
+    account_disabled: 'Your account is currently disabled. Please contact an administrator.',
+    account_pending_approval: 'Your account is pending approval. Please contact an administrator if you need help.',
+    google_configuration_incomplete: "Google Sign-In is temporarily unavailable because the server's Google authentication configuration is incomplete.",
+    token_expired: 'Google sign-in expired before it could be verified. Please try again.',
+    rate_limited: 'Too many requests were made. Please wait a moment and try again.',
+  };
+  if (code && knownMessages[code]) return new Error(knownMessages[code]);
 
   if (Array.isArray(detail)) {
     const combinedMessage = detail
@@ -100,12 +124,13 @@ function normalizeAuthError(error: unknown, fallbackMessage: string): Error {
     return new Error(fallbackMessage);
   }
 
-  const rawMessage =
+  const rawMessage = safeDetailMessage || (
     typeof detail === 'string'
       ? detail
-      : typeof error.response?.data?.message === 'string'
-        ? error.response.data.message
-        : '';
+      : typeof responseData?.message === 'string'
+        ? responseData.message
+        : ''
+  );
   const message = rawMessage.toLowerCase();
 
   if (message.includes('already in use') || message.includes('already exists')) {
@@ -140,12 +165,27 @@ function normalizeAuthError(error: unknown, fallbackMessage: string): Error {
     return new Error('Enter your university name to continue.');
   }
 
-  if (rawMessage) {
+  if (rawMessage && error.response && error.response.status < 500) {
     return new Error(rawMessage);
   }
 
+  if (!error.response) {
+    if (error.code === 'ECONNABORTED' || error.message.toLowerCase().includes('timeout')) {
+      return new Error('The request timed out. Please try again.');
+    }
+    return new Error('Unable to connect to UR Academic Resource Hub. Please check your internet connection and try again.');
+  }
+
+  if (error.response.status === 429) {
+    return new Error('Too many requests were made. Please wait a moment and try again.');
+  }
+
+  if (error.response.status >= 500) {
+    return new Error("We couldn't connect to the server. Please try again in a moment.");
+  }
+
   if (error.response?.status === 401) {
-    return new Error('Login credentials were not found or are incorrect.');
+    return new Error('Incorrect email or password. Please check your details and try again.');
   }
 
   if (error.response?.status === 409) {

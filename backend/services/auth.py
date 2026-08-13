@@ -24,6 +24,10 @@ REQUESTABLE_REGISTRATION_ROLES = {"cp", "lecturer"}
 REQUESTABLE_ROLE_STATUSES = {"none", "pending", "approved", "rejected"}
 
 
+class AccountLinkRequiredError(ValueError):
+    """Raised when a Google identity matches an unlinked existing app account."""
+
+
 def _admin_matches(platform_sub: str, email: str) -> bool:
     admin_user_id = getattr(settings, "admin_user_id", "") or ""
     admin_user_email = (getattr(settings, "admin_user_email", "") or "").strip().lower()
@@ -385,18 +389,23 @@ class AuthService:
 
         normalized_email = _normalize_email(email)
         candidate_by_id = await self.db.get(User, platform_sub)
+        candidate_by_google_sub = await self.find_user_by_google_sub(google_sub) if google_sub else None
         candidate_by_email = await self.find_user_by_email(normalized_email)
-        user = candidate_by_id or candidate_by_email
+        user = candidate_by_google_sub or candidate_by_id
+
+        # Do not treat control of an email address as permission to attach a new
+        # Google identity to an existing password account. Account linking needs a
+        # separately authenticated, explicit flow.
+        if google_sub and candidate_by_email and candidate_by_email is not user:
+            raise AccountLinkRequiredError("An account already exists for this email. Sign in with your password to link Google securely.")
 
         if user:
             if normalized_email and user.email != normalized_email:
                 user.email = normalized_email
             if name and user.name != name:
                 user.name = name
-            if google_sub and not user.google_sub:
-                user.google_sub = google_sub
-            if google_sub and user.google_sub and user.google_sub != google_sub:
-                user.google_sub = google_sub
+            if google_sub and user.google_sub != google_sub:
+                raise AccountLinkRequiredError("This Google account is not linked to the existing application account.")
             if user.auth_provider in (None, ""):
                 user.auth_provider = "email"
             user.last_login = datetime.now(timezone.utc)

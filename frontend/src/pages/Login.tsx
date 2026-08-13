@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError(null);
 
@@ -70,6 +71,7 @@ export default function LoginPage() {
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
+                  disabled={loading}
                   placeholder="you@example.com"
                   required
                   className="theme-form-input mt-2 h-12 rounded-xl"
@@ -93,6 +95,7 @@ export default function LoginPage() {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
+                    disabled={loading}
                     placeholder="Enter your password"
                     required
                     className="theme-form-input h-12 rounded-xl pr-12"
@@ -115,7 +118,7 @@ export default function LoginPage() {
                 className="theme-accent-bg h-12 w-full rounded-xl"
                 disabled={loading}
               >
-                {loading ? 'Signing in...' : 'Sign in'}
+                {loading ? <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Signing in...</span> : 'Sign in'}
               </Button>
 
               <div className="relative">
@@ -129,9 +132,16 @@ export default function LoginPage() {
 
               <GoogleSignInButton
                 onSuccess={async (credential) => {
-                  const token = await authApi.loginWithGoogle(credential);
-                  if (token) {
-                    window.location.replace(returnTo);
+                  if (loading) return;
+                  setLoading(true);
+                  setError(null);
+                  try {
+                    const token = await authApi.loginWithGoogle(credential);
+                    if (token) window.location.replace(returnTo);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Google sign-in failed. Please try again.');
+                  } finally {
+                    setLoading(false);
                   }
                 }}
                 onError={(message) => setError(message)}

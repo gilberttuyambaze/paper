@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 declare global {
@@ -31,11 +32,23 @@ export default function GoogleSignInButton({
 }: GoogleSignInButtonProps) {
   const [isReady, setIsReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const loadingRef = useRef(false);
+
+  const finishLoading = () => {
+    loadingRef.current = false;
+    setIsLoading(false);
+  };
+
+  const reportError = (message: string) => {
+    finishLoading();
+    onError?.(message);
+  };
 
   useEffect(() => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
     if (!clientId) {
-      onError?.('Google Sign-In is not configured.');
+      setIsReady(false);
+      onError?.('Google Sign-In is temporarily unavailable because this site has not completed its Google configuration.');
       return;
     }
 
@@ -51,15 +64,20 @@ export default function GoogleSignInButton({
         client_id: clientId,
         callback: async (response: { credential?: string }) => {
           if (!response?.credential) {
-            onError?.('Google sign-in was cancelled.');
+            reportError('Google sign-in was cancelled.');
             return;
           }
 
-          setIsLoading(true);
+          if (!loadingRef.current) {
+            loadingRef.current = true;
+            setIsLoading(true);
+          }
           try {
             await onSuccess(response.credential);
+          } catch (error) {
+            reportError(error instanceof Error ? error.message : 'Google sign-in failed. Please try again.');
           } finally {
-            setIsLoading(false);
+            finishLoading();
           }
         },
         auto_select: false,
@@ -92,20 +110,23 @@ export default function GoogleSignInButton({
   }, [onError, onSuccess]);
 
   const handleClick = () => {
+    if (disabled || isLoading || loadingRef.current) return;
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
     if (!clientId) {
-      onError?.('Google Sign-In is not configured.');
+      reportError('Google Sign-In is temporarily unavailable because this site has not completed its Google configuration.');
       return;
     }
 
     if (!window.google?.accounts?.id) {
-      onError?.('Google Sign-In is not available right now.');
+      reportError('Google Sign-In is not available right now. Please try again or use your email and password.');
       return;
     }
 
+    loadingRef.current = true;
+    setIsLoading(true);
     window.google.accounts.id.prompt((notification) => {
       if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        onError?.('Google sign-in is not available right now. Please try again or use your email and password.');
+        reportError('Google sign-in is not available right now. Please try again or use your email and password.');
       }
     });
   };
@@ -122,7 +143,8 @@ export default function GoogleSignInButton({
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
           G
         </span>
-        <span>{isLoading ? 'Signing in...' : label}</span>
+        {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+        <span>{isLoading ? 'Signing in with Google...' : label}</span>
       </span>
     </Button>
   );

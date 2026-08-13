@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
-import { Camera, Eye, EyeOff } from 'lucide-react';
+import { Camera, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,6 +78,7 @@ export default function RegisterPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError(null);
 
@@ -451,7 +452,7 @@ export default function RegisterPage() {
                 className="theme-accent-bg h-12 w-full rounded-xl"
                 disabled={loading || password.length < 6 || !passwordsMatch}
               >
-                {loading ? 'Creating account...' : 'Create account'}
+                {loading ? <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Creating account...</span> : 'Create account'}
               </Button>
 
               <div className="relative">
@@ -465,9 +466,16 @@ export default function RegisterPage() {
 
               <GoogleSignInButton
                 onSuccess={async (credential) => {
-                  const token = await authApi.loginWithGoogle(credential);
-                  if (token) {
-                    window.location.replace(returnTo);
+                  if (loading) return;
+                  setLoading(true);
+                  setError(null);
+                  try {
+                    const token = await authApi.loginWithGoogle(credential);
+                    if (token) window.location.replace(returnTo);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Google sign-in failed. Please try again.');
+                  } finally {
+                    setLoading(false);
                   }
                 }}
                 onError={(message) => setError(message)}

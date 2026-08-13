@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     debug: bool = False
     version: str = "1.0.0"
     oidc_scope: str = "openid email profile"
+    oidc_issuer_url: Optional[str] = None
+    oidc_client_id: Optional[str] = None
+    # Retained for a future authorization-code flow; Google One Tap token exchange does not read it.
+    oidc_client_secret: Optional[str] = None
 
     # Server
     host: str = "0.0.0.0"

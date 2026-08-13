@@ -86,24 +86,38 @@ app = FastAPI(
 )
 
 
+def _parse_comma_separated_values(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+
+    parsed: list[str] = []
+    for token in raw_value.replace("\n", ",").split(","):
+        normalized = token.strip().rstrip("/")
+        if normalized:
+            parsed.append(normalized)
+    return parsed
+
+
 def _build_cors_origins() -> list[str]:
     origins = {
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
+        "https://paperhubur.vercel.app",
     }
 
-    configured_frontend = getattr(settings, "frontend_url", "").strip()
-    if configured_frontend:
-        origins.add(configured_frontend.rstrip("/"))
+    for raw_value in (
+        getattr(settings, "frontend_url", ""),
+        os.getenv("FRONTEND_URL", ""),
+        os.getenv("CORS_ALLOWED_ORIGINS", ""),
+    ):
+        for origin in _parse_comma_separated_values(raw_value):
+            if origin:
+                origins.add(origin)
 
-    configured_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
-    if configured_origins:
-        for origin in configured_origins.split(","):
-            normalized = origin.strip().rstrip("/")
-            if normalized:
-                origins.add(normalized)
+    for origin in _parse_comma_separated_values(os.getenv("CORS_ALLOWED_ORIGINS", "")):
+        origins.add(origin)
 
     return sorted(origins)
 
@@ -114,9 +128,9 @@ app.add_middleware(
     allow_origins=_build_cors_origins(),
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    expose_headers=["Authorization", "Content-Type"],
 )
 # MODULE_MIDDLEWARE_END
 

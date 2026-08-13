@@ -4,7 +4,7 @@ import os
 from typing import Optional
 from urllib.parse import urlencode
 
-from core.auth import IDTokenValidationError, validate_id_token
+from core.auth import IDTokenValidationError, google_oidc_configuration_issue, validate_id_token
 from core.config import settings
 from core.database import get_db
 from dependencies.auth import get_current_user
@@ -24,12 +24,17 @@ from schemas.auth import (
     TokenExchangeResponse,
     UserResponse,
 )
-from services.auth import AuthService
+from services.auth import AccountLinkRequiredError, AuthService
 from services.mailer import send_password_reset_email, should_expose_password_reset_links
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
+
+
+def auth_error(status_code: int, code: str, message: str) -> HTTPException:
+    """Stable, safe error shape for auth API consumers."""
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
 
 def get_dynamic_frontend_url(request: Request) -> str:
@@ -86,10 +91,7 @@ async def login_user(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
             message = "The password you entered is incorrect."
         else:
             message = "We could not sign you in. Please try again."
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=message,
-        )
+        raise auth_error(status.HTTP_401_UNAUTHORIZED, error_code or "invalid_credentials", message)
 
     app_token, _, _ = await auth_service.issue_app_token(user=user)
     return TokenExchangeResponse(token=app_token)
@@ -118,7 +120,9 @@ async def register_user(payload: RegisterRequest, db: AsyncSession = Depends(get
             },
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        message = str(exc)
+        code = "email_already_registered" if "already in use" in message.lower() else "registration_validation_failed"
+        raise auth_error(status.HTTP_409_CONFLICT if code == "email_already_registered" else status.HTTP_400_BAD_REQUEST, code, message) from exc
 
     app_token, _, _ = await auth_service.issue_app_token(user=user)
     return TokenExchangeResponse(token=app_token)
@@ -278,24 +282,36 @@ async def exchange_google_token(
     """Validate a Google ID token, link it to the app user, and issue the existing app JWT."""
     logger.info("[google/exchange] Received Google token exchange request")
 
+    config_issue = google_oidc_configuration_issue()
+    if config_issue:
+        logger.error("Google OIDC configuration incomplete: missing_or_invalid=%s", config_issue)
+        raise auth_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "google_configuration_incomplete",
+            "Google Sign-In is temporarily unavailable because the server's Google authentication configuration is incomplete.",
+        )
+
     try:
         google_claims = await validate_id_token(payload.credential)
     except IDTokenValidationError as exc:
         logger.warning("[google/exchange] Google token validation failed: type=%s detail=%s", exc.error_type, exc.message)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message) from exc
+        raise auth_error(status.HTTP_401_UNAUTHORIZED, exc.error_type, "Google sign-in could not be verified. Please try again.") from exc
 
     google_sub = str(google_claims.get("sub") or "")
     email = (google_claims.get("email") or "").strip().lower()
     if not google_sub or not email:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google account information is incomplete.")
+        raise auth_error(status.HTTP_401_UNAUTHORIZED, "google_account_incomplete", "Google did not provide the account details needed to sign in.")
 
     auth_service = AuthService(db)
-    user = await auth_service.get_or_create_user(
-        platform_sub=google_sub,
-        email=email,
-        name=google_claims.get("name") or derive_name_from_email(email),
-        google_sub=google_sub,
-    )
+    try:
+        user = await auth_service.get_or_create_user(
+            platform_sub=google_sub,
+            email=email,
+            name=google_claims.get("name") or derive_name_from_email(email),
+            google_sub=google_sub,
+        )
+    except AccountLinkRequiredError as exc:
+        raise auth_error(status.HTTP_409_CONFLICT, "account_link_required", str(exc)) from exc
     app_token, expires_at, _ = await auth_service.issue_app_token(user=user)
 
     logger.info("[google/exchange] Token issued successfully for user_id=%s, expires_at=%s", user.id, expires_at)

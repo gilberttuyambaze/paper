@@ -14,6 +14,18 @@ from jose.exceptions import ExpiredSignatureError, JWSSignatureError, JWTClaimsE
 
 logger = logging.getLogger(__name__)
 FIREBASE_CERTS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+GOOGLE_OIDC_ISSUER = "https://accounts.google.com"
+
+
+def google_oidc_configuration_issue() -> str | None:
+    """Return a log-safe Google One Tap configuration diagnosis, never a secret."""
+    missing = []
+    if not str(getattr(settings, "oidc_client_id", "") or "").strip():
+        missing.append("OIDC_CLIENT_ID")
+    issuer = str(getattr(settings, "oidc_issuer_url", "") or "").rstrip("/")
+    if issuer != GOOGLE_OIDC_ISSUER:
+        missing.append("OIDC_ISSUER_URL=https://accounts.google.com")
+    return ", ".join(missing) if missing else None
 
 
 def normalize_firebase_project_id(value: str) -> str:
@@ -220,6 +232,13 @@ def decode_access_token(token: str) -> Dict[str, Any]:
 
 async def validate_id_token(id_token: str) -> Optional[Dict[str, Any]]:
     """Validate ID token with proper JWT signature verification using JWKS."""
+    config_issue = google_oidc_configuration_issue()
+    if config_issue:
+        logger.error("Google OIDC configuration incomplete: missing_or_invalid=%s", config_issue)
+        raise IDTokenValidationError(
+            "Google Sign-In is temporarily unavailable because the server's Google authentication configuration is incomplete.",
+            "google_configuration_incomplete",
+        )
     try:
         # Get the header to find the key ID
         header = jwt.get_unverified_header(id_token)
