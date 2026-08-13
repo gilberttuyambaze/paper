@@ -4,6 +4,7 @@ import os
 from typing import Optional
 from urllib.parse import urlencode
 
+from core.auth import IDTokenValidationError, validate_id_token
 from core.config import settings
 from core.database import get_db
 from dependencies.auth import get_current_user
@@ -13,6 +14,7 @@ from models.auth import User
 from schemas.auth import (
     FirebaseTokenExchangeRequest,
     GenericMessageResponse,
+    GoogleTokenExchangeRequest,
     LoginRequest,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
@@ -265,6 +267,38 @@ async def exchange_firebase_token(
     app_token, expires_at, _ = await auth_service.issue_app_token(user=user)
 
     logger.info("[firebase/exchange] Token issued successfully for user_id=%s, expires_at=%s", user.id, expires_at)
+    return TokenExchangeResponse(token=app_token)
+
+
+@router.post("/google", response_model=TokenExchangeResponse)
+async def exchange_google_token(
+    payload: GoogleTokenExchangeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Validate a Google ID token, link it to the app user, and issue the existing app JWT."""
+    logger.info("[google/exchange] Received Google token exchange request")
+
+    try:
+        google_claims = await validate_id_token(payload.credential)
+    except IDTokenValidationError as exc:
+        logger.warning("[google/exchange] Google token validation failed: type=%s detail=%s", exc.error_type, exc.message)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message) from exc
+
+    google_sub = str(google_claims.get("sub") or "")
+    email = (google_claims.get("email") or "").strip().lower()
+    if not google_sub or not email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google account information is incomplete.")
+
+    auth_service = AuthService(db)
+    user = await auth_service.get_or_create_user(
+        platform_sub=google_sub,
+        email=email,
+        name=google_claims.get("name") or derive_name_from_email(email),
+        google_sub=google_sub,
+    )
+    app_token, expires_at, _ = await auth_service.issue_app_token(user=user)
+
+    logger.info("[google/exchange] Token issued successfully for user_id=%s, expires_at=%s", user.id, expires_at)
     return TokenExchangeResponse(token=app_token)
 
 

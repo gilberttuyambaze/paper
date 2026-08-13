@@ -8,8 +8,11 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from dependencies.auth import get_current_user
+from fastapi import APIRouter, Depends, HTTPException, status
 from schemas.aihub import GenImgRequest, GenImgResponse, GenTxtRequest
+from schemas.auth import UserResponse
+from services.ai.base import AIError
 from services.aihub import AIHubService, InvalidImageInputError
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,7 @@ router = APIRouter(prefix="/api/v1/aihub", tags=["aihub"])
 @router.post("/gentxt")
 async def generate_text(
     request: GenTxtRequest,
+    current_user: UserResponse = Depends(get_current_user),
 ):
     """
     Generate Text endpoint (supports text and image input).
@@ -112,7 +116,7 @@ async def generate_text(
     - stream=true: return an SSE streaming response
     """
     try:
-        service = AIHubService()
+        service = AIHubService(user_id=str(current_user.id))
 
         # Decide response mode based on the `stream` parameter
         if request.stream:
@@ -127,9 +131,12 @@ async def generate_text(
                 try:
                     async for content in service.gentxt_stream(request):
                         yield json.dumps({"content": content})
+                except AIError as e:
+                    logger.warning("AI stream failed code=%s", e.code)
+                    yield json.dumps({"error": {"code": e.code, "message": e.public_message}})
                 except Exception as e:
-                    logger.error(f"Stream error: {e}")
-                    yield json.dumps({"content": f"[ERROR] {extract_error_message(e)}"})
+                    logger.exception("Unexpected AI stream failure")
+                    yield json.dumps({"error": {"code": "ai_error", "message": "The AI stream ended unexpectedly."}})
                 finally:
                     yield "[DONE]"
 
@@ -139,9 +146,9 @@ async def generate_text(
             response = await service.gentxt(request)
             return response
 
-    except ValueError as e:
-        logger.error(f"AI service configuration error: {e}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=extract_error_message(e))
+    except AIError as e:
+        logger.warning("AI text request failed code=%s", e.code)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": e.code, "message": e.public_message})
     except Exception as e:
         logger.error(f"Text generation failed: {e}")
         raise HTTPException(
@@ -153,6 +160,7 @@ async def generate_text(
 @router.post("/genimg", response_model=GenImgResponse)
 async def generate_image(
     request: GenImgRequest,
+    _current_user: UserResponse = Depends(get_current_user),
 ):
     """
     Text-to-Image / Image-to-Image endpoint.
@@ -171,15 +179,15 @@ async def generate_image(
     - n: number of images to generate (1-4)
     """
     try:
-        service = AIHubService()
+        service = AIHubService(user_id=str(_current_user.id))
         return await service.genimg(request)
 
     except InvalidImageInputError as e:
         logger.warning(f"Invalid image input: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ValueError as e:
-        logger.error(f"AI service configuration error: {e}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=extract_error_message(e))
+    except AIError as e:
+        logger.warning("AI image request failed code=%s", e.code)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": e.code, "message": e.public_message})
     except Exception as e:
         logger.error(f"Image generation failed: {e}")
         raise HTTPException(

@@ -1,9 +1,11 @@
 import { FormEvent, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import SeoMeta from '@/components/SeoMeta';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 import AuthShowcase from '../components/AuthShowcase';
 import { authApi } from '../lib/auth';
 
@@ -15,6 +17,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -84,15 +87,25 @@ export default function LoginPage() {
                     Forgot password?
                   </button>
                 </div>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Enter your password"
-                  required
-                  className="theme-form-input mt-2 h-12 rounded-xl"
-                />
+                <div className="relative mt-2">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter your password"
+                    required
+                    className="theme-form-input h-12 rounded-xl pr-12"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((value) => !value)}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               {error && <p className="theme-error-note rounded-xl px-4 py-3 text-sm">{error}</p>}
@@ -104,6 +117,26 @@ export default function LoginPage() {
               >
                 {loading ? 'Signing in...' : 'Sign in'}
               </Button>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] text-slate-400">
+                  <span className="bg-transparent px-2">or</span>
+                </div>
+              </div>
+
+              <GoogleSignInButton
+                onSuccess={async (credential) => {
+                  const token = await authApi.loginWithGoogle(credential);
+                  if (token) {
+                    window.location.replace(returnTo);
+                  }
+                }}
+                onError={(message) => setError(message)}
+                disabled={loading}
+              />
             </form>
 
             <div className="theme-auth-subtle mt-6 rounded-2xl px-4 py-4 text-sm">

@@ -63,6 +63,23 @@ class Settings(BaseSettings):
     google_drive_folder_id: Optional[str] = None
     google_service_account_json_base64: Optional[str] = None
 
+    # Paper Hub AI (all provider credentials remain backend-only)
+    ai_enabled: bool = False
+    ai_provider: str = "openai"
+    ai_fallback_provider: Optional[str] = None
+    ai_timeout_seconds: float = 30.0
+    ai_max_output_tokens: int = 1024
+    ai_max_context_tokens: int = 12000
+    ai_max_requests_per_user_per_minute: int = 20
+    openai_api_key: Optional[str] = None
+    openai_model: str = "gpt-4.1-mini"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_image_model: str = "gpt-image-1"
+    ai_compatible_base_url: Optional[str] = None
+    ai_compatible_api_key: Optional[str] = None
+    ai_compatible_model: Optional[str] = None
+    ai_compatible_embedding_model: Optional[str] = None
+
     class Config:
         case_sensitive = False
         extra = "ignore"

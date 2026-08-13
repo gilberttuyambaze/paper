@@ -1,6 +1,6 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
+import { Camera, Eye, EyeOff } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import AuthShowcase from '../components/AuthShowcase';
 import { updateUserProfile, uploadFileObject } from '../lib/client';
 import { authApi } from '../lib/auth';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 import {
   buildProfilePictureObjectKey,
   createEmptyProfileForm,
@@ -34,6 +35,8 @@ export default function RegisterPage() {
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const passwordStrength = getPasswordStrength(password);
   const hasStartedConfirmingPassword = confirmPassword.length > 0;
   const passwordsMatch = password === confirmPassword;
@@ -272,16 +275,26 @@ export default function RegisterPage() {
 
                 <div>
                   <Label htmlFor="password" className="theme-form-label">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="Create a password"
-                    required
-                    minLength={6}
-                    className="theme-form-input mt-2 h-12 rounded-xl"
-                  />
+                  <div className="relative mt-2">
+                    <Input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="Create a password"
+                      required
+                      minLength={6}
+                      className="theme-form-input h-12 rounded-xl pr-12"
+                    />
+                    <button
+                      type="button"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowPassword((value) => !value)}
+                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <div className="mt-2 flex items-center justify-between gap-3 text-xs">
                     <p className="theme-muted">Minimum 6 characters</p>
                     <p className={passwordStrength.toneClass}>{passwordStrength.label}</p>
@@ -293,16 +306,26 @@ export default function RegisterPage() {
 
                 <div>
                   <Label htmlFor="confirm-password" className="theme-form-label">Confirm Password</Label>
-                  <Input
-                    id="confirm-password"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    placeholder="Re-enter your password"
-                    required
-                    minLength={6}
-                    className="theme-form-input mt-2 h-12 rounded-xl"
-                  />
+                  <div className="relative mt-2">
+                    <Input
+                      id="confirm-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="Re-enter your password"
+                      required
+                      minLength={6}
+                      className="theme-form-input h-12 rounded-xl pr-12"
+                    />
+                    <button
+                      type="button"
+                      aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                      onClick={() => setShowConfirmPassword((value) => !value)}
+                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <p className={`mt-2 text-xs ${hasStartedConfirmingPassword ? (passwordsMatch ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300') : 'theme-muted'}`}>
                     {passwordMatchMessage}
                   </p>
@@ -430,6 +453,26 @@ export default function RegisterPage() {
               >
                 {loading ? 'Creating account...' : 'Create account'}
               </Button>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] text-slate-400">
+                  <span className="bg-transparent px-2">or</span>
+                </div>
+              </div>
+
+              <GoogleSignInButton
+                onSuccess={async (credential) => {
+                  const token = await authApi.loginWithGoogle(credential);
+                  if (token) {
+                    window.location.replace(returnTo);
+                  }
+                }}
+                onError={(message) => setError(message)}
+                disabled={loading}
+              />
             </form>
 
             <div className="theme-auth-subtle mt-6 rounded-2xl px-4 py-4 text-sm">

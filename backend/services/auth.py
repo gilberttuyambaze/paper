@@ -238,6 +238,10 @@ class AuthService:
         result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
+    async def find_user_by_google_sub(self, google_sub: str) -> Optional[User]:
+        result = await self.db.execute(select(User).where(User.google_sub == google_sub))
+        return result.scalar_one_or_none()
+
     async def create_user_with_password(
         self,
         email: str,
@@ -374,27 +378,44 @@ class AuthService:
         await self.db.refresh(user)
         return user
 
-    async def get_or_create_user(self, platform_sub: str, email: str, name: Optional[str] = None) -> User:
-        """Get existing user or create new one."""
+    async def get_or_create_user(self, platform_sub: str, email: str, name: Optional[str] = None, google_sub: Optional[str] = None) -> User:
+        """Get an existing app user or create one while preserving account linkage."""
         start_time = time.time()
-        logger.debug(f"[DB_OP] Starting get_or_create_user - platform_sub: {platform_sub}")
-        # Try to find existing user
-        result = await self.db.execute(select(User).where(User.id == platform_sub))
-        user = result.scalar_one_or_none()
-        logger.debug(f"[DB_OP] User lookup completed in {time.time() - start_time:.4f}s - found: {user is not None}")
+        logger.debug(f"[DB_OP] Starting get_or_create_user - platform_sub: {platform_sub}, google_sub={google_sub}")
+
+        normalized_email = _normalize_email(email)
+        candidate_by_id = await self.db.get(User, platform_sub)
+        candidate_by_email = await self.find_user_by_email(normalized_email)
+        user = candidate_by_id or candidate_by_email
 
         if user:
-            # Update user info if needed
-            user.email = email
-            user.name = name
+            if normalized_email and user.email != normalized_email:
+                user.email = normalized_email
+            if name and user.name != name:
+                user.name = name
+            if google_sub and not user.google_sub:
+                user.google_sub = google_sub
+            if google_sub and user.google_sub and user.google_sub != google_sub:
+                user.google_sub = google_sub
+            if user.auth_provider in (None, ""):
+                user.auth_provider = "email"
             user.last_login = datetime.now(timezone.utc)
         else:
-            # Create new user
-            user = User(id=platform_sub, email=email, name=name, last_login=datetime.now(timezone.utc))
+            user = User(
+                id=platform_sub,
+                email=normalized_email,
+                name=name,
+                google_sub=google_sub,
+                auth_provider="google" if google_sub else "email",
+                last_login=datetime.now(timezone.utc),
+            )
             self.db.add(user)
 
-        if _admin_matches(platform_sub, email):
+        if _admin_matches(platform_sub, normalized_email):
             user.role = "admin"
+        if google_sub:
+            user.google_sub = google_sub
+            user.auth_provider = "google"
 
         await ensure_user_profile_record(self.db, user)
 

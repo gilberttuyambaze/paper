@@ -204,6 +204,24 @@ class RPApi {
     return null;
   }
 
+  async loginWithGoogle(credential: string): Promise<string> {
+    try {
+      const response = await this.client.post(`${this.getBaseURL()}/api/v1/auth/google`, {
+        credential,
+      });
+
+      const token = response.data?.token;
+      if (!token) {
+        throw new Error('Invalid Google login response');
+      }
+
+      setStoredAuthToken(token);
+      return token;
+    } catch (error) {
+      throw normalizeAuthError(error, 'Google sign-in failed. Please try again.');
+    }
+  }
+
   async login(returnTo?: string) {
     const targetPath =
       returnTo ||

@@ -48,7 +48,7 @@ class GenTxtRequest(BaseModel):
     """Generate Text request parameters."""
 
     messages: List[ChatMessage] = Field(..., description="Conversation messages list.")
-    model: str = Field(default="deepseek-v3.2", description="Model name")
+    model: Optional[str] = Field(default=None, description="Optional model override; the configured backend model is used when omitted.")
     stream: bool = Field(default=False, description="Whether to enable streaming output.")
     temperature: Optional[float] = Field(default=0.7, description="Sampling temperature (0-2).")
     max_tokens: Optional[int] = Field(default=4096, description="Maximum number of generated tokens.")
@@ -77,10 +77,7 @@ class GenImgRequest(BaseModel):
             "If provided, the API performs image editing (img2img) instead of text-to-image."
         ),
     )
-    model: str = Field(
-        default="gemini-2.5-flash-image",
-        description="Model name",
-    )
+    model: Optional[str] = Field(default=None, description="Optional image-model override; the configured backend model is used when omitted.")
     size: str = Field(default="1024x1024", description="Image size: 1024x1024 / 1024x1792 / 1792x1024.")
     quality: Literal["standard", "hd"] = Field(
         default="standard",

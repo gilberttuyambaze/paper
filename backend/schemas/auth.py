@@ -27,6 +27,12 @@ class FirebaseTokenExchangeRequest(BaseModel):
     firebase_token: str
 
 
+class GoogleTokenExchangeRequest(BaseModel):
+    """Request body for exchanging a Google ID token for an application JWT."""
+
+    credential: str
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)

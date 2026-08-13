@@ -6,13 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
+from core.config import settings
 from dependencies.auth import get_current_user
 from models.comments import Comments
 from models.papers import Papers
 from models.solutions import Solutions
-from schemas.aihub import ChatMessage, GenTxtRequest
 from schemas.auth import UserResponse
-from services.aihub import AIHubService
+from services.ai.base import AIGenerationRequest, AIMessage
+from services.ai.papers import build_paper_context
+from services.ai.service import AIService
 
 logger = logging.getLogger(__name__)
 
@@ -102,44 +104,33 @@ async def study_paper(
     else:
         raise HTTPException(status_code=400, detail="Unsupported AI action")
 
-    compiled_context = f"""
-Paper title: {paper.title}
-Course: {paper.course_code} - {paper.course_name}
-College: {paper.college}
-Department: {paper.department}
-Year: {paper.year}
-Paper type: {paper.paper_type}
-Lecturer: {paper.lecturer or 'Unknown'}
-Description: {paper.description or 'None'}
-
-Recent discussion:
-{chr(10).join(f"- {comment.content}" for comment in comments) or "- None"}
-
-Top solutions:
-{chr(10).join(f"- {solution.content}" for solution in solutions) or "- None"}
-""".strip()
+    context = build_paper_context(
+        paper=paper,
+        comments=comments,
+        solutions=solutions,
+        max_tokens=max(1, min(6000, settings.ai_max_context_tokens // 2)),
+    )
 
     try:
-        service = AIHubService()
-        response = await service.gentxt(
-            GenTxtRequest(
-                model="gpt-4.1-mini",
+        response = await AIService().analyze_paper(
+            AIGenerationRequest(
                 temperature=0.4,
-                max_tokens=650,
-                stream=False,
+                max_output_tokens=650,
+                user_id=str(_current_user.id),
                 messages=[
-                    ChatMessage(
+                    AIMessage(
                         role="system",
                         content=(
                             "You are a helpful academic study assistant for University of Rwanda students. "
-                            "Give structured, practical answers with headings, bullet points, and concrete revision advice."
+                            "Give structured, practical answers with headings, bullet points, and concrete revision advice. "
+                            "Use only the supplied context; state when it does not contain enough evidence."
                         ),
                     ),
-                    ChatMessage(role="user", content=f"{prompt}\n\nContext:\n{compiled_context}"),
+                    AIMessage(role="user", content=f"{prompt}\n\nAuthorized context:\n{context.text}"),
                 ],
             )
         )
-        return response
+        return {"content": response.content, "model": response.model, "usage": response.usage.__dict__ if response.usage else None}
     except Exception as exc:
         logger.warning("Study AI request failed, using fallback summary: %s", exc)
         return _build_fallback_response(action, paper, comments, solutions)

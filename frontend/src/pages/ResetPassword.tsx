@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +14,8 @@ export default function ResetPasswordPage() {
   const token = useMemo(() => searchParams.get('token') || '', [searchParams]);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -76,30 +79,50 @@ export default function ResetPasswordPage() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <Label htmlFor="password" className="theme-form-label">New password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="At least 6 characters"
-                  required
-                  minLength={6}
-                  className="theme-form-input mt-2 h-12 rounded-xl"
-                />
+                <div className="relative mt-2">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="At least 6 characters"
+                    required
+                    minLength={6}
+                    className="theme-form-input h-12 rounded-xl pr-12"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((value) => !value)}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <Label htmlFor="confirm-password" className="theme-form-label">Confirm password</Label>
-                <Input
-                  id="confirm-password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  placeholder="Re-enter your password"
-                  required
-                  minLength={6}
-                  className="theme-form-input mt-2 h-12 rounded-xl"
-                />
+                <div className="relative mt-2">
+                  <Input
+                    id="confirm-password"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Re-enter your password"
+                    required
+                    minLength={6}
+                    className="theme-form-input h-12 rounded-xl pr-12"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    onClick={() => setShowConfirmPassword((value) => !value)}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               {error && <p className="theme-error-note rounded-xl px-4 py-3 text-sm">{error}</p>}

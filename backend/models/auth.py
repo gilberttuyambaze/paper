@@ -11,6 +11,8 @@ class User(Base):
     name = Column(String(255), nullable=True)
     password_hash = Column(String(512), nullable=True)
     role = Column(String(50), default="user", nullable=False)  # user/admin
+    google_sub = Column(String(255), nullable=True, unique=True, index=True)
+    auth_provider = Column(String(50), nullable=False, default="email")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
 
