@@ -7,6 +7,7 @@ from core.auth import AccessTokenError, decode_access_token
 from core.database import get_db
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from models.auth import User
 from models.user_profiles import User_profiles
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +62,12 @@ async def get_current_user(
         role=payload.get("role", "user"),
         last_login=last_login,
     )
+
+    db_user_result = await db.execute(select(User).where(User.id == user_id))
+    db_user = db_user_result.scalar_one_or_none()
+    if db_user:
+        user.auth_provider = db_user.auth_provider or "email"
+        user.has_password = bool(db_user.password_hash)
 
     profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
     profile = profile_result.scalar_one_or_none()

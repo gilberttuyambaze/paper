@@ -19,9 +19,9 @@ const LogoutCallbackPage: React.FC = () => {
         robots="noindex,nofollow"
       />
       <div className="text-center">
-        <div className="theme-soft-panel mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full text-green-600 dark:text-green-300">
+        <div className="theme-soft-panel mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full text-success-foreground">
           <svg
-            className="h-6 w-6 text-green-600"
+            className="h-6 w-6"
             fill="none"
             strokeLinecap="round"
             strokeLinejoin="round"

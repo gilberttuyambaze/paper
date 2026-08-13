@@ -62,7 +62,7 @@ function VerificationBadge({ status }: { status: string }) {
     );
   }
   return (
-    <Badge className="bg-gray-100 text-gray-600 hover:bg-gray-100">
+    <Badge className="bg-muted text-muted-foreground hover:bg-muted">
       Unverified
     </Badge>
   );
@@ -188,8 +188,8 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <Card className="theme-panel">
           <CardContent className="p-4 flex items-center gap-4">
-            <div className="theme-soft-panel flex h-12 w-12 items-center justify-center rounded-lg text-blue-600 dark:text-blue-300">
-              <FileText className="h-6 w-6 text-blue-600" />
+            <div className="theme-soft-panel flex h-12 w-12 items-center justify-center rounded-lg text-info-foreground">
+              <FileText className="h-6 w-6" />
             </div>
             <div>
               <p className="theme-title text-2xl font-bold">{papers.length}</p>
@@ -199,8 +199,8 @@ export default function DashboardPage() {
         </Card>
         <Card className="theme-panel">
           <CardContent className="p-4 flex items-center gap-4">
-            <div className="theme-soft-panel flex h-12 w-12 items-center justify-center rounded-lg text-green-600 dark:text-green-300">
-              <Download className="h-6 w-6 text-green-600" />
+            <div className="theme-soft-panel flex h-12 w-12 items-center justify-center rounded-lg text-success-foreground">
+              <Download className="h-6 w-6" />
             </div>
             <div>
               <p className="theme-title text-2xl font-bold">{totalDownloads}</p>
@@ -221,8 +221,8 @@ export default function DashboardPage() {
         </Card>
         <Card className="theme-panel">
           <CardContent className="p-4 flex items-center gap-4">
-            <div className="theme-soft-panel flex h-12 w-12 items-center justify-center rounded-lg text-purple-600 dark:text-purple-300">
-              <BarChart3 className="h-6 w-6 text-purple-600" />
+            <div className="theme-soft-panel flex h-12 w-12 items-center justify-center rounded-lg text-primary">
+              <BarChart3 className="h-6 w-6" />
             </div>
             <div>
               <p className="theme-title text-2xl font-bold">
@@ -303,7 +303,7 @@ export default function DashboardPage() {
             <ChartContainer
               className="h-[260px] w-full"
               config={{
-                downloads: { label: 'Downloads', color: '#F08A5D' },
+                downloads: { label: 'Downloads', color: 'hsl(var(--color-chart-1))' },
               }}
             >
               <BarChart data={uploadTrend}>
@@ -323,9 +323,9 @@ export default function DashboardPage() {
             <ChartContainer
               className="h-[260px] w-full"
               config={{
-                verified: { label: 'Verified', color: '#22c55e' },
-                community: { label: 'Community', color: '#f59e0b' },
-                unverified: { label: 'Unverified', color: '#94a3b8' },
+                verified: { label: 'Verified', color: 'hsl(var(--color-chart-2))' },
+                community: { label: 'Community', color: 'hsl(var(--color-chart-3))' },
+                unverified: { label: 'Unverified', color: 'hsl(var(--color-chart-4))' },
               }}
             >
               <PieChart>
@@ -439,9 +439,9 @@ export default function DashboardPage() {
                     <h4 className="theme-title truncate font-medium">{paper.title}</h4>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className="theme-muted text-xs">{paper.course_code}</span>
-                      <span className="text-xs text-gray-400">·</span>
+                      <span className="text-xs text-muted-foreground">·</span>
                       <span className="theme-muted text-xs">{paper.year}</span>
-                      <span className="text-xs text-gray-400">·</span>
+                      <span className="text-xs text-muted-foreground">·</span>
                       <span className="theme-muted text-xs">{paper.paper_type}</span>
                       <VerificationBadge status={paper.verification_status} />
                     </div>
@@ -463,7 +463,7 @@ export default function DashboardPage() {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleDelete(paper.id)}
-                      className="h-8 w-8 text-gray-400 hover:text-red-500"
+                      className="h-8 w-8 text-muted-foreground hover:text-error"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

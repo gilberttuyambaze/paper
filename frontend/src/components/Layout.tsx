@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import BrandMark from '@/components/BrandMark';
+import AvatarFallback from '@/components/AvatarFallback';
 import SeoMeta from '@/components/SeoMeta';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchNotifications } from '@/lib/client';
@@ -193,7 +194,11 @@ export default function Layout({ children }: LayoutProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
             <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-90">
-              <BrandMark label imageClassName="h-10 w-10" labelClassName="hidden text-lg sm:block" />
+              <BrandMark
+                label
+                imageClassName="h-10 w-10"
+                labelClassName={user ? "text-lg md:hidden min-[844px]:block" : "text-lg"}
+              />
             </Link>
 
             <nav className="hidden items-center gap-1 md:flex">
@@ -260,12 +265,8 @@ export default function Layout({ children }: LayoutProps) {
 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="theme-icon-button"
-                      >
-                        <User className="h-5 w-5" />
+                      <Button variant="ghost" size="icon" className="theme-icon-button overflow-hidden rounded-full p-0" aria-label="Open account menu">
+                        <AvatarFallback name={user.name || user.email} imageAlt="Account avatar" className="text-xs" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent
@@ -387,17 +388,17 @@ export default function Layout({ children }: LayoutProps) {
             <div>
               <h3 className="theme-title mb-3 font-semibold">Quick Links</h3>
               <div className="theme-muted flex flex-col gap-2 text-sm">
-                <Link to="/" className="transition-colors hover:text-[hsl(var(--brand))]">Home</Link>
-                <Link to="/past-papers" className="transition-colors hover:text-[hsl(var(--brand))]">Browse Papers</Link>
-                <Link to="/upload" className="transition-colors hover:text-[hsl(var(--brand))]">Upload Paper</Link>
-                <Link to="/student-stories" className="transition-colors hover:text-[hsl(var(--brand))]">Story Behind This Website</Link>
+                <Link to="/" className="transition-colors hover:text-primary">Home</Link>
+                <Link to="/past-papers" className="transition-colors hover:text-primary">Browse Papers</Link>
+                <Link to="/upload" className="transition-colors hover:text-primary">Upload Paper</Link>
+                <Link to="/student-stories" className="transition-colors hover:text-primary">Story Behind This Website</Link>
               </div>
             </div>
             <div>
               <h3 className="theme-title mb-3 font-semibold">Policy</h3>
               <div className="theme-muted flex flex-col gap-2 text-sm">
-                <Link to="/terms" className="transition-colors hover:text-[hsl(var(--brand))]">Terms</Link>
-                <Link to="/privacy" className="transition-colors hover:text-[hsl(var(--brand))]">Privacy Policy</Link>
+                <Link to="/terms" className="transition-colors hover:text-primary">Terms</Link>
+                <Link to="/privacy" className="transition-colors hover:text-primary">Privacy Policy</Link>
                 
               </div>
             </div>
@@ -411,7 +412,7 @@ export default function Layout({ children }: LayoutProps) {
                   href="https://tuyambaze-gilbert.vercel.app/"
                   target="_blank"
                   rel="noreferrer"
-                  className="transition-colors hover:text-[hsl(var(--brand))]"
+                  className="transition-colors hover:text-primary"
                 >
                   Gilbert Tuyambaze
                 </a>
@@ -419,7 +420,7 @@ export default function Layout({ children }: LayoutProps) {
                   href="https://rw.linkedin.com/in/karly-ngarambe-designer"
                   target="_blank"
                   rel="noreferrer"
-                  className="transition-colors hover:text-[hsl(var(--brand))]"
+                  className="transition-colors hover:text-primary"
                 >
                   Karly Ngarambe
                 </a>
@@ -428,7 +429,7 @@ export default function Layout({ children }: LayoutProps) {
           </div>
           <div className="theme-muted mt-8 border-t border-border/70 pt-6 text-center text-sm">
             Copyright 2026 UR Academic Resource Hub. Led by{' '}
-            <a href="https://tuyambaze-gilbert.vercel.app/" target="_blank" rel="noreferrer" className="hover:text-[hsl(var(--brand))]">
+            <a href="https://tuyambaze-gilbert.vercel.app/" target="_blank" rel="noreferrer" className="hover:text-primary">
               Gilbert Tuyambaze
             </a>{' '}
             with {' '}
@@ -436,7 +437,7 @@ export default function Layout({ children }: LayoutProps) {
               href="https://rw.linkedin.com/in/karly-ngarambe-designer"
               target="_blank"
               rel="noreferrer"
-              className="hover:text-[hsl(var(--brand))]"
+              className="hover:text-primary"
             >
               Karly Ngarambe
             </a>

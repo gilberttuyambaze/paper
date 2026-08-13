@@ -8,6 +8,7 @@ import SeoMeta from '@/components/SeoMeta';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import AuthShowcase from '../components/AuthShowcase';
+import AvatarFallback from '../components/AvatarFallback';
 import { updateUserProfile, uploadFileObject } from '../lib/client';
 import { authApi } from '../lib/auth';
 import GoogleSignInButton from '../components/GoogleSignInButton';
@@ -178,12 +179,8 @@ export default function RegisterPage() {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="theme-soft-panel rounded-2xl p-4">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                  <div className="theme-soft-panel flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl text-2xl font-semibold">
-                    {profileImagePreview ? (
-                      <img src={profileImagePreview} alt="Profile preview" className="h-full w-full object-cover" />
-                    ) : (
-                      displayNameInitials(profileForm.display_name)
-                    )}
+                  <div className="theme-soft-panel h-24 w-24 overflow-hidden rounded-3xl text-2xl">
+                    <AvatarFallback name={profileForm.display_name} imageUrl={profileImagePreview} imageAlt="Profile picture preview" />
                   </div>
                   <div className="flex-1">
                     <Label htmlFor="profile-image" className="theme-form-label">Profile picture</Label>
@@ -231,7 +228,7 @@ export default function RegisterPage() {
                     </p>
                   )}
                   {accountRole !== 'normal' && (
-                    <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
+                    <div className="mt-2 rounded-xl border border-warning-border bg-warning-soft px-3 py-3 text-xs text-warning-foreground">
                       <p className="font-medium">
                         {accountRole === 'cp' ? 'CP access request' : 'Lecturer access request'}
                       </p>
@@ -291,7 +288,7 @@ export default function RegisterPage() {
                       type="button"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                       onClick={() => setShowPassword((value) => !value)}
-                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                      className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -322,12 +319,12 @@ export default function RegisterPage() {
                       type="button"
                       aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
                       onClick={() => setShowConfirmPassword((value) => !value)}
-                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                      className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
                     >
                       {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                  <p className={`mt-2 text-xs ${hasStartedConfirmingPassword ? (passwordsMatch ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300') : 'theme-muted'}`}>
+                  <p className={`mt-2 text-xs ${hasStartedConfirmingPassword ? (passwordsMatch ? 'text-success-foreground' : 'text-error-foreground') : 'theme-muted'}`}>
                     {passwordMatchMessage}
                   </p>
                 </div>
@@ -457,9 +454,9 @@ export default function RegisterPage() {
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+                  <div className="w-full border-t border-border" />
                 </div>
-                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] text-slate-400">
+                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
                   <span className="bg-transparent px-2">or</span>
                 </div>
               </div>
@@ -505,20 +502,6 @@ export default function RegisterPage() {
   );
 }
 
-function displayNameInitials(name: string) {
-  const parts = name
-    .split(' ')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (parts.length === 0) {
-    return 'UR';
-  }
-
-  return parts.map((part) => part[0]?.toUpperCase() || '').join('');
-}
-
 function getPasswordStrength(password: string) {
   if (!password) {
     return {
@@ -540,8 +523,8 @@ function getPasswordStrength(password: string) {
   if (password.length < 6 || score <= 2) {
     return {
       label: 'Weak password',
-      toneClass: 'text-red-600 dark:text-red-300',
-      barClass: 'bg-red-500',
+      toneClass: 'text-error-foreground',
+      barClass: 'bg-error',
       width: '33%',
     };
   }
@@ -549,16 +532,16 @@ function getPasswordStrength(password: string) {
   if (score === 3 || score === 4) {
     return {
       label: 'Medium password',
-      toneClass: 'text-amber-600 dark:text-amber-300',
-      barClass: 'bg-amber-500',
+      toneClass: 'text-warning-foreground',
+      barClass: 'bg-warning',
       width: '66%',
     };
   }
 
   return {
     label: 'Strong password',
-    toneClass: 'text-emerald-600 dark:text-emerald-300',
-    barClass: 'bg-emerald-500',
+    toneClass: 'text-success-foreground',
+    barClass: 'bg-success',
     width: '100%',
   };
 }

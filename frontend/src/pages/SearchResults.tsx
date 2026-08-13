@@ -395,8 +395,8 @@ export default function SearchResults() {
       ) : filteredPapers.length === 0 ? (
         <div className="py-16 text-center">
           <img
-            src="/search-empty.svg"
-            alt="No results"
+            src="/assets/illustrations/search-empty.svg"
+            alt="No matching academic papers"
             className="mx-auto mb-6 h-48 w-48 rounded-lg opacity-70"
           />
           <h3 className="theme-title mb-2 text-xl font-semibold">No papers found</h3>
@@ -412,12 +412,12 @@ export default function SearchResults() {
                 <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
                   <CardContent className="p-5">
                     <div className="mb-3 flex items-start justify-between">
-                      <Badge variant="outline" className="border-[hsl(var(--brand))] text-xs font-medium text-[hsl(var(--brand))]">
+                      <Badge variant="outline" className="border-primary text-xs font-medium text-primary">
                         {paper.paper_type}
                       </Badge>
                       <VerificationBadge status={paper.verification_status} />
                     </div>
-                    <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-[hsl(var(--brand))]">
+                    <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">
                       {paper.title}
                     </h3>
                     <div className="theme-muted space-y-1 text-sm">

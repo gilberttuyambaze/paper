@@ -6,32 +6,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, BadgeCheck, BookOpen, School, UserCircle2 } from 'lucide-react';
 import { fetchPublicUserProfile, getStorageDownloadUrl, type PublicUserProfile } from '../lib/client';
 import { toast } from 'sonner';
-
-function displayNameInitials(name: string) {
-  const parts = name
-    .split(' ')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (parts.length === 0) {
-    return 'UR';
-  }
-
-  return parts.map((part) => part[0]?.toUpperCase() || '').join('');
-}
+import AvatarFallback from '../components/AvatarFallback';
 
 function URVerificationBadge({ status }: { status?: string | null }) {
   if (status === 'verified') {
     return (
-      <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+      <Badge className="bg-success-soft text-success-foreground hover:bg-success-soft">
         <BadgeCheck className="mr-1 h-3 w-3" />
         UR verified
       </Badge>
     );
   }
   if (status === 'pending') {
-    return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">UR review pending</Badge>;
+    return <Badge className="bg-warning-soft text-warning-foreground hover:bg-warning-soft">UR review pending</Badge>;
   }
   return <Badge variant="secondary">Community profile</Badge>;
 }
@@ -115,12 +102,8 @@ export default function PublicProfilePage() {
       <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <Card className="theme-panel">
           <CardContent className="p-6">
-            <div className="theme-accent-soft mx-auto flex h-36 w-36 items-center justify-center overflow-hidden rounded-full text-4xl font-semibold">
-              {profileImageUrl ? (
-                <img src={profileImageUrl} alt={profile.display_name} className="h-full w-full object-cover" />
-              ) : (
-                displayNameInitials(profile.display_name)
-              )}
+            <div className="theme-accent-soft mx-auto h-36 w-36 overflow-hidden rounded-full text-4xl">
+              <AvatarFallback name={profile.display_name} imageUrl={profileImageUrl} imageAlt={`${profile.display_name} profile picture`} />
             </div>
 
             <div className="mt-5 text-center">

@@ -39,8 +39,8 @@ export default function AuthErrorPage() {
         <div className="space-y-4">
           <div className="flex justify-center">
             <div className="relative">
-              <div className="absolute inset-0 rounded-full bg-red-500/20 blur-xl" />
-              <AlertCircle className="relative h-12 w-12 text-red-500" strokeWidth={1.5} />
+              <div className="absolute inset-0 rounded-full bg-error/20 blur-xl" />
+              <AlertCircle className="relative h-12 w-12 text-error" strokeWidth={1.5} />
             </div>
           </div>
 

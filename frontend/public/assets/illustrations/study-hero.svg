@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Students studying with academic papers</title>
+  <desc id="desc">Editorial illustration of students reviewing printed papers, notes, and a laptop.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff4e6"/><stop offset="1" stop-color="#eaf4ff"/></linearGradient>
+  </defs>
+  <rect width="1200" height="800" rx="48" fill="url(#bg)"/>
+  <path d="M0 622C230 536 420 707 666 620s348-33 534-105v285H0Z" fill="#f08a5d" opacity=".13"/>
+  <g stroke="#23415d" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="550" y="204" width="390" height="292" rx="28" fill="#fff"/>
+    <path d="M590 274h162M590 318h290M590 362h230M590 406h174" opacity=".45"/>
+    <path d="M772 270l26 25 47-54" stroke="#2a9d8f"/>
+    <path d="M538 518h438"/>
+    <path d="M638 518l-72 110M866 518l72 110"/>
+  </g>
+  <g stroke="#23415d" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="330" cy="306" r="66" fill="#f6c47f"/>
+    <path d="M236 531c8-119 47-171 94-171s87 52 95 171" fill="#457b9d"/>
+    <path d="M281 291c17-43 78-59 108-17" fill="none"/>
+    <path d="M203 540h261l-28 86H231Z" fill="#fff"/>
+    <path d="M250 579h128M266 612h94" opacity=".45"/>
+  </g>
+  <g stroke="#23415d" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="1014" cy="386" r="54" fill="#8d6e63"/>
+    <path d="M935 604c7-104 39-157 79-157s73 53 81 157" fill="#2a9d8f"/>
+    <path d="M970 379c22-35 69-34 87 0" fill="none"/>
+    <path d="M862 606h222l-19 74H884Z" fill="#fff"/>
+    <path d="M905 644h112" opacity=".45"/>
+  </g>
+  <g fill="#f08a5d"><circle cx="488" cy="176" r="15"/><circle cx="103" cy="190" r="12"/></g>
+  <g fill="#2a9d8f"><path d="M112 366l15 32 34 15-34 15-15 34-15-34-34-15 34-15z"/><path d="M1065 159l10 21 22 10-22 10-10 22-10-22-22-10 22-10z"/></g>
+</svg>

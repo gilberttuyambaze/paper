@@ -112,16 +112,16 @@ function createDraft(profile: UserProfile): UserDraft {
 function RoleBadge({ role }: { role: string }) {
   const styles =
     role === 'admin'
-      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200'
+      ? 'bg-error-soft text-error-foreground'
       : role === 'content_manager'
-      ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200'
+      ? 'bg-info-soft text-info-foreground'
       : role === 'lecturer'
-      ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-200'
+      ? 'bg-primary/15 text-primary'
       : role === 'cp'
-      ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-200'
+      ? 'bg-warning-soft text-warning-foreground'
       : role === 'verified_contributor'
-      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
-      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
+      ? 'bg-success-soft text-success-foreground'
+      : 'bg-muted text-muted-foreground';
 
   return <Badge className={styles}>{role.split('_').join(' ')}</Badge>;
 }
@@ -130,10 +130,10 @@ function StatusBadge({ status }: { status?: string | null }) {
   const value = status || 'active';
   const styles =
     value === 'banned'
-      ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-200'
+      ? 'bg-error-soft text-error-foreground'
       : value === 'suspended'
-      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
-      : 'bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-200';
+      ? 'bg-warning-soft text-warning-foreground'
+      : 'bg-success-soft text-success-foreground';
 
   return <Badge className={styles}>{value}</Badge>;
 }
@@ -151,20 +151,20 @@ function RequestedRoleBadge({
 
   const styles =
     requestedRoleStatus === 'approved'
-      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
+      ? 'bg-success-soft text-success-foreground'
       : requestedRoleStatus === 'rejected'
-      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200'
-      : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200';
+      ? 'bg-error-soft text-error-foreground'
+      : 'bg-warning-soft text-warning-foreground';
 
   return <Badge className={styles}>{`${requestedRole} request: ${requestedRoleStatus}`}</Badge>;
 }
 
 function PaperVerificationBadge({ status }: { status: string }) {
   if (status === 'verified') {
-    return <Badge className="bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-200">verified</Badge>;
+    return <Badge className="bg-success-soft text-success-foreground">verified</Badge>;
   }
   if (status === 'community') {
-    return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">community</Badge>;
+    return <Badge className="bg-warning-soft text-warning-foreground">community</Badge>;
   }
   return <Badge variant="secondary">unverified</Badge>;
 }
@@ -432,28 +432,28 @@ export default function AdminPage() {
         </Card>
         <Card className="theme-panel">
           <CardContent className="p-4 text-center">
-            <FileText className="mx-auto mb-2 h-6 w-6 text-blue-500" />
+            <FileText className="mx-auto mb-2 h-6 w-6 text-info" />
             <p className="theme-title text-2xl font-bold">{overview?.stats.total_papers || papers.length}</p>
             <p className="theme-muted text-xs">Papers</p>
           </CardContent>
         </Card>
         <Card className="theme-panel">
           <CardContent className="p-4 text-center">
-            <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-amber-500" />
+            <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-warning" />
             <p className="theme-title text-2xl font-bold">{overview?.stats.pending_reports || 0}</p>
             <p className="theme-muted text-xs">Pending Reports</p>
           </CardContent>
         </Card>
         <Card className="theme-panel">
           <CardContent className="p-4 text-center">
-            <Download className="mx-auto mb-2 h-6 w-6 text-emerald-500" />
+            <Download className="mx-auto mb-2 h-6 w-6 text-success" />
             <p className="theme-title text-2xl font-bold">{totalDownloads.toLocaleString()}</p>
             <p className="theme-muted text-xs">Downloads</p>
           </CardContent>
         </Card>
         <Card className="theme-panel">
           <CardContent className="p-4 text-center">
-            <Clock className="mx-auto mb-2 h-6 w-6 text-violet-500" />
+            <Clock className="mx-auto mb-2 h-6 w-6 text-primary" />
             <p className="theme-title text-2xl font-bold">{overview?.stats.pending_role_requests || roleRequests.length}</p>
             <p className="theme-muted text-xs">Role Requests</p>
           </CardContent>
@@ -604,7 +604,7 @@ export default function AdminPage() {
                           <Button
                             size="sm"
                             onClick={() => void handleRoleRequestReview(profile.id, 'approve')}
-                            className="bg-green-600 text-white hover:bg-green-700"
+                            className="bg-success text-success-foreground hover:bg-success/90"
                           >
                             Approve
                           </Button>
@@ -649,7 +649,7 @@ export default function AdminPage() {
                         <Button
                           size="sm"
                           onClick={() => updateAdminReport(report.id, { status: 'resolved', hide_paper: false }).then(() => loadData())}
-                          className="bg-green-600 text-white hover:bg-green-700"
+                          className="bg-success text-success-foreground hover:bg-success/90"
                         >
                           Resolve
                         </Button>
@@ -730,7 +730,7 @@ export default function AdminPage() {
                         {paper.download_count || 0}
                       </span>
                       {(paper.report_count || 0) > 0 && (
-                        <span className="flex items-center gap-1 text-red-500">
+                        <span className="flex items-center gap-1 text-error">
                           <Flag className="h-3 w-3" />
                           {paper.report_count} reports
                         </span>
@@ -743,7 +743,7 @@ export default function AdminPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {paper.verification_status !== 'verified' && (
-                      <Button size="sm" onClick={() => handleVerifyPaper(paper.id)} className="bg-green-600 text-white hover:bg-green-700">
+                      <Button size="sm" onClick={() => handleVerifyPaper(paper.id)} className="bg-success text-success-foreground hover:bg-success/90">
                         <CheckCircle className="mr-1 h-4 w-4" />
                         Verify
                       </Button>
@@ -799,7 +799,7 @@ export default function AdminPage() {
               </div>
 
               {adminProtected && (
-                <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
+                <div className="rounded-2xl border border-warning-border bg-warning-soft px-4 py-3 text-sm text-warning-foreground">
                   Only administrators can edit or delete administrator accounts.
                 </div>
               )}
@@ -942,4 +942,3 @@ export default function AdminPage() {
     </div>
   );
 }
-

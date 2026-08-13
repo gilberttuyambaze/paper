@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ensureGoogleGsiReady } from '@/lib/googleGsi';
 
 declare global {
   interface Window {
@@ -52,17 +53,11 @@ export default function GoogleSignInButton({
       return;
     }
 
-    const existingScript = document.getElementById('google-gsi-script') as HTMLScriptElement | null;
+    let isCancelled = false;
 
-    const initializeGoogle = () => {
-      if (!window.google?.accounts?.id) {
-        setIsReady(false);
-        return;
-      }
-
-      window.google.accounts.id.initialize({
-        client_id: clientId,
-        callback: async (response: { credential?: string }) => {
+    const initializeGoogle = async () => {
+      try {
+        const ready = await ensureGoogleGsiReady(clientId, async (response: { credential?: string }) => {
           if (!response?.credential) {
             reportError('Google sign-in was cancelled.');
             return;
@@ -79,33 +74,22 @@ export default function GoogleSignInButton({
           } finally {
             finishLoading();
           }
-        },
-        auto_select: false,
-        cancel_on_tap_outside: true,
-      });
+        });
 
-      setIsReady(true);
+        if (!isCancelled) {
+          setIsReady(Boolean(ready));
+        }
+      } catch {
+        if (!isCancelled) {
+          setIsReady(false);
+        }
+      }
     };
 
-    if (existingScript) {
-      if (window.google?.accounts?.id) {
-        initializeGoogle();
-      } else {
-        existingScript.addEventListener('load', initializeGoogle, { once: true });
-      }
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.id = 'google-gsi-script';
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = initializeGoogle;
-    document.body.appendChild(script);
+    void initializeGoogle();
 
     return () => {
-      script.onload = null;
+      isCancelled = true;
     };
   }, [onError, onSuccess]);
 
@@ -137,10 +121,10 @@ export default function GoogleSignInButton({
       variant="outline"
       onClick={handleClick}
       disabled={disabled || isLoading || !isReady}
-      className={`h-12 w-full rounded-xl border border-slate-200 bg-white text-slate-800 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 ${className}`}
+      className={`h-12 w-full rounded-xl border border-border bg-card text-card-foreground shadow-sm hover:bg-secondary ${className}`}
     >
       <span className="flex items-center justify-center gap-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">
           G
         </span>
         {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}

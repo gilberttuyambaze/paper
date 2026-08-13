@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Paper Hub AI study assistant</title><desc id="desc">An annotated academic paper with a study spark.</desc>
+  <rect x="12" y="8" width="32" height="44" rx="7" fill="#fff4e6" stroke="#23415d" stroke-width="4"/>
+  <path d="M20 22h16M20 30h12M20 38h16" stroke="#23415d" stroke-width="4" stroke-linecap="round" opacity=".7"/>
+  <path d="M47 13l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#f08a5d"/>
+  <path d="M39 45l4 4 9-11" fill="none" stroke="#2a9d8f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

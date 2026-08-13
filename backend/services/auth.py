@@ -246,6 +246,14 @@ class AuthService:
         result = await self.db.execute(select(User).where(User.google_sub == google_sub))
         return result.scalar_one_or_none()
 
+    async def get_user_by_id(self, user_id: str) -> Optional[User]:
+        return await self.db.get(User, user_id)
+
+    def hash_password(self, password: str) -> str:
+        if not password or len(password) < 6:
+            raise ValueError("Password is too weak. Use at least 6 characters.")
+        return hash_password(password)
+
     async def create_user_with_password(
         self,
         email: str,

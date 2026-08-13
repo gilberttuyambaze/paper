@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">No matching academic papers</title><desc id="desc">A magnifying glass examining a document with no matching result.</desc>
+  <rect width="512" height="512" rx="56" fill="#f5f8fc"/>
+  <g stroke="#23415d" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M126 94h184l72 72v234H126z" fill="#fff"/><path d="M310 94v72h72" fill="#eaf4ff"/>
+    <path d="M172 210h126M172 252h92M172 294h112" opacity=".4"/>
+    <circle cx="324" cy="314" r="78" fill="#fff4e6" stroke="#f08a5d" stroke-width="18"/><path d="M380 370l63 63" stroke="#f08a5d" stroke-width="20"/>
+    <path d="M298 314h52" opacity=".45"/>
+  </g>
+</svg>

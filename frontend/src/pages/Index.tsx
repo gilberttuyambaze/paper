@@ -31,8 +31,8 @@ import {
   ChevronRight,
 } from 'lucide-react';
 
-const HERO_IMAGE = '/hero-study.svg';
-const COLLAB_IMAGE = '/collaboration-scene.svg';
+const HERO_IMAGE = '/assets/illustrations/landing.jpg';
+const COLLAB_IMAGE = '/assets/illustrations/peer-collaboration.svg';
 
 const COLLEGES = [
   'College of Science and Technology',
@@ -75,12 +75,12 @@ function PaperCard({ paper }: { paper: Paper }) {
       <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
         <CardContent className="p-5">
           <div className="flex items-start justify-between mb-3">
-            <Badge variant="outline" className="border-[hsl(var(--brand))] text-xs font-medium text-[hsl(var(--brand))]">
+            <Badge variant="outline" className="border-primary text-xs font-medium text-primary">
               {paper.paper_type}
             </Badge>
             <VerificationBadge status={paper.verification_status} />
           </div>
-          <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-[hsl(var(--brand))]">
+          <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">
             {paper.title}
           </h3>
           <div className="theme-muted space-y-1 text-sm">
@@ -293,7 +293,7 @@ export default function HomePage() {
               <div className="theme-highlight-shell rounded-[2rem] p-6 backdrop-blur-xl">
                 <div className="mb-5 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#F08A5D]">Highlighted Papers</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">Highlighted Papers</p>
                     <h2 className="mt-2 text-2xl font-bold">See what students are opening most</h2>
                   </div>
                   <div className="flex items-center gap-2">
@@ -487,7 +487,7 @@ export default function HomePage() {
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
-                <CheckCircle className="h-5 w-5 text-green-500" />
+                <CheckCircle className="h-5 w-5 text-success" />
                 <span className="theme-title text-2xl font-bold">{stats.verified}</span>
               </div>
               <p className="theme-muted text-sm">Verified Papers</p>
@@ -520,7 +520,7 @@ export default function HomePage() {
             <TrendingUp className="theme-accent h-6 w-6" />
             <h2 className="theme-title text-2xl font-bold">Trending Papers</h2>
           </div>
-          <Button variant="ghost" asChild className="theme-accent hover:text-[hsl(var(--brand-hover))]">
+          <Button variant="ghost" asChild className="theme-accent hover:text-primary">
             <Link to="/past-papers">View All <ArrowRight className="ml-1 h-4 w-4" /></Link>
           </Button>
         </div>
@@ -552,7 +552,7 @@ export default function HomePage() {
             <Clock className="theme-accent h-6 w-6" />
             <h2 className="theme-title text-2xl font-bold">Recently Added</h2>
           </div>
-          <Button variant="ghost" asChild className="theme-accent hover:text-[hsl(var(--brand-hover))]">
+          <Button variant="ghost" asChild className="theme-accent hover:text-primary">
             <Link to="/past-papers?sort=-created_at">View All <ArrowRight className="ml-1 h-4 w-4" /></Link>
           </Button>
         </div>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Academic document upload</title><desc id="desc">A paper document moving securely into an academic resource library.</desc>
+  <rect width="512" height="512" rx="56" fill="#fff4e6"/>
+  <g stroke="#23415d" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M132 94h180l74 74v250H132z" fill="#fff"/>
+    <path d="M312 94v74h74" fill="#eaf4ff"/><path d="M176 228h160M176 272h110M176 316h132" opacity=".45"/>
+    <path d="M256 430V290M201 346l55-56 55 56" stroke="#f08a5d" stroke-width="20"/>
+  </g>
+  <circle cx="386" cy="376" r="62" fill="#2a9d8f"/><path d="M358 377l19 19 39-45" fill="none" stroke="#fff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -4,7 +4,7 @@ import os
 from typing import Optional
 from urllib.parse import urlencode
 
-from core.auth import IDTokenValidationError, google_oidc_configuration_issue, validate_id_token
+from core.auth import IDTokenValidationError, google_oidc_configuration_issue, validate_firebase_id_token, validate_id_token
 from core.config import settings
 from core.database import get_db
 from dependencies.auth import get_current_user
@@ -21,11 +21,12 @@ from schemas.auth import (
     PasswordResetRequestResponse,
     PlatformTokenExchangeRequest,
     RegisterRequest,
+    SetPasswordRequest,
     TokenExchangeResponse,
     UserResponse,
 )
 from services.auth import AccountLinkRequiredError, AuthService
-from services.mailer import send_password_reset_email, should_expose_password_reset_links
+from services.mailer import send_account_created_email, send_password_reset_email, should_expose_password_reset_links
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
@@ -43,6 +44,15 @@ def get_dynamic_frontend_url(request: Request) -> str:
         return origin.rstrip("/")
     frontend_url = getattr(settings, "frontend_url", "http://localhost:3000")
     return _local_patch(frontend_url).rstrip("/")
+
+
+def get_configured_frontend_url() -> str:
+    """Return the trusted frontend URL for security-sensitive email links.
+
+    Request Origin is intentionally not consulted here: a reset token must never
+    be placed in a link to an attacker-controlled origin.
+    """
+    return _local_patch(getattr(settings, "frontend_url", "http://localhost:3000")).rstrip("/")
 
 
 def build_frontend_error_redirect(request: Request, message: str) -> RedirectResponse:
@@ -124,8 +134,33 @@ async def register_user(payload: RegisterRequest, db: AsyncSession = Depends(get
         code = "email_already_registered" if "already in use" in message.lower() else "registration_validation_failed"
         raise auth_error(status.HTTP_409_CONFLICT if code == "email_already_registered" else status.HTTP_400_BAD_REQUEST, code, message) from exc
 
+    login_url = f"{get_configured_frontend_url()}/login"
+    # Account creation remains successful if a non-critical welcome email cannot
+    # be delivered. The mailer records a safe operational failure for follow-up.
+    await send_account_created_email(user.email, user.name or derive_name_from_email(user.email), user.role or "user", login_url)
+
     app_token, _, _ = await auth_service.issue_app_token(user=user)
     return TokenExchangeResponse(token=app_token)
+
+
+@router.post("/password", response_model=GenericMessageResponse)
+async def set_or_update_password(
+    payload: SetPasswordRequest,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create or replace a password for the current authenticated app user."""
+    auth_service = AuthService(db)
+    user = await auth_service.get_user_by_id(current_user.id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.password_hash = auth_service.hash_password(payload.password)
+    if user.auth_provider in (None, ""):
+        user.auth_provider = "email"
+    user.last_login = user.last_login or __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    await db.commit()
+    return GenericMessageResponse(message="Password updated successfully.")
 
 
 @router.post("/password-reset/request", response_model=PasswordResetRequestResponse)
@@ -137,7 +172,7 @@ async def request_password_reset(payload: PasswordResetRequest, request: Request
 
     if reset_result:
         user, raw_token, expires_at = reset_result
-        frontend_url = get_dynamic_frontend_url(request)
+        frontend_url = get_configured_frontend_url()
         reset_url = f"{frontend_url}/reset-password?{urlencode({'token': raw_token})}"
         sent = await send_password_reset_email(user.email, reset_url, expires_at)
         if not sent and should_expose_password_reset_links():
@@ -303,6 +338,9 @@ async def exchange_google_token(
         raise auth_error(status.HTTP_401_UNAUTHORIZED, "google_account_incomplete", "Google did not provide the account details needed to sign in.")
 
     auth_service = AuthService(db)
+    existing_google_user = await auth_service.find_user_by_google_sub(google_sub)
+    existing_email_user = await auth_service.find_user_by_email(email)
+    is_new_google_user = existing_google_user is None and existing_email_user is None
     try:
         user = await auth_service.get_or_create_user(
             platform_sub=google_sub,
@@ -312,6 +350,14 @@ async def exchange_google_token(
         )
     except AccountLinkRequiredError as exc:
         raise auth_error(status.HTTP_409_CONFLICT, "account_link_required", str(exc)) from exc
+
+    if is_new_google_user:
+        await send_account_created_email(
+            user.email,
+            user.name or derive_name_from_email(user.email),
+            user.role or "user",
+            f"{get_configured_frontend_url()}/login",
+        )
     app_token, expires_at, _ = await auth_service.issue_app_token(user=user)
 
     logger.info("[google/exchange] Token issued successfully for user_id=%s, expires_at=%s", user.id, expires_at)

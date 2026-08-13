@@ -9,6 +9,8 @@ class UserResponse(BaseModel):
     email: str
     name: Optional[str] = None
     role: str = "user"  # user/admin
+    auth_provider: str = "email"
+    has_password: bool = False
     last_login: Optional[datetime] = None
 
     class Config:
@@ -65,6 +67,10 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordResetConfirmRequest(BaseModel):
     token: str = Field(min_length=16)
+    password: str = Field(min_length=6)
+
+
+class SetPasswordRequest(BaseModel):
     password: str = Field(min_length=6)
 
 

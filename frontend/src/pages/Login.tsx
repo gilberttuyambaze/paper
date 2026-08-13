@@ -104,7 +104,7 @@ export default function LoginPage() {
                     type="button"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                     onClick={() => setShowPassword((value) => !value)}
-                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                    className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -123,9 +123,9 @@ export default function LoginPage() {
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+                  <div className="w-full border-t border-border" />
                 </div>
-                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] text-slate-400">
+                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
                   <span className="bg-transparent px-2">or</span>
                 </div>
               </div>

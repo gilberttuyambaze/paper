@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import BrandMark from '@/components/BrandMark';
-import { BookOpen, Clock3, ShieldCheck, Sparkles, UploadCloud } from 'lucide-react';
+import {
+  BookOpen,
+  Clock3,
+  Landmark,
+  ShieldCheck,
+  Sparkles,
+  UploadCloud,
+} from 'lucide-react';
 
 type AuthSlide = {
   title: string;
@@ -16,29 +23,37 @@ const SLIDES: AuthSlide[] = [
     title: 'Study smarter with trusted past papers',
     description:
       'Browse organized papers, verified uploads, and discussion threads that help you revise with confidence.',
-    image: '/hero-study.svg',
-    accent: 'from-[#F08A5D] via-[#ffb48f] to-[#f6d365]',
+    image: '/assets/illustrations/study-hero.svg',
+    accent: 'from-primary via-warning to-secondary',
     chips: ['Verified papers', 'Fast search', 'Course-based'],
   },
+  {
+  title: 'Your university resources, connected',
+  description:
+    'A student-centered space for discovering past papers, sharing academic resources, and learning together across the University of Rwanda.',
+  image: '/assets/illustrations/landing.jpg',
+  accent: 'from-primary via-info to-secondary',
+  chips: ['University of Rwanda', 'Past papers', 'Student community'],
+ },
   {
     title: 'Share resources with your class community',
     description:
       'Upload exams, CATs, assignments, and model solutions so your classmates can build on real course materials.',
-    image: '/collaboration-scene.svg',
-    accent: 'from-[#1f6feb] via-[#5ea0ff] to-[#8ed1fc]',
+    image: '/assets/illustrations/peer-collaboration.svg',
+    accent: 'from-info via-primary to-secondary',
     chips: ['Uploads', 'Solutions', 'Collaboration'],
   },
   {
     title: 'Keep your academic history in one place',
     description:
       'Track your contributions, manage downloads, and return to the resources you need throughout the semester.',
-    image: '/upload-placeholder.svg',
-    accent: 'from-[#0f766e] via-[#14b8a6] to-[#6ee7b7]',
+    image: '/assets/illustrations/document-upload.svg',
+    accent: 'from-success via-info to-secondary',
     chips: ['Dashboard', 'Contribution log', 'Anywhere access'],
   },
 ];
 
-const ICONS = [BookOpen, UploadCloud, ShieldCheck];
+const ICONS = [BookOpen, UploadCloud, ShieldCheck, Landmark];
 
 export default function AuthShowcase() {
   const [activeIndex, setActiveIndex] = useState(0);
@@ -77,7 +92,7 @@ export default function AuthShowcase() {
       <div
         className={`absolute inset-x-0 top-0 h-40 bg-gradient-to-br ${activeSlide.accent} opacity-90 transition-all duration-700`}
       />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_hsla(var(--card),0.55),_transparent_45%)] dark:bg-[radial-gradient(circle_at_top_right,_rgba(255,255,255,0.08),_transparent_45%)]" />
+      <div className="theme-auth-glow absolute inset-0" />
 
       <div className="relative z-10">
         <div className="mb-5 flex items-center justify-between gap-3">
@@ -118,7 +133,7 @@ export default function AuthShowcase() {
           <div className="grid gap-4 md:grid-cols-[1.15fr_0.85fr] md:items-center">
             <img
               src={activeSlide.image}
-              alt={activeSlide.title}
+              alt=""
               className="h-56 w-full rounded-[1.2rem] object-cover md:h-72"
             />
 

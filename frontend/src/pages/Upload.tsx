@@ -594,8 +594,8 @@ export default function UploadPage() {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
         <img
-          src="/upload-placeholder.svg"
-          alt="Upload"
+          src="/assets/illustrations/document-upload.svg"
+          alt="Academic document upload"
           className="w-48 h-48 mx-auto mb-6 rounded-lg opacity-80"
         />
         <h2 className="theme-title mb-4 text-2xl font-bold">Sign In Required</h2>
@@ -615,8 +615,8 @@ export default function UploadPage() {
   if (success) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-        <div className="theme-soft-panel mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full text-green-600 dark:text-green-300">
-          <CheckCircle className="h-10 w-10 text-green-600" />
+        <div className="theme-soft-panel mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full text-success-foreground">
+          <CheckCircle className="h-10 w-10" />
         </div>
         <h2 className="theme-title mb-4 text-2xl font-bold">Upload Successful!</h2>
         <p className="theme-muted mb-6">
@@ -639,7 +639,7 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <Button variant="ghost" onClick={() => navigate(-1)} className="theme-muted mb-6 hover:bg-transparent hover:text-[hsl(var(--brand))]">
+      <Button variant="ghost" onClick={() => navigate(-1)} className="theme-muted mb-6 hover:bg-transparent hover:text-primary">
         <ArrowLeft className="h-4 w-4 mr-2" />
         Back
       </Button>
@@ -667,9 +667,9 @@ export default function UploadPage() {
               <div
                 className={`rounded-lg p-4 text-sm ${
                   suggestionFeedback.tone === 'success'
-                    ? 'border border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800/50 dark:bg-emerald-950/20 dark:text-emerald-200'
+                    ? 'border border-success-border bg-success-soft text-success-foreground'
                     : suggestionFeedback.tone === 'warning'
-                      ? 'border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200'
+                      ? 'border border-warning-border bg-warning-soft text-warning-foreground'
                       : 'theme-soft-panel'
                 }`}
               >
@@ -817,7 +817,7 @@ export default function UploadPage() {
                       key={paper.id}
                       type="button"
                       onClick={() => applySuggestion(paper)}
-                      className="theme-accent-soft-border rounded-full px-3 py-1 text-xs transition-colors hover:bg-[hsl(var(--brand))] hover:text-white"
+                      className="theme-accent-soft-border rounded-full px-3 py-1 text-xs transition-colors hover:bg-primary hover:text-primary-foreground"
                     >
                       {paper.course_code} · {paper.course_name}
                     </button>
@@ -995,7 +995,7 @@ export default function UploadPage() {
             >
               {submitting ? (
                 <div className="flex items-center gap-2">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-foreground" />
                   Uploading...
                 </div>
               ) : (

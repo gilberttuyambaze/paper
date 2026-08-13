@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Document preview unavailable</title><desc id="desc">A document icon with an unavailable marker.</desc>
+  <path d="M14 7h26l12 12v36H14z" fill="#f8fafc" stroke="#23415d" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M40 7v12h12M22 30h21M22 38h14" stroke="#23415d" stroke-width="4" stroke-linecap="round" opacity=".6"/>
+  <circle cx="46" cy="47" r="12" fill="#f08a5d"/><path d="M46 40v8M46 53h.01" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+</svg>

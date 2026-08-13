@@ -94,7 +94,7 @@ export default function ResetPasswordPage() {
                     type="button"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                     onClick={() => setShowPassword((value) => !value)}
-                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                    className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -118,7 +118,7 @@ export default function ResetPasswordPage() {
                     type="button"
                     aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
                     onClick={() => setShowConfirmPassword((value) => !value)}
-                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                    className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
                   >
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>

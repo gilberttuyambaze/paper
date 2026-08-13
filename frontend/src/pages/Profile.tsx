@@ -16,8 +16,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { BadgeCheck, Camera, Pencil, School, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, Camera, Eye, EyeOff, Pencil, School, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import AvatarFallback from '../components/AvatarFallback';
 import {
   buildProfilePictureObjectKey,
   createEmptyProfileForm,
@@ -27,34 +28,20 @@ import {
   type ProfileFormValues,
 } from '../lib/profile-form';
 
-function displayNameInitials(name: string) {
-  const parts = name
-    .split(' ')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (parts.length === 0) {
-    return 'UR';
-  }
-
-  return parts.map((part) => part[0]?.toUpperCase() || '').join('');
-}
-
 function URVerificationBadge({ status }: { status?: string | null }) {
   if (status === 'verified') {
     return (
-      <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+      <Badge className="bg-success-soft text-success-foreground hover:bg-success-soft">
         <BadgeCheck className="mr-1 h-3 w-3" />
         UR verified
       </Badge>
     );
   }
   if (status === 'pending') {
-    return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">UR review pending</Badge>;
+    return <Badge className="bg-warning-soft text-warning-foreground hover:bg-warning-soft">UR review pending</Badge>;
   }
   if (status === 'rejected') {
-    return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">UR verification rejected</Badge>;
+    return <Badge className="bg-error-soft text-error-foreground hover:bg-error-soft">UR verification rejected</Badge>;
   }
   return <Badge className="theme-soft-panel hover:bg-inherit">No UR verification</Badge>;
 }
@@ -90,6 +77,11 @@ export default function ProfilePage() {
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileImageFile, setProfileImageFile] = useState<File | null>(null);
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -184,6 +176,35 @@ export default function ProfilePage() {
     setProfileImagePreview(null);
     setProfileImageFile(null);
     setEditing(false);
+  };
+
+  const handleSavePassword = async () => {
+    if (!user) return;
+
+    if (password.length < 6) {
+      toast.error('Password is too weak. Use at least 6 characters.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match.');
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      await authApi.setPassword(password);
+      setPassword('');
+      setConfirmPassword('');
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      toast.success('Password updated successfully.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to update password.';
+      toast.error(message);
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -322,12 +343,8 @@ export default function ProfilePage() {
       <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <Card className="theme-panel">
           <CardContent className="p-6">
-            <div className="theme-accent-soft mx-auto flex h-36 w-36 items-center justify-center overflow-hidden rounded-[2rem] text-4xl font-semibold">
-              {previewImage ? (
-                <img src={previewImage} alt="Profile" className="h-full w-full object-cover" />
-              ) : (
-                displayNameInitials(profile.display_name)
-              )}
+            <div className="theme-accent-soft mx-auto h-36 w-36 overflow-hidden rounded-[2rem] text-4xl">
+              <AvatarFallback name={profile.display_name} imageUrl={previewImage} imageAlt="Your profile picture" />
             </div>
 
             <div className="mt-5 text-center">
@@ -415,7 +432,7 @@ export default function ProfilePage() {
               <div className="theme-auth-subtle md:col-span-2 rounded-2xl p-4 text-sm">
                 {urCodeLocked ? (
                   <div className="flex items-start gap-3">
-                    <ShieldCheck className="mt-0.5 h-5 w-5 text-emerald-600" />
+                    <ShieldCheck className="mt-0.5 h-5 w-5 text-success-foreground" />
                     <p>Your UR student code has been verified and is now locked to preserve verification integrity.</p>
                   </div>
                 ) : (
@@ -550,6 +567,62 @@ export default function ProfilePage() {
                 ) : (
                   <p>If you use a UR student code, your verification status will stay pending until it is reviewed.</p>
                 )}
+              </div>
+
+              <div className="theme-auth-subtle md:col-span-2 rounded-2xl p-4 text-sm">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="font-semibold text-foreground">Password access</p>
+                  <Badge variant={user?.email ? 'secondary' : 'outline'}>
+                    {user?.email ? 'Email/password available' : 'Google only'}
+                  </Badge>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label className="theme-form-label">New password</Label>
+                    <div className="relative mt-2">
+                      <Input
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        placeholder="At least 6 characters"
+                        className="theme-form-input h-11 rounded-xl pr-12"
+                      />
+                      <button
+                        type="button"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowPassword((value) => !value)}
+                        className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="theme-form-label">Confirm password</Label>
+                    <div className="relative mt-2">
+                      <Input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        placeholder="Confirm new password"
+                        className="theme-form-input h-11 rounded-xl pr-12"
+                      />
+                      <button
+                        type="button"
+                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                        onClick={() => setShowConfirmPassword((value) => !value)}
+                        className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button type="button" variant="outline" onClick={handleSavePassword} disabled={passwordSaving || !password} className="theme-accent-bg">
+                    {passwordSaving ? 'Saving…' : 'Set password'}
+                  </Button>
+                </div>
               </div>
 
               <div className="md:col-span-2 flex justify-end gap-3">

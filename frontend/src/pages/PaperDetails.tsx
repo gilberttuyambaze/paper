@@ -58,11 +58,14 @@ import {
   Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import AvatarFallback from '../components/AvatarFallback';
+import DocumentPreview from '../components/DocumentPreview';
+import AcademicAiMark from '../components/AcademicAiMark';
 
 function VerificationBadge({ status }: { status: string }) {
   if (status === 'verified') {
     return (
-      <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-100">
+      <Badge className="bg-success-soft text-success-foreground hover:bg-success-soft">
         <CheckCircle className="h-3 w-3 mr-1" />
         Verified
       </Badge>
@@ -70,31 +73,17 @@ function VerificationBadge({ status }: { status: string }) {
   }
   if (status === 'community') {
     return (
-      <Badge className="bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 hover:bg-yellow-100">
+      <Badge className="bg-warning-soft text-warning-foreground hover:bg-warning-soft">
         <Users className="h-3 w-3 mr-1" />
         Community Verified
       </Badge>
     );
   }
   return (
-    <Badge className="bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-100">
+    <Badge className="bg-muted text-muted-foreground hover:bg-muted">
       Unverified
     </Badge>
   );
-}
-
-function displayNameInitials(name: string) {
-  const parts = name
-    .split(' ')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (parts.length === 0) {
-    return 'UR';
-  }
-
-  return parts.map((part) => part[0]?.toUpperCase() || '').join('');
 }
 
 export default function PaperDetails() {
@@ -302,9 +291,9 @@ export default function PaperDetails() {
     return (
       <div className="max-w-4xl mx-auto px-4 py-8">
         <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-gray-200 dark:bg-gray-600 rounded w-3/4" />
-          <div className="h-4 bg-gray-200 dark:bg-gray-600 rounded w-1/2" />
-          <div className="h-48 bg-gray-200 dark:bg-gray-600 rounded" />
+          <div className="h-8 w-3/4 rounded bg-muted" />
+          <div className="h-4 w-1/2 rounded bg-muted" />
+          <div className="h-48 rounded bg-muted" />
         </div>
       </div>
     );
@@ -416,7 +405,7 @@ export default function PaperDetails() {
       <Button
         variant="ghost"
         onClick={() => navigate(-1)}
-        className="theme-muted mb-6 hover:bg-[hsl(42,100%,88%)] hover:text-black"
+        className="theme-muted mb-6 hover:bg-secondary hover:text-secondary-foreground"
       >
         <ArrowLeft className="h-4 w-4 mr-2" />
         Back
@@ -426,7 +415,7 @@ export default function PaperDetails() {
       <Card className="theme-panel mb-6">
         <CardContent className="p-6">
           <div className="flex flex-wrap items-center gap-2 mb-4">
-            <Badge variant="outline" className="border-[hsl(var(--brand))] text-[hsl(var(--brand))]">
+            <Badge variant="outline" className="border-primary text-primary">
               {paper.paper_type}
             </Badge>
             <VerificationBadge status={paper.verification_status} />
@@ -475,18 +464,10 @@ export default function PaperDetails() {
               <button
                 type="button"
                 onClick={() => navigate(`/profile/${paper.user_id}`)}
-                className="theme-soft-panel flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-[hsla(var(--brand),0.12)]"
+                className="theme-soft-panel flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-secondary"
               >
-                <div className="theme-accent-soft flex h-11 w-11 items-center justify-center overflow-hidden rounded-full text-sm font-semibold">
-                  {uploaderImageUrl ? (
-                    <img
-                      src={uploaderImageUrl}
-                      alt={paper.uploader_display_name || `Student ${paper.user_id}`}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    displayNameInitials(paper.uploader_display_name || `Student ${paper.user_id}`)
-                  )}
+                <div className="theme-accent-soft h-11 w-11 overflow-hidden rounded-full text-sm">
+                  <AvatarFallback name={paper.uploader_display_name || `Student ${paper.user_id}`} imageUrl={uploaderImageUrl} imageAlt={`${paper.uploader_display_name || 'Uploader'} profile picture`} />
                 </div>
                 <div className="min-w-0">
                   <p className="theme-muted text-xs uppercase tracking-[0.2em]">Uploaded by</p>
@@ -543,19 +524,10 @@ export default function PaperDetails() {
                   </Button>
                 </div>
               </div>
-              <div className="overflow-auto bg-background">
-                <iframe
-                  src={paperUrl || offlinePaperUrl!}
-                  title="Paper preview"
-                  className="min-h-[700px] origin-top-left bg-background"
-                  style={{ width: `${pdfZoom * 100}%` }}
-                />
-              </div>
+              <DocumentPreview src={paperUrl || offlinePaperUrl} title={`${paper.title} paper preview`} minHeightClassName="min-h-[700px]" zoom={pdfZoom} />
             </div>
           ) : (
-            <div className="theme-soft-panel theme-muted mt-6 rounded-xl border-dashed p-6 text-center">
-              Paper preview is not available. Use the download button to view the full document.
-            </div>
+            <div className="mt-6"><DocumentPreview title={`${paper.title} paper preview`} unavailableMessage="Paper preview is not available. Use the download button to view the full document." /></div>
           )}
 
           <Card className="theme-panel mt-6">
@@ -581,9 +553,9 @@ export default function PaperDetails() {
                 <p className="theme-link-accent mb-3 text-xs font-semibold uppercase tracking-[0.2em]">
                   {aiMode === 'summarize' ? 'Discussion Brief' : aiMode === 'explain' ? 'Study Guide' : 'AI Study Assistant'}
                 </p>
-                <div className="whitespace-pre-wrap leading-6">
-                  {aiLoading ? 'Thinking...' : aiResult || 'Use the AI assistant to get a study explanation or a summary of the current discussion and solutions.'}
-                </div>
+                {aiLoading ? <div className="whitespace-pre-wrap leading-6">Thinking...</div> : aiResult ? <div className="whitespace-pre-wrap leading-6">{aiResult}</div> : (
+                  <div className="flex items-center gap-3 leading-6"><AcademicAiMark className="h-11 w-11 shrink-0" /><span>Use the AI assistant to get a study explanation or a summary of the current discussion and solutions.</span></div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -627,7 +599,7 @@ export default function PaperDetails() {
                 <DialogTrigger asChild>
                   <Button
                     variant="outline"
-                    className="text-red-500 border-red-200 hover:bg-[hsl(42,100%,88%)] hover:text-red-800 dark:border-red-900 dark:hover:bg-red-900/20 dark:hover:text-red-200"
+                    className="border-error-border text-error hover:bg-error-soft hover:text-error-foreground"
                   >
                     <Flag className="h-4 w-4 mr-2" />
                     Report
@@ -650,7 +622,7 @@ export default function PaperDetails() {
                   <Button
                     onClick={handleReport}
                     disabled={!reportReason.trim() || submitting}
-                    className="bg-red-500 hover:bg-red-600 text-white"
+                    className="bg-error text-error-foreground hover:bg-error/90"
                   >
                     Submit Report
                   </Button>
@@ -672,13 +644,7 @@ export default function PaperDetails() {
                   )}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-0">
-                <iframe
-                  src={solutionUrl || offlineSolutionUrl!}
-                  title="Solution preview"
-                  className="min-h-[520px] w-full bg-background"
-                />
-              </CardContent>
+              <CardContent className="p-0"><DocumentPreview src={solutionUrl || offlineSolutionUrl} title={`${paper.title} solution preview`} /></CardContent>
             </Card>
           )}
         </CardContent>
@@ -742,9 +708,7 @@ export default function PaperDetails() {
                 <Card key={comment.id} className="theme-panel">
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className="theme-accent-soft flex h-8 w-8 items-center justify-center rounded-full">
-                        <User className="theme-section-icon h-4 w-4" />
-                      </div>
+                      <div className="theme-accent-soft h-8 w-8 overflow-hidden rounded-full text-xs"><AvatarFallback name="Student" imageAlt="Student avatar" /></div>
                       <span className="theme-title text-sm font-medium">Student</span>
                       <span className="theme-muted text-xs">
                         {comment.created_at ? new Date(comment.created_at).toLocaleDateString() : ''}
@@ -756,7 +720,7 @@ export default function PaperDetails() {
                         size="sm"
                         variant="ghost"
                         onClick={() => handleCommentVote(comment.id)}
-                        className="theme-muted h-8 px-2 hover:text-[hsl(var(--brand))]"
+                        className="theme-muted h-8 px-2 hover:text-primary"
                       >
                         <ChevronUp className="mr-1 h-4 w-4" />
                         {comment.upvotes || 0}
@@ -766,7 +730,7 @@ export default function PaperDetails() {
                           size="sm"
                           variant="ghost"
                           onClick={() => setReplyTarget(replyTarget === comment.id ? null : comment.id)}
-                          className="theme-muted h-8 px-2 hover:text-[hsl(var(--brand))]"
+                          className="theme-muted h-8 px-2 hover:text-primary"
                         >
                           <Reply className="mr-1 h-4 w-4" />
                           Reply
@@ -810,7 +774,7 @@ export default function PaperDetails() {
                               size="sm"
                               variant="ghost"
                               onClick={() => handleCommentVote(reply.id)}
-                              className="theme-muted mt-2 h-8 px-2 hover:text-[hsl(var(--brand))]"
+                              className="theme-muted mt-2 h-8 px-2 hover:text-primary"
                             >
                               <ChevronUp className="mr-1 h-4 w-4" />
                               {reply.upvotes || 0}
@@ -874,9 +838,7 @@ export default function PaperDetails() {
                 <Card key={solution.id} className="theme-panel">
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="theme-accent-soft flex h-8 w-8 items-center justify-center rounded-full">
-                        <User className="theme-section-icon h-4 w-4" />
-                      </div>
+                      <div className="theme-accent-soft h-8 w-8 overflow-hidden rounded-full text-xs"><AvatarFallback name="Contributor" imageAlt="Contributor avatar" /></div>
                       <span className="theme-title text-sm font-medium">Contributor</span>
                       {solution.is_best && <Badge className="theme-status-badge--verified hover:bg-inherit">Best Answer</Badge>}
                       <span className="theme-muted ml-auto text-xs">
@@ -891,7 +853,7 @@ export default function PaperDetails() {
                         size="sm"
                         variant="ghost"
                         onClick={() => handleSolutionVote(solution.id)}
-                        className="theme-muted h-8 px-2 hover:text-[hsl(var(--brand))]"
+                        className="theme-muted h-8 px-2 hover:text-primary"
                       >
                         <ChevronUp className="mr-1 h-4 w-4" />
                         {solution.upvotes || 0}
