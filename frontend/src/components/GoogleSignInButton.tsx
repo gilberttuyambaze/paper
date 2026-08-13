@@ -121,7 +121,7 @@ export default function GoogleSignInButton({
       variant="outline"
       onClick={handleClick}
       disabled={disabled || isLoading || !isReady}
-      className={`h-12 w-full rounded-xl border border-border bg-card text-card-foreground shadow-sm hover:bg-secondary ${className}`}
+      className={`h-12 w-full rounded-xl border border-border bg-card text-card-foreground shadow-sm hover:bg-black ${className}`}
     >
       <span className="flex items-center justify-center gap-3">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">
