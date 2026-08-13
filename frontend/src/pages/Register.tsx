@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import AuthShowcase from '../components/AuthShowcase';
 import AvatarFallback from '../components/AvatarFallback';
+import AcademicContextFields from '../components/AcademicContextFields';
 import { updateUserProfile, uploadFileObject } from '../lib/client';
 import { authApi } from '../lib/auth';
 import GoogleSignInButton from '../components/GoogleSignInButton';
@@ -34,6 +35,7 @@ export default function RegisterPage() {
   const [profileForm, setProfileForm] = useState<ProfileFormValues>(createEmptyProfileForm());
   const [profileImageFile, setProfileImageFile] = useState<File | null>(null);
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const [profileImageUrlInput, setProfileImageUrlInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -130,6 +132,9 @@ export default function RegisterPage() {
         phone_number: normalizeOptionalField(profileForm.phone_number),
         college_name: normalizeOptionalField(profileForm.college_name),
         department_name: normalizeOptionalField(profileForm.department_name),
+        institution_id: profileForm.campus_id ? 'ur' : undefined,
+        campus_id: normalizeOptionalField(profileForm.campus_id), college_id: normalizeOptionalField(profileForm.college_id), school_id: normalizeOptionalField(profileForm.school_id), programme_id: normalizeOptionalField(profileForm.programme_id),
+        programme_name_other: profileForm.programme_id === 'other' ? normalizeOptionalField(profileForm.programme_name_other) : undefined,
         year_of_study: normalizeOptionalField(profileForm.year_of_study),
         bio: normalizeOptionalField(profileForm.bio),
       });
@@ -144,6 +149,16 @@ export default function RegisterPage() {
           }
         } catch (uploadError) {
           console.error('Profile image upload failed:', uploadError);
+        }
+      } else if (profileImageUrlInput.trim()) {
+        try {
+          const currentUser = await authApi.getCurrentUser();
+          if (currentUser?.id) {
+            // Save external URL directly as profile_picture_key
+            await updateUserProfile({ profile_picture_key: profileImageUrlInput.trim() });
+          }
+        } catch (uploadError) {
+          console.error('Setting profile image URL failed:', uploadError);
         }
       }
 
@@ -190,8 +205,17 @@ export default function RegisterPage() {
                         type="file"
                         accept="image/*"
                         onChange={handleProfileImageChange}
-                        className="theme-form-input h-12 rounded-xl"
+                        className="theme-form-input h-12 rounded-xl cursor-pointer"
                       />
+                      <div className="ml-2 flex items-center gap-2">
+                        <Input placeholder="Or paste image URL" value={profileImageUrlInput} onChange={(e) => setProfileImageUrlInput(e.target.value)} className="theme-form-input h-12 rounded-xl" />
+                        <Button type="button" onClick={() => {
+                          const url = profileImageUrlInput.trim();
+                          if (!url) return;
+                          setProfileImageFile(null);
+                          setProfileImagePreview(url);
+                        }}>Use URL</Button>
+                      </div>
                       <div className="theme-accent-soft hidden rounded-xl px-3 py-2 text-xs font-medium sm:flex sm:items-center sm:gap-2">
                         <Camera className="h-4 w-4" />
                         Optional
@@ -386,28 +410,8 @@ export default function RegisterPage() {
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="college_name" className="theme-form-label">College</Label>
-                  <Input
-                    id="college_name"
-                    type="text"
-                    value={profileForm.college_name}
-                    onChange={(event) => updateField('college_name', event.target.value)}
-                    placeholder="College or faculty"
-                    className="theme-form-input mt-2 h-12 rounded-xl"
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="department_name" className="theme-form-label">Department</Label>
-                  <Input
-                    id="department_name"
-                    type="text"
-                    value={profileForm.department_name}
-                    onChange={(event) => updateField('department_name', event.target.value)}
-                    placeholder="Department or program"
-                    className="theme-form-input mt-2 h-12 rounded-xl"
-                  />
+                <div className="sm:col-span-2">
+                  <AcademicContextFields value={profileForm} onChange={(academic) => setProfileForm((current) => ({ ...current, ...academic }))} otherName={profileForm.programme_name_other} onOtherNameChange={(programme_name_other) => updateField('programme_name_other', programme_name_other)} submissionSource="registration" />
                 </div>
 
                 <div>

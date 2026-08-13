@@ -31,6 +31,12 @@ export interface ProfileFormValues {
   phone_number: string;
   college_name: string;
   department_name: string;
+  institution_id: string;
+  campus_id: string;
+  college_id: string;
+  school_id: string;
+  programme_id: string;
+  programme_name_other: string;
   year_of_study: string;
   bio: string;
 }
@@ -58,6 +64,7 @@ export function createEmptyProfileForm(): ProfileFormValues {
     phone_number: '',
     college_name: '',
     department_name: '',
+    institution_id: 'ur', campus_id: '', college_id: '', school_id: '', programme_id: '', programme_name_other: '',
     year_of_study: '',
     bio: '',
   };

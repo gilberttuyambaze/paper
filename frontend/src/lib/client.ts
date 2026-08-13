@@ -34,6 +34,15 @@ export interface Paper {
   course_name: string;
   college: string;
   department: string;
+  institution_id?: string | null;
+  campus_id?: string | null;
+  college_id?: string | null;
+  school_id?: string | null;
+  academic_department_id?: string | null;
+  programme_id?: string | null;
+  programme_name_other?: string | null;
+  semester?: string | null;
+  examination_session?: string | null;
   year: number;
   paper_type: string;
   lecturer: string | null;
@@ -94,6 +103,13 @@ export interface UserProfile {
   phone_number?: string | null;
   college_name?: string | null;
   department_name?: string | null;
+  institution_id?: string | null;
+  campus_id?: string | null;
+  college_id?: string | null;
+  school_id?: string | null;
+  academic_department_id?: string | null;
+  programme_id?: string | null;
+  programme_name_other?: string | null;
   year_of_study?: string | null;
   bio?: string | null;
   requested_role?: 'cp' | 'lecturer' | null;
@@ -124,6 +140,66 @@ export interface PublicUserProfile {
   year_of_study?: string | null;
   bio?: string | null;
   created_at: string | null;
+}
+
+export interface AcademicNode { id: string; name: string; slug: string; parent_id: string | null; active: boolean; order: number; description?: string | null; }
+export interface AcademicTaxonomy { institution: AcademicNode; nodes: AcademicNode[]; }
+export interface ProgrammeRecommendation { kind: 'official' | 'submission'; id: string; name: string; confidence: number; confidence_label: string; occurrences: number; campus_id: string; college_id: string; school_id: string; }
+
+export async function fetchAcademicTaxonomy(): Promise<AcademicTaxonomy> {
+  const response = await apiClient.get(apiUrl('/api/v1/academics/taxonomy'));
+  return response.data as AcademicTaxonomy;
+}
+export async function fetchProgrammeRecommendations(data: { institution_id: string; campus_id: string; college_id: string; school_id: string; programme_name_other: string }): Promise<ProgrammeRecommendation[]> {
+  const response = await apiClient.post(apiUrl('/api/v1/academics/programme-recommendations'), data);
+  const recs = response.data.recommendations || [];
+  // Normalize shape for frontend consumption
+  return recs.map((r: any) => ({
+    kind: r.source === 'alias' || r.source === 'official' ? 'official' : 'submission',
+    id: r.programme_id || String(r.submission_id || ''),
+    name: r.programme_name || r.normalized_programme_name || '',
+    confidence: r.score || 0,
+    confidence_label: r.match_level === 'strong' ? 'Strong match' : r.match_level === 'likely' ? 'Likely match' : r.match_level === 'possible' ? 'Possible match' : '',
+    occurrences: r.occurrences || 0,
+    campus_id: r.campus_id,
+    college_id: r.college_id,
+    school_id: r.school_id,
+  })) as ProgrammeRecommendation[];
+}
+
+export interface ProgrammeCandidateItem {
+  normalized_programme_name: string;
+  campus_id: string;
+  college_id: string;
+  school_id: string;
+  occurrences: number;
+  best_match?: ProgrammeRecommendation | null;
+  matches?: ProgrammeRecommendation[];
+}
+
+export async function fetchProgrammeCandidatesDetailed(): Promise<{ items: ProgrammeCandidateItem[] }> {
+  const response = await apiClient.get(apiUrl('/api/v1/admin/hub/programme-candidates/detailed'));
+  return response.data as { items: ProgrammeCandidateItem[] };
+}
+
+export async function verifyProgrammeCandidate(data: { normalized_programme_name: string; campus_id: string; college_id: string; school_id: string; programme_id: string }) {
+  const response = await apiClient.post(apiUrl('/api/v1/admin/hub/programme-candidates/verify-alias'), data);
+  return response.data;
+}
+
+export async function rejectProgrammeCandidateGroup(data: { normalized_programme_name: string; campus_id: string; college_id: string; school_id: string }) {
+  const response = await apiClient.post(apiUrl('/api/v1/admin/hub/programme-candidates/reject'), data);
+  return response.data;
+}
+
+export async function fetchProgrammeCandidateSubmissions(normalized: string) {
+  const response = await apiClient.get(apiUrl(`/api/v1/admin/hub/programme-candidates/${encodeURIComponent(normalized)}/submissions`));
+  return response.data as { items: Array<Record<string, any>> };
+}
+
+export async function createProgrammeSubmission(data: { institution_id: string; campus_id: string; college_id: string; school_id: string; programme_name_other: string; source?: string; accepted_programme_id?: string | null; accepted_candidate_id?: number | null }) {
+  const response = await apiClient.post(apiUrl('/api/v1/academics/programme-submissions'), data);
+  return response.data;
 }
 
 export interface NotificationItem {
@@ -550,6 +626,13 @@ export async function updateUserProfile(data: {
   phone_number?: string | null;
   college_name?: string | null;
   department_name?: string | null;
+  institution_id?: string | null;
+  campus_id?: string | null;
+  college_id?: string | null;
+  school_id?: string | null;
+  academic_department_id?: string | null;
+  programme_id?: string | null;
+  programme_name_other?: string | null;
   year_of_study?: string | null;
   bio?: string | null;
 }): Promise<UserProfile> {

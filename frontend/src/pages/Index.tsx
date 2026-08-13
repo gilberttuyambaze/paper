@@ -34,15 +34,6 @@ import {
 const HERO_IMAGE = '/assets/illustrations/landing.jpg';
 const COLLAB_IMAGE = '/assets/illustrations/peer-collaboration.svg';
 
-const COLLEGES = [
-  'College of Science and Technology',
-  'College of Arts and Social Sciences',
-  'College of Business and Economics',
-  'College of Medicine and Health Sciences',
-  'College of Agriculture and Veterinary Medicine',
-  'College of Education',
-];
-
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
 
 function VerificationBadge({ status }: { status: string }) {
@@ -115,6 +106,7 @@ export default function HomePage() {
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [papers, setPapers] = useState<Paper[]>([]);
+  const colleges = Array.from(new Set(papers.map((paper) => paper.college).filter(Boolean))).sort();
   const [personalized, setPersonalized] = useState<PersonalizedRecommendationsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [personalizedLoading, setPersonalizedLoading] = useState(false);
@@ -500,7 +492,7 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <h2 className="theme-title mb-6 text-2xl font-bold">Browse by College</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {COLLEGES.map((college) => (
+          {colleges.map((college) => (
             <Link key={college} to={`/past-papers?college=${encodeURIComponent(college)}`} className="block">
               <Card className="theme-panel border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md">
                 <CardContent className="p-4 flex items-center justify-between">

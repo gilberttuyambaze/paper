@@ -54,9 +54,25 @@ def do_run_migrations(connection):
 
 
 async def run_migrations_online():
+    # Ensure the URL is suitable for SQLAlchemy's async engine. If the configured
+    # URL uses the 'postgresql://' scheme, prefer the asyncpg dialect so the
+    # async engine can load an async driver. Do not modify other schemes.
+    raw_url = config.get_main_option("sqlalchemy.url") or ""
+    if raw_url.startswith("postgresql://") and "+asyncpg" not in raw_url:
+        async_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    else:
+        async_url = raw_url
+
+    connect_args = {}
+    # For asyncpg behind pgbouncer, prepared statements can cause errors;
+    # setting statement_cache_size=0 disables prepared statement caching.
+    if async_url.startswith("postgresql+asyncpg://"):
+        connect_args = {"statement_cache_size": 0}
+
     connectable = create_async_engine(
-        config.get_main_option("sqlalchemy.url"),
+        async_url,
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:

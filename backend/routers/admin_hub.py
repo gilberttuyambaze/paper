@@ -16,8 +16,11 @@ from models.papers import Papers
 from models.reports import Reports
 from models.solutions import Solutions
 from models.user_profiles import User_profiles
+from models.academic_programme_submissions import AcademicProgrammeAlias, AcademicProgrammeSubmission
+from services.academic_taxonomy import NODES
 from routers.notifications import create_notification
 from schemas.auth import UserResponse
+from services.programme_discovery import find_programme_matches
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,10 @@ class AdminReportUpdateRequest(BaseModel):
 class AdminRoleRequestReviewRequest(BaseModel):
     action: str
 
+class ProgrammeCandidateReviewRequest(BaseModel):
+    action: str
+    programme_id: Optional[str] = None
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -80,6 +87,126 @@ def _normalize_text(value: Optional[str]) -> Optional[str]:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+@router.get("/programme-candidates")
+async def list_programme_candidates(_current_user: UserResponse = Depends(get_management_user), db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(AcademicProgrammeSubmission.normalized_programme_name, AcademicProgrammeSubmission.campus_id, AcademicProgrammeSubmission.college_id, AcademicProgrammeSubmission.school_id, func.count(AcademicProgrammeSubmission.id).label("occurrences")).where(AcademicProgrammeSubmission.status.notin_(["rejected", "merged"])).group_by(AcademicProgrammeSubmission.normalized_programme_name, AcademicProgrammeSubmission.campus_id, AcademicProgrammeSubmission.college_id, AcademicProgrammeSubmission.school_id).order_by(desc("occurrences")))).all()
+    return {"items": [{"normalized_programme_name": row.normalized_programme_name, "campus_id": row.campus_id, "college_id": row.college_id, "school_id": row.school_id, "occurrences": row.occurrences} for row in rows]}
+
+
+@router.get("/programme-candidates/detailed")
+async def list_programme_candidates_detailed(_current_user: UserResponse = Depends(get_management_user), db: AsyncSession = Depends(get_db)):
+    # Aggregate submissions and include a best-match recommendation using the matching service
+    rows = (await db.execute(select(AcademicProgrammeSubmission.normalized_programme_name, AcademicProgrammeSubmission.campus_id, AcademicProgrammeSubmission.college_id, AcademicProgrammeSubmission.school_id, func.count(AcademicProgrammeSubmission.id).label("occurrences")).where(AcademicProgrammeSubmission.status.notin_("rejected")).group_by(AcademicProgrammeSubmission.normalized_programme_name, AcademicProgrammeSubmission.campus_id, AcademicProgrammeSubmission.college_id, AcademicProgrammeSubmission.school_id).order_by(desc("occurrences")))).all()
+    items = []
+    for row in rows:
+        normalized = row.normalized_programme_name
+        campus_id = row.campus_id
+        college_id = row.college_id
+        school_id = row.school_id
+        # Use the discovery matcher to find best candidates for this normalized label
+        try:
+            matches = await find_programme_matches(db, institution_id="ur", campus_id=campus_id, college_id=college_id, school_id=school_id, raw_name=normalized)
+        except Exception:
+            matches = []
+        best = matches[0] if matches else None
+        items.append({
+            "normalized_programme_name": normalized,
+            "campus_id": campus_id,
+            "college_id": college_id,
+            "school_id": school_id,
+            "occurrences": row.occurrences,
+            "best_match": best,
+            "matches": matches,
+        })
+    return {"items": items}
+
+
+@router.get("/programme-candidates/{normalized}/submissions")
+async def get_candidate_submissions(normalized: str, _current_user: UserResponse = Depends(get_management_user), db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(AcademicProgrammeSubmission).where(AcademicProgrammeSubmission.normalized_programme_name == normalized))).scalars().all()
+    items = [
+        {
+            "id": r.id,
+            "raw_programme_name": r.raw_programme_name,
+            "normalized_programme_name": r.normalized_programme_name,
+            "campus_id": r.campus_id,
+            "college_id": r.college_id,
+            "school_id": r.school_id,
+            "submitted_by_user_id": None if r.submitted_by_user_id is None else str(r.submitted_by_user_id),
+            "status": r.status,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
+        }
+        for r in rows
+    ]
+    return {"items": items}
+
+
+class VerifyAliasRequest(BaseModel):
+    normalized_programme_name: str
+    campus_id: str
+    college_id: str
+    school_id: str
+    programme_id: str
+
+
+@router.post("/programme-candidates/verify-alias")
+async def verify_programme_alias(payload: VerifyAliasRequest, current_user: UserResponse = Depends(get_management_user), db: AsyncSession = Depends(get_db)):
+    # Ensure target programme exists
+    if payload.programme_id not in NODES:
+        raise HTTPException(400, "Unknown official programme")
+    # Prevent duplicate verified alias for same normalized alias + programme
+    existing = (await db.execute(select(AcademicProgrammeAlias).where(AcademicProgrammeAlias.normalized_alias == payload.normalized_programme_name))).scalars().first()
+    if existing:
+        raise HTTPException(409, "An alias for this normalized name already exists")
+    alias = AcademicProgrammeAlias(programme_id=payload.programme_id, alias=payload.normalized_programme_name, normalized_alias=payload.normalized_programme_name, source="admin_verified", verified_by=str(current_user.id), created_at=_utcnow())
+    db.add(alias)
+    await db.commit(); await db.refresh(alias)
+    return {"id": alias.id, "programme_id": alias.programme_id, "normalized_alias": alias.normalized_alias}
+
+
+class RejectCandidatesRequest(BaseModel):
+    normalized_programme_name: str
+    campus_id: str
+    college_id: str
+    school_id: str
+
+
+@router.post("/programme-candidates/reject")
+async def reject_programme_candidates(payload: RejectCandidatesRequest, current_user: UserResponse = Depends(get_management_user), db: AsyncSession = Depends(get_db)):
+    # Mark grouped submissions as rejected for this normalized label and context
+    await db.execute(
+        select(AcademicProgrammeSubmission).where(
+            AcademicProgrammeSubmission.normalized_programme_name == payload.normalized_programme_name,
+            AcademicProgrammeSubmission.campus_id == payload.campus_id,
+            AcademicProgrammeSubmission.college_id == payload.college_id,
+            AcademicProgrammeSubmission.school_id == payload.school_id,
+        )
+    )
+    await db.execute(
+        "UPDATE academic_programme_submissions SET status = :status, updated_at = :now WHERE normalized_programme_name = :name AND campus_id = :campus AND college_id = :college AND school_id = :school",
+        {"status": "rejected", "now": _utcnow(), "name": payload.normalized_programme_name, "campus": payload.campus_id, "college": payload.college_id, "school": payload.school_id},
+    )
+    await db.commit()
+    return {"status": "rejected"}
+
+@router.post("/programme-submissions/{submission_id}/review")
+async def review_programme_submission(submission_id: int, payload: ProgrammeCandidateReviewRequest, current_user: UserResponse = Depends(get_management_user), db: AsyncSession = Depends(get_db)):
+    submission = await db.get(AcademicProgrammeSubmission, submission_id)
+    if not submission: raise HTTPException(404, "Programme submission not found")
+    if payload.action not in {"verify", "reject", "map", "merge"}: raise HTTPException(400, "Invalid review action")
+    if payload.action in {"map", "merge"}:
+        if not payload.programme_id or payload.programme_id not in NODES: raise HTTPException(400, "A verified taxonomy programme is required")
+        submission.accepted_programme_id = payload.programme_id
+        submission.status = "merged" if payload.action == "merge" else "verified"
+        alias = AcademicProgrammeAlias(programme_id=payload.programme_id, alias=submission.raw_programme_name, normalized_alias=submission.normalized_programme_name, source="admin_review", verified_by=str(current_user.id), created_at=_utcnow())
+        db.add(alias)
+    else:
+        submission.status = "candidate" if payload.action == "verify" else "rejected"
+    submission.updated_at = _utcnow()
+    await db.commit(); await db.refresh(submission)
+    return {"id": submission.id, "status": submission.status, "programme_id": submission.accepted_programme_id}
 
 
 def _serialize_user(profile: User_profiles, user: Optional[User]) -> dict:

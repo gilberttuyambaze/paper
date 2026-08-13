@@ -17,26 +17,9 @@ import {
 import { Label } from '@/components/ui/label';
 import { Upload as UploadIcon, FileText, ArrowLeft, CheckCircle, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-
-const COLLEGES = [
-  'College of Science and Technology',
-  'College of Arts and Social Sciences',
-  'College of Business and Economics',
-  'College of Medicine and Health Sciences',
-  'College of Agriculture and Veterinary Medicine',
-  'College of Education',
-];
+import AcademicContextFields, { type AcademicContextValue } from '@/components/AcademicContextFields';
 
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
-
-const DEPARTMENTS: Record<string, string[]> = {
-  'College of Science and Technology': ['Computer Science', 'Mathematics', 'Physics', 'Civil Engineering', 'Electrical Engineering', 'Mechanical Engineering'],
-  'College of Arts and Social Sciences': ['Political Science', 'History', 'Journalism', 'Social Work', 'Law'],
-  'College of Business and Economics': ['Accounting', 'Finance', 'Marketing', 'Economics', 'Management'],
-  'College of Medicine and Health Sciences': ['Medicine', 'Pharmacy', 'Nursing', 'Public Health', 'Dentistry'],
-  'College of Agriculture and Veterinary Medicine': ['Agriculture', 'Veterinary Medicine', 'Food Science', 'Forestry'],
-  'College of Education': ['Educational Psychology', 'Curriculum Studies', 'Early Childhood Education', 'Science Education'],
-};
 
 const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018];
 const CUSTOM_COURSE_OPTION = '__custom__';
@@ -218,6 +201,8 @@ export default function UploadPage() {
   const [courseName, setCourseName] = useState('');
   const [college, setCollege] = useState('');
   const [department, setDepartment] = useState('');
+  const [academic, setAcademic] = useState<AcademicContextValue>({ institution_id: 'ur', campus_id: '', college_id: '', school_id: '', programme_id: '' });
+  const [programmeNameOther, setProgrammeNameOther] = useState('');
   const [year, setYear] = useState('');
   const [paperType, setPaperType] = useState('');
   const [lecturer, setLecturer] = useState('');
@@ -278,6 +263,9 @@ export default function UploadPage() {
         fetchAllPapers({ sort: '-created_at', limit: 200 }),
       ]);
       setProfile(profileData);
+      if (profileData?.campus_id) setAcademic({ institution_id: profileData.institution_id || 'ur', campus_id: profileData.campus_id || '', college_id: profileData.college_id || '', school_id: profileData.school_id || '', programme_id: profileData.programme_id || '' });
+      if (profileData?.college_name) setCollege(profileData.college_name);
+      if (profileData?.department_name) setDepartment(profileData.department_name);
       setPaperCatalog(paperData.items);
     } catch (error) {
       console.error('Failed to load upload helpers:', error);
@@ -508,7 +496,8 @@ export default function UploadPage() {
     e.preventDefault();
     if (!user) return;
 
-    if (!title || !courseCode || !courseName || !college || !department || !year || !paperType) {
+    const hasStructuredContext = Boolean(academic.campus_id && academic.college_id && academic.school_id);
+    if (!title || !courseCode || !courseName || (!hasStructuredContext && (!college || !department)) || !year || !paperType) {
       toast.error('Please fill in all required fields');
       return;
     }
@@ -569,6 +558,8 @@ export default function UploadPage() {
         description: description || undefined,
         file_key: fileKey || undefined,
         solution_key: solutionKey || undefined,
+        ...academic,
+        programme_name_other: academic.programme_id === 'other' ? programmeNameOther : undefined,
       });
 
       setUploadedPaper(createdPaper);
@@ -826,33 +817,16 @@ export default function UploadPage() {
               </div>
             )}
 
-            {/* College & Department */}
+            <AcademicContextFields value={academic} onChange={setAcademic} otherName={programmeNameOther} onOtherNameChange={setProgrammeNameOther} title="Academic context" paper submissionSource="paper_upload" />
+            {/* Legacy fallback for material outside the verified catalogue. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label className="theme-form-label">College *</Label>
-                <Select value={college} onValueChange={(val) => { setCollege(val); setDepartment(''); }}>
-                  <SelectTrigger className="theme-form-input mt-1">
-                    <SelectValue placeholder="Select College" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {COLLEGES.map((c) => (
-                      <SelectItem key={c} value={c}>{c.replace('College of ', '')}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="theme-form-label">Legacy college {academic.college_id ? '(optional)' : '*'}</Label>
+                <Input value={college} onChange={(event) => setCollege(event.target.value)} placeholder="Only if not represented above" className="theme-form-input mt-1" />
               </div>
               <div>
-                <Label className="theme-form-label">Department *</Label>
-                <Select value={department} onValueChange={setDepartment} disabled={!college}>
-                  <SelectTrigger className="theme-form-input mt-1">
-                    <SelectValue placeholder="Select Department" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(DEPARTMENTS[college] || []).map((d) => (
-                      <SelectItem key={d} value={d}>{d}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="theme-form-label">Legacy department {academic.school_id ? '(optional)' : '*'}</Label>
+                <Input value={department} onChange={(event) => setDepartment(event.target.value)} placeholder="Only if not represented above" className="theme-form-input mt-1" />
               </div>
             </div>
 

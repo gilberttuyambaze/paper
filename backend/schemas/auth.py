@@ -51,6 +51,13 @@ class RegisterRequest(BaseModel):
     phone_number: Optional[str] = None
     college_name: Optional[str] = None
     department_name: Optional[str] = None
+    institution_id: Optional[str] = None
+    campus_id: Optional[str] = None
+    college_id: Optional[str] = None
+    school_id: Optional[str] = None
+    academic_department_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    programme_name_other: Optional[str] = Field(default=None, max_length=180)
     year_of_study: Optional[str] = None
     bio: Optional[str] = None
 

@@ -11,6 +11,7 @@ from dependencies.auth import get_current_user
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from models.auth import User
+from models.user_profiles import User_profiles
 from schemas.auth import (
     FirebaseTokenExchangeRequest,
     GenericMessageResponse,
@@ -26,8 +27,12 @@ from schemas.auth import (
     UserResponse,
 )
 from services.auth import AccountLinkRequiredError, AuthService
+from services.academic_taxonomy import context_names, validate_context
+from services.programme_discovery import record_submission
+from services.programme_discovery import normalize_programme_name
 from services.mailer import send_account_created_email, send_password_reset_email, should_expose_password_reset_links
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
@@ -112,6 +117,11 @@ async def register_user(payload: RegisterRequest, db: AsyncSession = Depends(get
     """Create a new user account and return an app token."""
     auth_service = AuthService(db)
     try:
+        validate_context(payload.institution_id, payload.campus_id, payload.college_id, payload.school_id, payload.programme_id, payload.academic_department_id)
+        if payload.programme_id == "other":
+            if not payload.programme_name_other: raise ValueError("Enter your programme name")
+            normalize_programme_name(payload.programme_name_other)
+        names = context_names(payload.campus_id, payload.college_id, payload.school_id, payload.programme_id)
         user = await auth_service.create_user_with_password(
             payload.email,
             payload.name,
@@ -123,12 +133,22 @@ async def register_user(payload: RegisterRequest, db: AsyncSession = Depends(get
                 "university_name": payload.university_name,
                 "ur_student_code": payload.ur_student_code,
                 "phone_number": payload.phone_number,
-                "college_name": payload.college_name,
-                "department_name": payload.department_name,
+                "college_name": names["college_name"] or payload.college_name,
+                "department_name": names["department_name"] or payload.department_name,
+                "institution_id": payload.institution_id, "campus_id": payload.campus_id, "college_id": payload.college_id,
+                "school_id": payload.school_id, "academic_department_id": payload.academic_department_id, "programme_id": payload.programme_id,
+                "programme_name_other": payload.programme_name_other,
                 "year_of_study": payload.year_of_study,
                 "bio": payload.bio,
             },
         )
+        if payload.programme_id == "other" and payload.programme_name_other:
+            # Registration keeps the unverified text separate from the official taxonomy.
+            submission = await record_submission(db, user_id=str(user.id), institution_id=payload.institution_id or "ur", campus_id=payload.campus_id, college_id=payload.college_id, school_id=payload.school_id, raw_name=payload.programme_name_other)
+            profile = (await db.execute(select(User_profiles).where(User_profiles.user_id == str(user.id)))).scalar_one_or_none()
+            if profile:
+                profile.programme_submission_id = submission.id; profile.programme_name_normalized = submission.normalized_programme_name; profile.academic_programme_status = submission.status
+                await db.commit()
     except ValueError as exc:
         message = str(exc)
         code = "email_already_registered" if "already in use" in message.lower() else "registration_validation_failed"

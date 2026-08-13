@@ -16,6 +16,7 @@ import {
   saveDocumentOffline,
   getOfflineDocumentUrl,
   getStorageDownloadUrl,
+  fetchAcademicTaxonomy,
   Paper,
   Comment,
   Solution,
@@ -110,10 +111,17 @@ export default function PaperDetails() {
   const [offlinePaperUrl, setOfflinePaperUrl] = useState<string | null>(null);
   const [offlineSolutionUrl, setOfflineSolutionUrl] = useState<string | null>(null);
   const [uploaderImageUrl, setUploaderImageUrl] = useState<string | null>(null);
+  const [academicNames, setAcademicNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (id) loadPaper(parseInt(id));
   }, [id]);
+
+  useEffect(() => {
+    void fetchAcademicTaxonomy().then((taxonomy) => {
+      setAcademicNames(Object.fromEntries(taxonomy.nodes.map((node) => [node.id, node.name])));
+    }).catch(() => setAcademicNames({}));
+  }, []);
 
   useEffect(() => {
     if (!paper?.id || !user) return;
@@ -453,6 +461,15 @@ export default function PaperDetails() {
                 <FileText className="theme-section-icon h-4 w-4" />
                 {paper.department}
               </p>
+              {paper.campus_id && academicNames[paper.campus_id] && (
+                <div className="theme-soft-panel rounded-xl p-3 text-sm">
+                  <p>{academicNames[paper.campus_id]}</p>
+                  {paper.college_id && academicNames[paper.college_id] && <p>{academicNames[paper.college_id]}</p>}
+                  {paper.school_id && academicNames[paper.school_id] && <p>{academicNames[paper.school_id]}</p>}
+                  {paper.programme_id && paper.programme_id !== 'other' && academicNames[paper.programme_id] && <p>{academicNames[paper.programme_id]}</p>}
+                  {paper.programme_id === 'other' && <p>Programme not listed</p>}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               {paper.lecturer && (

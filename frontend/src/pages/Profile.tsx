@@ -2,6 +2,7 @@ import { ChangeEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   fetchUserProfile,
+  fetchAcademicTaxonomy,
   getStorageDownloadUrl,
   updateUserProfile,
   uploadFileObject,
@@ -19,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { BadgeCheck, Camera, Eye, EyeOff, Pencil, School, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import AvatarFallback from '../components/AvatarFallback';
+import AcademicContextFields from '../components/AcademicContextFields';
 import {
   buildProfilePictureObjectKey,
   createEmptyProfileForm,
@@ -61,6 +63,8 @@ function profileFormFromProfile(profile: UserProfile, fallbackName: string): Pro
     phone_number: profile.phone_number || '',
     college_name: profile.college_name || '',
     department_name: profile.department_name || '',
+    institution_id: profile.institution_id || 'ur', campus_id: profile.campus_id || '', college_id: profile.college_id || '', school_id: profile.school_id || '', programme_id: profile.programme_id || '',
+    programme_name_other: profile.programme_name_other || '',
     year_of_study: profile.year_of_study || '',
     bio: profile.bio || '',
   };
@@ -77,11 +81,13 @@ export default function ProfilePage() {
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileImageFile, setProfileImageFile] = useState<File | null>(null);
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const [profileImageUrlInput, setProfileImageUrlInput] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [academicNames, setAcademicNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!user) {
@@ -94,10 +100,22 @@ export default function ProfilePage() {
   }, [user]);
 
   useEffect(() => {
+    void fetchAcademicTaxonomy().then((taxonomy) => setAcademicNames(Object.fromEntries(taxonomy.nodes.map((node) => [node.id, node.name])))).catch(() => setAcademicNames({}));
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     if (!profile?.profile_picture_key) {
       setProfileImageUrl(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // If profile_picture_key is an external URL, use it directly.
+    if (/^https?:\/\//i.test(profile.profile_picture_key)) {
+      setProfileImageUrl(profile.profile_picture_key);
       return () => {
         cancelled = true;
       };
@@ -236,6 +254,9 @@ export default function ProfilePage() {
         phone_number: normalizeOptionalField(profileForm.phone_number),
         college_name: normalizeOptionalField(profileForm.college_name),
         department_name: normalizeOptionalField(profileForm.department_name),
+        institution_id: profileForm.campus_id ? 'ur' : undefined,
+        campus_id: normalizeOptionalField(profileForm.campus_id), college_id: normalizeOptionalField(profileForm.college_id), school_id: normalizeOptionalField(profileForm.school_id), programme_id: normalizeOptionalField(profileForm.programme_id),
+        programme_name_other: profileForm.programme_id === 'other' ? normalizeOptionalField(profileForm.programme_name_other) : undefined,
         year_of_study: normalizeOptionalField(profileForm.year_of_study),
         bio: normalizeOptionalField(profileForm.bio),
       };
@@ -251,6 +272,8 @@ export default function ProfilePage() {
       if (profileImageFile) {
         const objectKey = buildProfilePictureObjectKey(user.id, profileImageFile.name);
         updatePayload.profile_picture_key = await uploadFileObject('profiles', objectKey, profileImageFile);
+      } else if (profileImageUrlInput.trim()) {
+        updatePayload.profile_picture_key = profileImageUrlInput.trim();
       }
 
       const updatedProfile = await updateUserProfile(updatePayload);
@@ -393,8 +416,17 @@ export default function ProfilePage() {
                   type="file"
                   accept="image/*"
                   onChange={handleProfileImageChange}
-                  className="theme-form-input mt-2 h-11 rounded-xl"
+                  className="theme-form-input mt-2 h-11 rounded-xl cursor-pointer"
                 />
+                <div className="mt-2 flex items-center gap-2">
+                  <Input placeholder="Or paste image URL" value={profileImageUrlInput} onChange={(e) => setProfileImageUrlInput(e.target.value)} className="theme-form-input h-11 rounded-xl" />
+                  <Button type="button" onClick={() => {
+                    const url = profileImageUrlInput.trim();
+                    if (!url) return;
+                    setProfileImageFile(null);
+                    setProfileImagePreview(url);
+                  }}>Use URL</Button>
+                </div>
                 <p className="theme-muted mt-2 text-xs">
                   Upload a photo or logo to make your profile easier to recognize.
                 </p>
@@ -423,7 +455,10 @@ export default function ProfilePage() {
               />
               <ReadOnlyField label="UR student code" value={profile.ur_student_code} />
               <ReadOnlyField label="Phone number" value={profile.phone_number} />
+              {profile.campus_id && <ReadOnlyField label="Campus" value={academicNames[profile.campus_id]} />}
               <ReadOnlyField label="College" value={profile.college_name} />
+              {profile.school_id && <ReadOnlyField label="School" value={academicNames[profile.school_id]} />}
+              {profile.programme_id && <ReadOnlyField label="Academic programme" value={profile.programme_id === 'other' ? 'Programme not listed' : academicNames[profile.programme_id]} />}
               <ReadOnlyField label="Department" value={profile.department_name} />
               <ReadOnlyField label="Year of study" value={profile.year_of_study} />
               <div className="md:col-span-2">
@@ -515,25 +550,7 @@ export default function ProfilePage() {
                 />
               </div>
 
-              <div>
-                <Label htmlFor="college_name" className="theme-form-label">College</Label>
-                <Input
-                  id="college_name"
-                  value={profileForm.college_name}
-                  onChange={(event) => updateField('college_name', event.target.value)}
-                  className="theme-form-input mt-2 h-11 rounded-xl"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="department_name" className="theme-form-label">Department</Label>
-                <Input
-                  id="department_name"
-                  value={profileForm.department_name}
-                  onChange={(event) => updateField('department_name', event.target.value)}
-                  className="theme-form-input mt-2 h-11 rounded-xl"
-                />
-              </div>
+              <div className="sm:col-span-2"><AcademicContextFields value={profileForm} onChange={(academic) => setProfileForm((current) => ({ ...current, ...academic }))} otherName={profileForm.programme_name_other} onOtherNameChange={(programme_name_other) => updateField('programme_name_other', programme_name_other)} submissionSource="profile" /></div>
 
               <div>
                 <Label className="theme-form-label">Year of study</Label>

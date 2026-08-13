@@ -91,6 +91,13 @@ async def ensure_user_profile_record(
     phone_number = pick_text("phone_number", profile.phone_number if profile else None)
     college_name = pick_text("college_name", profile.college_name if profile else None)
     department_name = pick_text("department_name", profile.department_name if profile else None)
+    institution_id = pick_text("institution_id", profile.institution_id if profile else None)
+    campus_id = pick_text("campus_id", profile.campus_id if profile else None)
+    college_id = pick_text("college_id", profile.college_id if profile else None)
+    school_id = pick_text("school_id", profile.school_id if profile else None)
+    academic_department_id = pick_text("academic_department_id", profile.academic_department_id if profile else None)
+    programme_id = pick_text("programme_id", profile.programme_id if profile else None)
+    programme_name_other = pick_text("programme_name_other", profile.programme_name_other if profile else None)
     year_of_study = pick_text("year_of_study", profile.year_of_study if profile else None)
     bio = pick_text("bio", profile.bio if profile else None)
     requested_role = pick_text("requested_role", profile.requested_role if profile else None)
@@ -185,6 +192,8 @@ async def ensure_user_profile_record(
         profile.phone_number = phone_number
         profile.college_name = college_name
         profile.department_name = department_name
+        profile.institution_id = institution_id; profile.campus_id = campus_id; profile.college_id = college_id; profile.school_id = school_id; profile.academic_department_id = academic_department_id; profile.programme_id = programme_id
+        profile.programme_name_other = programme_name_other
         profile.year_of_study = year_of_study
         profile.bio = bio
         profile.requested_role = requested_role
@@ -208,6 +217,8 @@ async def ensure_user_profile_record(
             phone_number=phone_number,
             college_name=college_name,
             department_name=department_name,
+            institution_id=institution_id, campus_id=campus_id, college_id=college_id, school_id=school_id, academic_department_id=academic_department_id, programme_id=programme_id,
+            programme_name_other=programme_name_other,
             year_of_study=year_of_study,
             bio=bio,
             requested_role=requested_role,

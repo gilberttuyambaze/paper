@@ -1,4 +1,5 @@
 aiosqlite
+alembic
 asyncpg
 cryptography
 fastapi

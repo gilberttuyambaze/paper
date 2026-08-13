@@ -20,6 +20,8 @@ from models.user_profiles import User_profiles
 from routers.notifications import create_notification
 from schemas.auth import UserResponse
 from services.auth import ensure_user_profile_record
+from services.academic_taxonomy import context_names, validate_context
+from services.programme_discovery import normalize_programme_name, record_submission
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +59,8 @@ class CommunityPaperCreate(BaseModel):
     title: str
     course_code: str
     course_name: str
-    college: str
-    department: str
+    college: Optional[str] = None
+    department: Optional[str] = None
     year: int
     paper_type: str
     lecturer: Optional[str] = None
@@ -69,6 +71,16 @@ class CommunityPaperCreate(BaseModel):
     download_count: int = 0
     report_count: int = 0
     is_hidden: bool = False
+    institution_id: Optional[str] = None
+    campus_id: Optional[str] = None
+    college_id: Optional[str] = None
+    school_id: Optional[str] = None
+    academic_department_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    semester: Optional[str] = None
+    examination_session: Optional[str] = None
+    programme_name_other: Optional[str] = None
+    academic_programme_status: Optional[str] = None
 
 
 class UserProfileResponse(BaseModel):
@@ -87,6 +99,15 @@ class UserProfileResponse(BaseModel):
     phone_number: Optional[str] = None
     college_name: Optional[str] = None
     department_name: Optional[str] = None
+    institution_id: Optional[str] = None
+    campus_id: Optional[str] = None
+    college_id: Optional[str] = None
+    school_id: Optional[str] = None
+    academic_department_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    programme_name_other: Optional[str] = None
+    academic_programme_status: Optional[str] = None
+    programme_name_normalized: Optional[str] = None
     year_of_study: Optional[str] = None
     bio: Optional[str] = None
     requested_role: Optional[str] = None
@@ -129,6 +150,13 @@ class UserProfileUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
     college_name: Optional[str] = None
     department_name: Optional[str] = None
+    institution_id: Optional[str] = None
+    campus_id: Optional[str] = None
+    college_id: Optional[str] = None
+    school_id: Optional[str] = None
+    academic_department_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    programme_name_other: Optional[str] = None
     year_of_study: Optional[str] = None
     bio: Optional[str] = None
 
@@ -469,7 +497,21 @@ async def update_my_profile(
         raise HTTPException(status_code=404, detail="User not found")
 
     try:
-        profile = await ensure_user_profile_record(db, user, payload.model_dump(exclude_unset=True))
+        data = payload.model_dump(exclude_unset=True)
+        current = await _get_profile(db, str(current_user.id))
+        ids = {key: data.get(key, getattr(current, key, None)) for key in ("institution_id", "campus_id", "college_id", "school_id", "programme_id")}
+        validate_context(**ids, academic_department_id=data.get("academic_department_id", getattr(current, "academic_department_id", None)))
+        if data.get("programme_id", getattr(current, "programme_id", None)) == "other":
+            other_name = data.get("programme_name_other", getattr(current, "programme_name_other", None))
+            if not other_name: raise ValueError("Enter your programme name")
+            normalize_programme_name(other_name)
+        if any(ids.values()): data.update({k: v for k, v in context_names(ids["campus_id"], ids["college_id"], ids["school_id"], ids["programme_id"]).items() if v})
+        profile = await ensure_user_profile_record(db, user, data)
+        if profile.programme_id == "other" and profile.programme_name_other:
+            submission = await record_submission(db, user_id=str(current_user.id), institution_id=profile.institution_id or "ur", campus_id=profile.campus_id, college_id=profile.college_id, school_id=profile.school_id, raw_name=profile.programme_name_other)
+            profile.programme_submission_id = submission.id
+            profile.programme_name_normalized = submission.normalized_programme_name
+            profile.academic_programme_status = submission.status
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -527,14 +569,25 @@ async def create_paper(
     current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    validate_context(payload.institution_id, payload.campus_id, payload.college_id, payload.school_id, payload.programme_id, payload.academic_department_id)
+    if payload.programme_id == "other":
+        if not payload.programme_name_other: raise HTTPException(400, "Enter your programme name")
+        normalize_programme_name(payload.programme_name_other)
     profile = await _ensure_profile(db, current_user)
+    names = context_names(payload.campus_id, payload.college_id, payload.school_id, payload.programme_id)
+    if not (names["college_name"] or payload.college) or not (names["department_name"] or payload.department):
+        raise HTTPException(status_code=400, detail="A complete academic context or legacy college and department is required")
+    submission = None
+    if payload.programme_id == "other" and payload.programme_name_other:
+        submission = await record_submission(db, user_id=str(current_user.id), institution_id=payload.institution_id or "ur", campus_id=payload.campus_id, college_id=payload.college_id, school_id=payload.school_id, raw_name=payload.programme_name_other)
     paper = Papers(
         user_id=str(current_user.id),
         title=payload.title,
         course_code=payload.course_code,
         course_name=payload.course_name,
-        college=payload.college,
-        department=payload.department,
+        college=names["college_name"] or payload.college,
+        department=names["department_name"] or payload.department,
+        institution_id=payload.institution_id, campus_id=payload.campus_id, college_id=payload.college_id, school_id=payload.school_id, academic_department_id=payload.academic_department_id, programme_id=payload.programme_id, programme_submission_id=submission.id if submission else None, programme_name_other=payload.programme_name_other, programme_name_normalized=submission.normalized_programme_name if submission else None, academic_programme_status=submission.status if submission else None, semester=payload.semester, examination_session=payload.examination_session,
         year=payload.year,
         paper_type=payload.paper_type,
         lecturer=payload.lecturer,

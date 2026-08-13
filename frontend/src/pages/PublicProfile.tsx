@@ -45,6 +45,13 @@ export default function PublicProfilePage() {
       };
     }
 
+    if (/^https?:\/\//i.test(profile.profile_picture_key)) {
+      setProfileImageUrl(profile.profile_picture_key);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     void getStorageDownloadUrl('profiles', profile.profile_picture_key)
       .then((url) => {
         if (!cancelled) {

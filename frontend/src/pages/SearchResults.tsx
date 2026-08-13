@@ -26,15 +26,6 @@ import {
   X,
 } from 'lucide-react';
 
-const COLLEGES = [
-  'College of Science and Technology',
-  'College of Arts and Social Sciences',
-  'College of Business and Economics',
-  'College of Medicine and Health Sciences',
-  'College of Agriculture and Veterinary Medicine',
-  'College of Education',
-];
-
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
 const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
 
@@ -129,6 +120,7 @@ export default function SearchResults() {
     if (!college) return [];
     return Array.from(new Set(papers.filter((paper) => paper.college === college).map((paper) => paper.department))).sort();
   }, [papers, college]);
+  const colleges = useMemo(() => Array.from(new Set(papers.map((paper) => paper.college).filter(Boolean))).sort(), [papers]);
 
   const courses = useMemo(() => {
     return Array.from(
@@ -267,7 +259,7 @@ export default function SearchResults() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Colleges</SelectItem>
-                    {COLLEGES.map((item) => (
+                    {colleges.map((item) => (
                       <SelectItem key={item} value={item}>{item.replace('College of ', '')}</SelectItem>
                     ))}
                   </SelectContent>

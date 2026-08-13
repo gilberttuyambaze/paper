@@ -2,6 +2,10 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   fetchAdminRoleRequests,
+  fetchProgrammeCandidatesDetailed,
+  fetchProgrammeCandidateSubmissions,
+  verifyProgrammeCandidate,
+  rejectProgrammeCandidateGroup,
   deleteAdminUser,
   fetchAdminOverview,
   fetchAdminUsers,
@@ -13,6 +17,7 @@ import {
   type AdminOverview,
   type Paper,
   type UserProfile,
+  type ProgrammeCandidateItem,
 } from '../lib/client';
 import { authApi } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
@@ -177,6 +182,10 @@ export default function AdminPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [roleRequests, setRoleRequests] = useState<UserProfile[]>([]);
+  const [programmeCandidates, setProgrammeCandidates] = useState<ProgrammeCandidateItem[]>([]);
+  const [selectedCandidateSubmissions, setSelectedCandidateSubmissions] = useState<Array<any>>([]);
+  const [selectedCandidateName, setSelectedCandidateName] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [paperSearch, setPaperSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
@@ -466,6 +475,7 @@ export default function AdminPage() {
           <TabsTrigger value="role-requests">Role Requests ({overview?.stats.pending_role_requests || filteredRoleRequests.length})</TabsTrigger>
           <TabsTrigger value="reports">Reports ({overview?.recent_reports?.length || 0})</TabsTrigger>
           <TabsTrigger value="papers">Papers ({filteredPapers.length})</TabsTrigger>
+          <TabsTrigger value="programme-candidates">Programme Discovery</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -536,6 +546,84 @@ export default function AdminPage() {
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <Dialog open={detailsOpen} onOpenChange={(open) => setDetailsOpen(open)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Submissions for {selectedCandidateName}</DialogTitle>
+              <DialogDescription>Original submitted values (user identity hidden) and status.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              {selectedCandidateSubmissions.length === 0 ? <p className="theme-muted">No submissions found.</p> : selectedCandidateSubmissions.map((s) => (
+                <div key={s.id} className="theme-soft-panel p-2 rounded">
+                  <p className="theme-title text-sm">{s.raw_programme_name}</p>
+                  <p className="theme-muted text-xs">Normalized: {s.normalized_programme_name} · Status: {s.status} · Created: {s.created_at || 'n/a'}</p>
+                </div>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setDetailsOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <TabsContent value="programme-candidates">
+          <Card className="theme-panel">
+            <CardHeader>
+              <CardTitle className="theme-title flex items-center gap-2">Programme Discovery</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <p className="theme-muted text-sm">Aggregated unlisted programme submissions grouped by normalized value. Use these tools to verify aliases or reject noisy entries.</p>
+                <div>
+                  <Button onClick={async () => { try { setLoading(true); const res = await fetchProgrammeCandidatesDetailed(); setProgrammeCandidates(res.items); } finally { setLoading(false); } }}>Refresh candidates</Button>
+                </div>
+                {programmeCandidates.length === 0 ? (
+                  <p className="theme-muted">No programme candidates found.</p>
+                ) : (
+                  <div className="grid gap-4">
+                    {programmeCandidates.map((item: ProgrammeCandidateItem) => (
+                      <div key={`${item.normalized_programme_name}-${item.school_id}`} className="theme-soft-panel rounded-xl p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="theme-title">{item.normalized_programme_name}</p>
+                            <p className="theme-muted text-sm">Occurrences: {item.occurrences} · School: {item.school_id} · College: {item.college_id} · Campus: {item.campus_id}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            {item.best_match ? <Badge>{item.best_match.name} · {item.best_match.confidence}%</Badge> : null}
+                            <Button variant="outline" onClick={async () => {
+                              if (!confirm(`Verify alias for \"${item.normalized_programme_name}\" to the best match ${item.best_match?.name || ''}?`)) return;
+                              try {
+                                setLoading(true);
+                                const target = item.best_match?.id;
+                                if (!target) { alert('No recommended programme available'); return; }
+                                await verifyProgrammeCandidate({ normalized_programme_name: item.normalized_programme_name, campus_id: item.campus_id, college_id: item.college_id, school_id: item.school_id, programme_id: target });
+                                alert('Alias verified');
+                              } catch (e) { console.error(e); alert('Failed to verify alias'); } finally { setLoading(false); }
+                            }}>Verify Alias</Button>
+                            <Button variant="outline" onClick={async () => {
+                              try {
+                                setLoading(true);
+                                const res = await fetchProgrammeCandidateSubmissions(item.normalized_programme_name);
+                                setSelectedCandidateSubmissions(res.items || []);
+                                setSelectedCandidateName(item.normalized_programme_name);
+                                setDetailsOpen(true);
+                              } catch (e) { console.error(e); alert('Failed to load submissions'); } finally { setLoading(false); }
+                            }}>View Details</Button>
+                            <Button variant="destructive" onClick={async () => {
+                              if (!confirm(`Reject all submissions for \"${item.normalized_programme_name}\" in this context?`)) return;
+                              try { setLoading(true); await rejectProgrammeCandidateGroup({ normalized_programme_name: item.normalized_programme_name, campus_id: item.campus_id, college_id: item.college_id, school_id: item.school_id }); alert('Rejected'); } catch (e) { console.error(e); alert('Failed'); } finally { setLoading(false); }
+                            }}>Reject</Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
