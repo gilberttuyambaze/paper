@@ -63,6 +63,30 @@ class Settings(BaseSettings):
     google_drive_folder_id: Optional[str] = None
     google_service_account_json_base64: Optional[str] = None
 
+    # AI is optional. Keep keys server-only; a disabled or unconfigured provider
+    # falls back to the local paper-context responder in the study route.
+    ai_enabled: bool = False
+    ai_provider: str = "openai"
+    ai_fallback_provider: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_model: str = "gpt-4.1-mini"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_image_model: str = "gpt-image-1"
+    ai_timeout_seconds: float = 12
+    ai_max_output_tokens: int = 1024
+    ai_max_context_tokens: int = 12000
+    ai_max_requests_per_user_per_minute: int = 5
+    ai_compatible_base_url: Optional[str] = None
+    ai_compatible_api_key: Optional[str] = None
+    ai_compatible_model: Optional[str] = None
+    ai_compatible_embedding_model: Optional[str] = None
+    embedding_provider: str = "openai"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimension: int = 1536
+    vector_search_top_k: int = 5
+    hybrid_search_top_k: int = 40
+    rag_context_limit: int = 5
+
     class Config:
         case_sensitive = False
         extra = "ignore"

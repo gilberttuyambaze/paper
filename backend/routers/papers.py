@@ -7,12 +7,13 @@ from datetime import datetime, date
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from models.user_profiles import User_profiles
 from services.papers import PapersService
+from services.passage_indexing import PassageIndexService
 from dependencies.auth import get_current_user
 from schemas.auth import UserResponse
 
@@ -169,6 +170,47 @@ def _load_mock_papers(query_dict=None, sort=None, skip=0, limit=20):
 
 
 # ---------- Routes ----------
+@router.post("/{paper_id}/index")
+async def index_paper_passages(
+    paper_id: int,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    paper = await db.get(Papers, paper_id)
+    if not paper or paper.user_id != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return await PassageIndexService(db).index_paper(paper)
+
+
+@router.get("/{paper_id}/index-status")
+async def paper_index_status(
+    paper_id: int,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    paper = await db.get(Papers, paper_id)
+    if not paper or paper.user_id != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    from models.papers import PaperPassage
+    row = (await db.execute(select(func.count(PaperPassage.id), func.sum(case((PaperPassage.embedding_status == "ready", 1), else_=0))).where(PaperPassage.paper_id == paper_id))).one()
+    return {"paper_id": paper_id, "passages": row[0] or 0, "embedded": row[1] or 0}
+
+
+@router.get("/{paper_id}/questions")
+async def paper_questions(paper_id: int, current_user: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    paper = await db.get(Papers, paper_id)
+    if not paper or paper.user_id != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    from models.papers import PaperQuestion, QuestionClassification, QuestionTopic
+    questions = (await db.execute(select(PaperQuestion).where(PaperQuestion.paper_id == paper_id).order_by(PaperQuestion.page_start, PaperQuestion.question_number))).scalars().all()
+    items = []
+    for question in questions:
+        topics = (await db.execute(select(QuestionTopic).where(QuestionTopic.question_id == question.id))).scalars().all()
+        classification = (await db.execute(select(QuestionClassification).where(QuestionClassification.question_id == question.id).order_by(QuestionClassification.id.desc()).limit(1))).scalar_one_or_none()
+        items.append({"id": question.id, "number": question.question_number, "text": question.text, "page_start": question.page_start, "status": question.classification_status, "topics": [{"topic": topic.topic, "subtopic": topic.subtopic, "confidence": topic.confidence} for topic in topics], "types": classification.question_types.split(",") if classification and classification.question_types else [], "difficulty": classification.difficulty if classification else "Unknown", "difficulty_confidence": classification.difficulty_confidence if classification else None})
+    return {"items": items}
+
+
 @router.get("", response_model=PapersListResponse)
 async def query_paperss(
     query: str = Query(None, description="Query conditions (JSON string)"),

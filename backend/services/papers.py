@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.papers import Papers
 from services.storage import StorageService
+from services.passage_indexing import PassageIndexService
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,12 @@ class PapersService:
             self.db.add(obj)
             await self.db.commit()
             await self.db.refresh(obj)
+            try:
+                await PassageIndexService(self.db).index_paper(obj)
+            except Exception as index_error:
+                # A successful upload/paper record must never be rolled back by
+                # optional retrieval indexing.
+                logger.warning("Passage indexing failed for paper_id=%s: %s", obj.id, index_error)
             logger.info(f"Created papers with id: {obj.id}")
             return obj
         except Exception as e:

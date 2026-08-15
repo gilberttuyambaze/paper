@@ -62,7 +62,9 @@ class OpenAIProvider(AIProvider):
         self.default_model = default_model
         self.embedding_model = embedding_model
         self.timeout_seconds = timeout_seconds
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds)
+        # Endpoint-level fallbacks are faster and more useful than SDK retries
+        # for interactive study help, which has a strict response budget.
+        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds, max_retries=0)
 
     @staticmethod
     def _image_upload(image: str, index: int) -> io.BytesIO:

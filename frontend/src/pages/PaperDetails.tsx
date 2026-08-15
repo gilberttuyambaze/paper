@@ -57,6 +57,7 @@ import {
   Maximize2,
   WifiOff,
   Save,
+  LoaderCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AvatarFallback from '../components/AvatarFallback';
@@ -104,10 +105,14 @@ export default function PaperDetails() {
   const [reportOpen, setReportOpen] = useState(false);
   const [paperUrl, setPaperUrl] = useState<string | null>(null);
   const [solutionUrl, setSolutionUrl] = useState<string | null>(null);
+  const [paperPreviewLoading, setPaperPreviewLoading] = useState(false);
   const [pdfZoom, setPdfZoom] = useState(1);
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiMode, setAiMode] = useState<'explain' | 'summarize' | null>(null);
+  const [aiMode, setAiMode] = useState<'explain' | 'summarize' | 'question' | null>(null);
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiSource, setAiSource] = useState<string | null>(null);
+  const [aiFallbackReason, setAiFallbackReason] = useState<string | null>(null);
   const [offlinePaperUrl, setOfflinePaperUrl] = useState<string | null>(null);
   const [offlineSolutionUrl, setOfflineSolutionUrl] = useState<string | null>(null);
   const [uploaderImageUrl, setUploaderImageUrl] = useState<string | null>(null);
@@ -160,6 +165,7 @@ export default function PaperDetails() {
       setLoading(true);
       setPaperUrl(null);
       setSolutionUrl(null);
+      setPaperPreviewLoading(false);
       const cached = getCachedPaperListSnapshot();
       const cachedPaper = cached?.items.find((item) => item.id === paperId) || null;
       if (cachedPaper) {
@@ -205,6 +211,7 @@ export default function PaperDetails() {
   };
 
   const hydratePaperAssets = async (paperData: Paper) => {
+    setPaperPreviewLoading(Boolean(paperData.file_key));
     const tasks: Promise<void>[] = [];
 
     tasks.push(
@@ -222,6 +229,7 @@ export default function PaperDetails() {
     }
 
     await Promise.allSettled(tasks);
+    setPaperPreviewLoading(false);
   };
 
   const handleDownload = async () => {
@@ -362,13 +370,19 @@ export default function PaperDetails() {
       .filter((comment) => comment.parent_id === parentId)
       .sort((a, b) => (new Date(a.created_at || 0).getTime() || 0) - (new Date(b.created_at || 0).getTime() || 0));
 
-  const handleAIAction = async (action: 'explain' | 'summarize') => {
+  const handleAIAction = async (action: 'explain' | 'summarize' | 'question') => {
     if (!paper) return;
+    if (action === 'question' && !aiQuestion.trim()) {
+      toast.error('Write a question about this paper first.');
+      return;
+    }
     try {
       setAiLoading(true);
       setAiMode(action);
-      const response = await runStudyAI(paper.id, action);
+      const response = await runStudyAI(paper.id, action, action === 'question' ? aiQuestion.trim() : undefined);
       setAiResult(response.content);
+      setAiSource(response.model);
+      setAiFallbackReason(response.fallback_reason || null);
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'AI assistant is unavailable right now');
     } finally {
@@ -543,6 +557,14 @@ export default function PaperDetails() {
               </div>
               <DocumentPreview src={paperUrl || offlinePaperUrl} title={`${paper.title} paper preview`} minHeightClassName="min-h-[700px]" zoom={pdfZoom} />
             </div>
+          ) : (paperPreviewLoading || paper.file_key) ? (
+            <div className="document-preview-fetching mt-6 flex min-h-[280px] items-center justify-center rounded-xl border p-6" role="status" aria-live="polite">
+              <div className="max-w-sm text-center">
+                <LoaderCircle className="mx-auto h-10 w-10 animate-spin text-primary" aria-hidden="true" />
+                <p className="theme-title mt-4 font-semibold">Preparing your paper preview</p>
+                <p className="theme-muted mt-2 text-sm">We are working on the document preview. Larger files can take a little longer.</p>
+              </div>
+            </div>
           ) : (
             <div className="mt-6"><DocumentPreview title={`${paper.title} paper preview`} unavailableMessage="Paper preview is not available. Use the download button to view the full document." /></div>
           )}
@@ -566,13 +588,33 @@ export default function PaperDetails() {
                   Summarize Discussion
                 </Button>
               </div>
+              <div className="space-y-2">
+                <Textarea
+                  value={aiQuestion}
+                  onChange={(event) => setAiQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      void handleAIAction('question');
+                    }
+                  }}
+                  placeholder="Ask a question about this paper, its discussion, or available solutions..."
+                  rows={2}
+                  className="theme-form-input"
+                />
+                <Button type="button" variant="outline" onClick={() => handleAIAction('question')} disabled={aiLoading || !aiQuestion.trim()}>
+                  <Send className="mr-2 h-4 w-4" />
+                  Send question
+                </Button>
+              </div>
               <div className="theme-soft-panel p-4 text-sm">
                 <p className="theme-link-accent mb-3 text-xs font-semibold uppercase tracking-[0.2em]">
-                  {aiMode === 'summarize' ? 'Discussion Brief' : aiMode === 'explain' ? 'Study Guide' : 'AI Study Assistant'}
+                  {aiMode === 'summarize' ? 'Discussion Brief' : aiMode === 'explain' ? 'Study Guide' : aiMode === 'question' ? 'Paper Answer' : 'AI Study Assistant'}
                 </p>
                 {aiLoading ? <div className="whitespace-pre-wrap leading-6">Thinking...</div> : aiResult ? <div className="whitespace-pre-wrap leading-6">{aiResult}</div> : (
                   <div className="flex items-center gap-3 leading-6"><AcademicAiMark className="h-11 w-11 shrink-0" /><span>Use the AI assistant to get a study explanation or a summary of the current discussion and solutions.</span></div>
                 )}
+                {aiResult && aiSource === 'local-study-guide' && <p className="theme-muted mt-3 text-xs">{aiFallbackReason === 'rate_limited' ? 'Cloud AI is temporarily rate-limited. This answer uses the retrieved paper material instead.' : 'Using retrieved paper details, discussion, and available solutions because cloud AI is unavailable.'}</p>}
               </div>
             </CardContent>
           </Card>

@@ -246,6 +246,7 @@ export interface AdminOverview {
 export interface AIStudyResponse {
   content: string;
   model: string;
+  fallback_reason?: string | null;
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -369,7 +370,8 @@ function paperField(item: Paper, key: string): unknown {
 export async function uploadFileObject(
   bucketName: string,
   objectKey: string,
-  file: File
+  file: File,
+  onProgress?: (percentage: number) => void
 ): Promise<string> {
   const formData = new FormData();
   formData.append('bucket_name', bucketName);
@@ -380,6 +382,10 @@ export async function uploadFileObject(
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+    onUploadProgress: (event) => {
+      if (!event.total) return;
+      onProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    },
   });
 
   const storedObjectKey = response.data?.object_key as string | undefined;
@@ -388,6 +394,15 @@ export async function uploadFileObject(
   }
 
   return storedObjectKey;
+}
+
+export async function extractUploadPdfText(file: File): Promise<{ text: string; has_readable_text: boolean }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await apiClient.post(apiUrl('/api/v1/storage/analyze-pdf'), formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data as { text: string; has_readable_text: boolean };
 }
 
 export async function getStorageDownloadUrl(
@@ -853,8 +868,8 @@ export async function markAllNotificationsRead(): Promise<{ updated: number }> {
   return response.data as { updated: number };
 }
 
-export async function runStudyAI(paperId: number, action: 'explain' | 'summarize'): Promise<AIStudyResponse> {
-  const response = await apiClient.post(apiUrl(`/api/v1/study-ai/papers/${paperId}`), { action });
+export async function runStudyAI(paperId: number, action: 'explain' | 'summarize' | 'question', question?: string): Promise<AIStudyResponse> {
+  const response = await apiClient.post(apiUrl(`/api/v1/study-ai/papers/${paperId}`), { action, question });
   return response.data as AIStudyResponse;
 }
 

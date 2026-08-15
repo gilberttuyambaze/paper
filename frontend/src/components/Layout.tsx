@@ -197,7 +197,7 @@ export default function Layout({ children }: LayoutProps) {
               <BrandMark
                 label
                 imageClassName="h-10 w-10"
-                labelClassName={user ? "text-lg md:hidden min-[844px]:block" : "text-lg"}
+                labelClassName={user ? "brand-label text-lg md:hidden min-[844px]:block" : "brand-label text-lg"}
               />
             </Link>
 

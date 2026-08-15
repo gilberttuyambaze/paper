@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createPaper, fetchAllPapers, fetchUserProfile, uploadFileObject, type Paper, type UserProfile } from '../lib/client';
+import { createPaper, extractUploadPdfText, fetchAllPapers, fetchUserProfile, uploadFileObject, type Paper, type UserProfile } from '../lib/client';
 import { authApi } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Upload as UploadIcon, FileText, ArrowLeft, CheckCircle, Sparkles } from 'lucide-react';
+import { Upload as UploadIcon, FileText, ArrowLeft, CheckCircle, Sparkles, LoaderCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import AcademicContextFields, { type AcademicContextValue } from '@/components/AcademicContextFields';
 
@@ -120,6 +120,17 @@ function detectYear(corpus: string) {
   return matches.sort().reverse()[0];
 }
 
+function detectCourseCode(corpus: string) {
+  const labelled = corpus.match(/(?:course\s*(?:code)?|module\s*(?:code)?)\s*[:#-]?\s*([A-Z]{2,6}\s?-?\s?\d{3,4})/i);
+  const generic = corpus.match(/\b([A-Z]{2,6}\s?-?\s?\d{3,4})\b/);
+  return (labelled?.[1] || generic?.[1] || '').replace(/[\s-]+/g, '').toUpperCase() || undefined;
+}
+
+function detectCourseName(corpus: string) {
+  const match = corpus.match(/(?:course|module)\s*(?:title|name)?\s*[:\-]\s*([A-Z][A-Za-z0-9,&/()' -]{4,90})/i);
+  return match?.[1]?.trim().replace(/\s{2,}/g, ' ') || undefined;
+}
+
 function buildDetectedHints(file: File, previewText: string, courseOptions: Paper[]): DetectedUploadHints | null {
   const filenameText = humanizeFileStem(file.name);
   const combinedText = `${filenameText} ${previewText}`;
@@ -147,6 +158,17 @@ function buildDetectedHints(file: File, previewText: string, courseOptions: Pape
     if (matchedCourse.paper_type) hints.paperType = matchedCourse.paper_type;
     if (matchedCourse.lecturer) hints.lecturer = matchedCourse.lecturer;
     evidence.push(`Matched existing course ${matchedCourse.course_code.toUpperCase()} from the uploaded PDF.`);
+  } else {
+    const detectedCourseCode = detectCourseCode(combinedText);
+    const detectedCourseName = detectCourseName(previewText);
+    if (detectedCourseCode) {
+      hints.courseCode = detectedCourseCode;
+      evidence.push(`Detected course code ${detectedCourseCode} from the PDF.`);
+    }
+    if (detectedCourseName) {
+      hints.courseName = detectedCourseName;
+      evidence.push(`Detected course name ${detectedCourseName}.`);
+    }
   }
 
   const year = detectYear(combinedText);
@@ -169,6 +191,8 @@ function buildDetectedHints(file: File, previewText: string, courseOptions: Pape
 
   if (matchedCourse?.course_name) {
     hints.title = `${matchedCourse.course_name} - ${hints.paperType || 'Paper'}${hints.year ? ` ${hints.year}` : ''}`;
+  } else if (hints.courseName) {
+    hints.title = `${hints.courseName} - ${hints.paperType || 'Paper'}${hints.year ? ` ${hints.year}` : ''}`;
   } else if (filenameText) {
     hints.title = filenameText;
     evidence.push('Built a draft title from the PDF filename.');
@@ -182,6 +206,8 @@ export default function UploadPage() {
   const { user, loading } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStage, setUploadStage] = useState<'paper' | 'solution' | 'publishing' | null>(null);
   const [success, setSuccess] = useState(false);
   const [uploadedPaper, setUploadedPaper] = useState<Paper | null>(null);
   const [paperCatalog, setPaperCatalog] = useState<Paper[]>([]);
@@ -292,12 +318,12 @@ export default function UploadPage() {
   ).sort((left, right) => left.course_code.localeCompare(right.course_code));
 
   useEffect(() => {
-    if (!paperFile || analyzingPaperFile || knownCourseOptions.length === 0) return;
+    if (!paperFile || analyzingPaperFile) return;
     const analysisKey = `${paperFile.name}:${paperFile.size}:${paperFile.lastModified}`;
     if (lastAnalyzedPaperKeyRef.current === analysisKey) return;
     lastAnalyzedPaperKeyRef.current = analysisKey;
     void analyzePaperFile(paperFile);
-  }, [paperFile, analyzingPaperFile, knownCourseOptions.length]);
+  }, [paperFile, analyzingPaperFile]);
 
   const matchingSuggestions = paperCatalog.filter(
     (paper) =>
@@ -407,7 +433,18 @@ export default function UploadPage() {
 
     for (let attempt = 0; attempt < MAX_SUGGESTION_AUTO_RETRIES; attempt += 1) {
       try {
-        const previewText = await extractPdfPreviewText(file);
+        let previewText = '';
+        try {
+          const analysis = await extractUploadPdfText(file);
+          previewText = analysis.text;
+          if (!analysis.has_readable_text) {
+            setSuggestionFeedback({ tone: 'info', message: 'The PDF has little selectable text. We are checking the filename and available course matches too...' });
+            previewText = await extractPdfPreviewText(file);
+          }
+        } catch (serverError) {
+          console.warn('Server PDF analysis unavailable; using browser fallback:', serverError);
+          previewText = await extractPdfPreviewText(file);
+        }
         const hints = buildDetectedHints(file, previewText, knownCourseOptions);
         setDetectedHints(hints);
 
@@ -469,6 +506,8 @@ export default function UploadPage() {
     }
 
     setAnalyzingPaperFile(false);
+    setUploadProgress(0);
+    setUploadStage(null);
   };
 
   const resetForm = () => {
@@ -519,14 +558,17 @@ export default function UploadPage() {
 
     try {
       setSubmitting(true);
+      setUploadStage('paper');
+      setUploadProgress(0);
 
       let fileKey = '';
       let solutionKey = '';
+      const paperUploadEnd = solutionFile ? 78 : 95;
 
       // Upload paper file
       const objectKey = `${courseCode}_${paperType}_${year}_${Date.now()}.pdf`;
       try {
-        await uploadFileObject('papers', objectKey, paperFile);
+        await uploadFileObject('papers', objectKey, paperFile, (percentage) => setUploadProgress(Math.round(percentage * paperUploadEnd / 100)));
         fileKey = objectKey;
       } catch (err) {
         console.error('File upload failed:', err);
@@ -538,7 +580,9 @@ export default function UploadPage() {
       if (solutionFile) {
         const solKey = `solutions/${courseCode}_${paperType}_${year}_sol_${Date.now()}.pdf`;
         try {
-          await uploadFileObject('papers', solKey, solutionFile);
+          setUploadStage('solution');
+          setUploadProgress(78);
+          await uploadFileObject('papers', solKey, solutionFile, (percentage) => setUploadProgress(78 + Math.round(percentage * 0.17)));
           solutionKey = solKey;
         } catch (err) {
           console.error('Solution upload failed:', err);
@@ -546,6 +590,8 @@ export default function UploadPage() {
       }
 
       // Create paper record
+      setUploadStage('publishing');
+      setUploadProgress(96);
       const createdPaper = await createPaper({
         title,
         course_code: courseCode.toUpperCase(),
@@ -563,6 +609,7 @@ export default function UploadPage() {
       });
 
       setUploadedPaper(createdPaper);
+      setUploadProgress(100);
       setSuccess(true);
       toast.success('Paper uploaded successfully!');
     } catch (err) {
@@ -570,6 +617,7 @@ export default function UploadPage() {
       toast.error('Failed to upload paper');
     } finally {
       setSubmitting(false);
+      setUploadStage(null);
     }
   };
 
@@ -652,6 +700,25 @@ export default function UploadPage() {
               <p className="theme-muted mt-2">
                 Upload the paper PDF first and we will try to suggest the title, course, year, paper type, and lecturer from the filename and readable PDF text.
               </p>
+            </div>
+
+            <div>
+              <Label className="theme-form-label">Paper File (PDF only) *</Label>
+              <div
+                className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${submitting && uploadStage === 'paper' ? 'file-upload-card--transferring' : ''} ${paperDragActive ? 'theme-dropzone--active' : ''}`}
+                onClick={() => document.getElementById('paperFile')?.click()}
+                onDragOver={(e) => handleDragOver(e, setPaperDragActive)}
+                onDragEnter={(e) => handleDragOver(e, setPaperDragActive)}
+                onDragLeave={(e) => handleDragLeave(e, setPaperDragActive)}
+                onDrop={(e) => handleDropFile(e, setPaperFile, setPaperDragActive, 'Paper file')}
+              >
+                <input type="file" accept=".pdf" onChange={(e) => handleFileSelection(e.target.files?.[0] || null, setPaperFile, 'Paper file')} className="hidden" id="paperFile" />
+                <label htmlFor="paperFile" className="cursor-pointer">
+                  <FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+                  <p className="theme-muted text-sm">{paperFile ? paperFile.name : 'Click to upload paper'}</p>
+                  <p className="theme-muted mt-1 text-xs">Only `.pdf` files are accepted. We will automatically suggest details from this file.</p>
+                </label>
+              </div>
             </div>
 
             {suggestionFeedback && !analyzingPaperFile && (
@@ -898,42 +965,31 @@ export default function UploadPage() {
               )}
             </div>
 
+            {submitting && (
+              <div className="upload-progress-panel rounded-2xl border p-5" role="status" aria-live="polite">
+                <div className="flex items-start gap-4">
+                  <div className="upload-progress-orb flex h-12 w-12 shrink-0 items-center justify-center rounded-full" style={{ '--upload-progress': `${uploadProgress}%` } as React.CSSProperties}>
+                    <span className="rounded-full bg-background px-1 text-xs font-bold">{uploadProgress}%</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="theme-title flex items-center gap-2 font-semibold"><LoaderCircle className="h-4 w-4 animate-spin text-primary" />
+                      {uploadStage === 'solution' ? 'Uploading solution PDF' : uploadStage === 'publishing' ? 'Publishing your paper' : 'Uploading paper PDF'}
+                    </p>
+                    <p className="theme-muted mt-1 text-sm">
+                      {uploadStage === 'publishing' ? 'Your files are secure. We are saving the paper details now.' : 'Please keep this page open while we safely transfer your document.'}
+                    </p>
+                    <div className="upload-progress-track mt-4 h-2 overflow-hidden rounded-full"><div className="upload-progress-fill h-full rounded-full" style={{ width: `${uploadProgress}%` }} /></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* File Uploads */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label className="theme-form-label">Paper File (PDF only) *</Label>
-                <div
-                  className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${
-                    paperDragActive
-                      ? 'theme-dropzone--active'
-                      : ''
-                  }`}
-                  onClick={() => document.getElementById('paperFile')?.click()}
-                  onDragOver={(e) => handleDragOver(e, setPaperDragActive)}
-                  onDragEnter={(e) => handleDragOver(e, setPaperDragActive)}
-                  onDragLeave={(e) => handleDragLeave(e, setPaperDragActive)}
-                  onDrop={(e) => handleDropFile(e, setPaperFile, setPaperDragActive, 'Paper file')}
-                >
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={(e) => handleFileSelection(e.target.files?.[0] || null, setPaperFile, 'Paper file')}
-                    className="hidden"
-                    id="paperFile"
-                  />
-                  <label htmlFor="paperFile" className="cursor-pointer">
-                    <FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
-                    <p className="theme-muted text-sm">
-                      {paperFile ? paperFile.name : 'Click to upload paper'}
-                    </p>
-                    <p className="theme-muted mt-1 text-xs">Only `.pdf` files are accepted. We will also try to auto-suggest details from this file.</p>
-                  </label>
-                </div>
-              </div>
-              <div>
                 <Label className="theme-form-label">Solution File (Optional PDF)</Label>
                 <div
-                  className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${
+                  className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${submitting && uploadStage === 'solution' ? 'file-upload-card--transferring' : ''} ${
                     solutionDragActive
                       ? 'theme-dropzone--active'
                       : ''

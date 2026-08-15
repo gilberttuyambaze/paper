@@ -20,10 +20,29 @@ from schemas.storage import (
     RenameResponse,
 )
 from services.storage import StorageService
+from services.pdf_text import extract_pdf_text
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/storage", tags=["storage"])
+
+
+@router.post("/analyze-pdf")
+async def analyze_pdf_upload(
+    file: UploadFile = File(...),
+    _current_user: UserResponse = Depends(get_current_user),
+):
+    """Return bounded readable text for client-side form suggestions; never stores the file."""
+    if not (file.content_type == "application/pdf" or (file.filename or "").lower().endswith(".pdf")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files can be analysed")
+    file_bytes = await file.read(12 * 1024 * 1024 + 1)
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The PDF is empty")
+    if len(file_bytes) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Use a PDF smaller than 12 MB for automatic suggestions")
+
+    text = extract_pdf_text(file_bytes)
+    return {"text": text, "has_readable_text": bool(text)}
 
 
 @router.post("/create-bucket", response_model=BucketResponse)
