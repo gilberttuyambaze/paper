@@ -115,7 +115,7 @@ export default function LoginPage() {
 
               <Button
                 type="submit"
-                className="theme-accent-bg h-12 w-full rounded-xl hover:bg-black"
+                className="theme-accent-bg h-12 w-full rounded-xl"
                 disabled={loading}
               >
                 {loading ? <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Signing in...</span> : 'Sign in'}

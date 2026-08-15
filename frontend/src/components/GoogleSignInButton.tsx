@@ -121,10 +121,10 @@ export default function GoogleSignInButton({
       variant="outline"
       onClick={handleClick}
       disabled={disabled || isLoading || !isReady}
-      className={`h-12 w-full rounded-xl border border-border bg-card text-card-foreground shadow-sm hover:bg-black ${className}`}
+      className={`theme-google-button h-12 w-full rounded-xl ${className}`}
     >
       <span className="flex items-center justify-center gap-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">
+        <span className="theme-google-mark flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold">
           G
         </span>
         {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}

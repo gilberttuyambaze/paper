@@ -332,12 +332,44 @@ select:disabled {
 }
 
 .theme-accent-bg {
-  background: hsl(var(--brand));
+  background: linear-gradient(135deg, hsl(var(--brand)), hsl(var(--color-primary-hover)));
   color: hsl(var(--primary-foreground));
+  box-shadow: 0 10px 20px hsl(var(--color-primary) / 0.22);
 }
 
 .theme-accent-bg:hover {
-  filter: brightness(0.95);
+  background: linear-gradient(135deg, hsl(var(--color-primary-hover)), hsl(var(--color-primary-active)));
+  color: hsl(var(--primary-foreground));
+  box-shadow: 0 14px 26px hsl(var(--color-primary) / 0.3);
+  transform: translateY(-1px);
+}
+
+.theme-accent-bg:active {
+  transform: translateY(0);
+}
+
+.theme-google-button {
+  border-color: hsl(var(--color-border-strong));
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  box-shadow: var(--shadow-soft);
+}
+
+.theme-google-button:hover {
+  border-color: hsl(var(--brand));
+  background: hsla(var(--brand), 0.1);
+  color: hsl(var(--foreground));
+  box-shadow: 0 10px 20px hsl(var(--color-primary) / 0.14);
+  transform: translateY(-1px);
+}
+
+.theme-google-button:active {
+  transform: translateY(0);
+}
+
+.theme-google-mark {
+  background: hsla(var(--brand), 0.14);
+  color: hsl(var(--brand));
 }
 
 .theme-accent-soft {

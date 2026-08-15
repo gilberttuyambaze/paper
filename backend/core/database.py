@@ -131,6 +131,16 @@ class DatabaseManager:
                 "echo": settings.debug,
             }
 
+            # Hosted PostgreSQL providers commonly expose a PgBouncer endpoint.
+            # PgBouncer transaction/statement pooling can route consecutive
+            # operations to different database connections, invalidating
+            # asyncpg's cached prepared statements ("prepared statement does
+            # not exist").  Disable that cache for all asyncpg connections;
+            # SQLAlchemy's own query compilation cache remains available.
+            if database_url.startswith(("postgresql+asyncpg://", "postgres+asyncpg://")):
+                engine_kwargs["connect_args"] = {"statement_cache_size": 0}
+                logger.info("Disabled asyncpg statement cache for PgBouncer compatibility")
+
             # Check if we're in a Lambda environment
             is_lambda = bool(
                 os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
