@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useState } from 'react';
+import { ChangeEvent, FormEvent, useState, useEffect } from 'react';
 import { Camera, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,6 @@ import { Label } from '@/components/ui/label';
 import SeoMeta from '@/components/SeoMeta';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import AuthShowcase from '../components/AuthShowcase';
 import AvatarFallback from '../components/AvatarFallback';
 import AcademicContextFields from '../components/AcademicContextFields';
 import { updateUserProfile, uploadFileObject } from '../lib/client';
@@ -40,6 +39,20 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const current = await authApi.getCurrentUser();
+        if (!cancelled && current) {
+          navigate('/past-papers?sort=-download_count', { replace: true });
+        }
+      } catch (_) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [navigate]);
   const passwordStrength = getPasswordStrength(password);
   const hasStartedConfirmingPassword = confirmPassword.length > 0;
   const passwordsMatch = password === confirmPassword;
@@ -178,10 +191,8 @@ export default function RegisterPage() {
         canonicalPath="/register"
         robots="noindex,nofollow"
       />
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <AuthShowcase />
-
-        <div className="flex items-center justify-center">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-7xl items-center justify-center gap-6">
+        <div className="flex items-center justify-center w-full">
           <div className="theme-auth-card w-full max-w-2xl rounded-[2rem] p-8 md:p-10">
             <div className="mb-8">
               <p className="theme-link-accent mb-3 text-xs font-semibold uppercase tracking-[0.28em]">Join the hub</p>
@@ -199,27 +210,38 @@ export default function RegisterPage() {
                   </div>
                   <div className="flex-1">
                     <Label htmlFor="profile-image" className="theme-form-label">Profile picture</Label>
-                    <div className="mt-2 flex items-center gap-3">
+                    <div className="mt-2">
                       <Input
                         id="profile-image"
                         type="file"
                         accept="image/*"
                         onChange={handleProfileImageChange}
-                        className="theme-form-input h-12 rounded-xl cursor-pointer"
+                        className="theme-form-input h-12 rounded-xl cursor-pointer w-full"
                       />
-                      <div className="ml-2 flex items-center gap-2">
-                        <Input placeholder="Or paste image URL" value={profileImageUrlInput} onChange={(e) => setProfileImageUrlInput(e.target.value)} className="theme-form-input h-12 rounded-xl" />
-                        <Button type="button" onClick={() => {
+                      <div className="theme-accent-soft mt-2 inline-flex rounded-xl px-3 py-2 text-xs font-medium items-center gap-2">
+                        <Camera className="h-4 w-4" />
+                        Optional
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center gap-2">
+                      <Input
+                        placeholder="Or paste image URL"
+                        value={profileImageUrlInput}
+                        onChange={(e) => setProfileImageUrlInput(e.target.value)}
+                        className="theme-form-input h-12 rounded-xl flex-1"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => {
                           const url = profileImageUrlInput.trim();
                           if (!url) return;
                           setProfileImageFile(null);
                           setProfileImagePreview(url);
-                        }}>Use URL</Button>
-                      </div>
-                      <div className="theme-accent-soft hidden rounded-xl px-3 py-2 text-xs font-medium sm:flex sm:items-center sm:gap-2">
-                        <Camera className="h-4 w-4" />
-                        Optional
-                      </div>
+                        }}
+                      >
+                        Use URL
+                      </Button>
                     </div>
                     <p className="theme-muted mt-2 text-xs">
                       Add a face or logo so your profile is easier to recognize in the community.

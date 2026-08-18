@@ -19,6 +19,8 @@ import {
   type UserProfile,
   type ProgrammeCandidateItem,
 } from '../lib/client';
+import AvatarFallback from '../components/AvatarFallback';
+import { resolvePublicUserProfiles } from '../lib/client';
 import { authApi } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -275,6 +277,7 @@ export default function AdminPage() {
   const reportedPapers = filteredPapers.filter((paper) => (paper.report_count || 0) > 0);
   const hiddenPapers = filteredPapers.filter((paper) => paper.is_hidden);
   const totalDownloads = papers.reduce((sum, paper) => sum + (paper.download_count || 0), 0);
+  const [uploaderProfiles, setUploaderProfiles] = useState<Record<string, { profile?: any; imageUrl?: string | null }>>({});
   const selectedUserIsAdmin = selectedUser?.role === 'admin';
   const adminProtected = selectedUserIsAdmin && !canAssignAdmin;
 
@@ -317,6 +320,27 @@ export default function AdminPage() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    const ids = Array.from(new Set(filteredPapers.map((p) => p.user_id)));
+    if (ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resolved = await resolvePublicUserProfiles(ids);
+        if (cancelled) return;
+        const next: Record<string, { profile?: any; imageUrl?: string | null }> = {};
+        for (const id of ids) {
+          const r = resolved[id];
+          next[id] = { profile: r.profile || undefined, imageUrl: r.imageUrl || null };
+        }
+        setUploaderProfiles(next);
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [filteredPapers]);
 
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
@@ -431,37 +455,37 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <Card className="theme-panel">
-          <CardContent className="p-4 text-center">
+      <div className="mb-8 grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 items-stretch">
+        <Card className="theme-panel h-[10vh] sm:h-auto">
+          <CardContent className="p-4 text-center h-full flex flex-col justify-center">
             <Users className="theme-section-icon mx-auto mb-2 h-6 w-6" />
             <p className="theme-title text-2xl font-bold">{overview?.stats.total_users || users.length}</p>
             <p className="theme-muted text-xs">Users</p>
           </CardContent>
         </Card>
-        <Card className="theme-panel">
-          <CardContent className="p-4 text-center">
+        <Card className="theme-panel h-[10vh] sm:h-auto">
+          <CardContent className="p-4 text-center h-full flex flex-col justify-center">
             <FileText className="mx-auto mb-2 h-6 w-6 text-info" />
             <p className="theme-title text-2xl font-bold">{overview?.stats.total_papers || papers.length}</p>
             <p className="theme-muted text-xs">Papers</p>
           </CardContent>
         </Card>
-        <Card className="theme-panel">
-          <CardContent className="p-4 text-center">
+        <Card className="theme-panel h-[10vh] sm:h-auto">
+          <CardContent className="p-4 text-center h-full flex flex-col justify-center">
             <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-warning" />
             <p className="theme-title text-2xl font-bold">{overview?.stats.pending_reports || 0}</p>
             <p className="theme-muted text-xs">Pending Reports</p>
           </CardContent>
         </Card>
-        <Card className="theme-panel">
-          <CardContent className="p-4 text-center">
+        <Card className="theme-panel h-[10vh] sm:h-auto">
+          <CardContent className="p-4 text-center h-full flex flex-col justify-center">
             <Download className="mx-auto mb-2 h-6 w-6 text-success" />
             <p className="theme-title text-2xl font-bold">{totalDownloads.toLocaleString()}</p>
             <p className="theme-muted text-xs">Downloads</p>
           </CardContent>
         </Card>
-        <Card className="theme-panel">
-          <CardContent className="p-4 text-center">
+        <Card className="theme-panel h-[10vh] sm:h-auto">
+          <CardContent className="p-4 text-center h-full flex flex-col justify-center">
             <Clock className="mx-auto mb-2 h-6 w-6 text-primary" />
             <p className="theme-title text-2xl font-bold">{overview?.stats.pending_role_requests || roleRequests.length}</p>
             <p className="theme-muted text-xs">Role Requests</p>
@@ -470,13 +494,15 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="users" className="space-y-5">
-        <TabsList className="bg-secondary">
-          <TabsTrigger value="users">Users ({filteredUsers.length})</TabsTrigger>
-          <TabsTrigger value="role-requests">Role Requests ({overview?.stats.pending_role_requests || filteredRoleRequests.length})</TabsTrigger>
-          <TabsTrigger value="reports">Reports ({overview?.recent_reports?.length || 0})</TabsTrigger>
-          <TabsTrigger value="papers">Papers ({filteredPapers.length})</TabsTrigger>
-          <TabsTrigger value="programme-candidates">Programme Discovery</TabsTrigger>
-        </TabsList>
+        <TabsList className="bg-secondary rounded-lg p-2 h-auto w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 w-full items-stretch">
+              <TabsTrigger value="users" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Users ({filteredUsers.length})</TabsTrigger>
+              <TabsTrigger value="role-requests" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Role Requests ({overview?.stats.pending_role_requests || filteredRoleRequests.length})</TabsTrigger>
+              <TabsTrigger value="reports" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Reports ({overview?.recent_reports?.length || 0})</TabsTrigger>
+              <TabsTrigger value="papers" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Papers ({filteredPapers.length})</TabsTrigger>
+              <TabsTrigger value="programme-candidates" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Programme Discovery</TabsTrigger>
+            </div>
+          </TabsList>
 
         <TabsContent value="users">
           <Card className="theme-panel">
@@ -508,38 +534,40 @@ export default function AdminPage() {
                   No users match the current search.
                 </div>
               ) : (
-                <div className="grid gap-4 xl:grid-cols-2">
+                <div className="grid gap-4 xl:grid-cols-2 items-stretch">
                   {filteredUsers.map((profile) => (
-                    <Card key={profile.id} className="border-border/80 bg-card/85">
-                      <CardContent className="space-y-4 p-5">
+                    <Card key={profile.id} className="border-border/80 bg-card/85 h-full">
+                      <CardContent className="space-y-4 p-5 flex flex-col h-full overflow-hidden">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <div className="mb-2 flex flex-wrap items-center gap-2">
-                              <h3 className="text-lg font-semibold text-foreground">{profile.display_name}</h3>
+                              <h3 className="text-lg font-semibold text-foreground truncate">{profile.display_name}</h3>
                               <RoleBadge role={profile.role} />
                               <StatusBadge status={profile.account_status} />
                               <RequestedRoleBadge requestedRole={profile.requested_role} requestedRoleStatus={profile.requested_role_status} />
                             </div>
-                            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <p className="flex items-center gap-2 text-sm text-muted-foreground truncate">
                               <Mail className="h-4 w-4" />
-                              {profile.email || 'No email saved'}
+                              <span className="truncate">{profile.email || 'No email saved'}</span>
                             </p>
-                            <p className="mt-2 text-sm text-muted-foreground">
-                              {profile.institution_type === 'ur_student'
+                            <p className="mt-2 text-sm text-muted-foreground truncate">
+                              <span className="block truncate">{profile.institution_type === 'ur_student'
                                 ? `University of Rwanda - ${profile.ur_student_code || 'UR code missing'}`
-                                : profile.university_name || 'University not specified'}
+                                : profile.university_name || 'University not specified'}</span>
                             </p>
                           </div>
-                          <Button variant="outline" size="sm" onClick={() => openUserDialog(profile)}>
-                            View details
-                          </Button>
+                          <div className="shrink-0 mt-2 sm:mt-0">
+                            <Button variant="outline" size="sm" onClick={() => openUserDialog(profile)} className="whitespace-nowrap">
+                              View details
+                            </Button>
+                          </div>
                         </div>
 
-                        <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-                          <p>Trust score: <span className="font-medium text-foreground">{profile.trust_score || 0}</span></p>
-                          <p>Uploads: <span className="font-medium text-foreground">{profile.upload_count || 0}</span></p>
-                          <p>Downloads: <span className="font-medium text-foreground">{profile.download_count || 0}</span></p>
-                          <p>Last login: <span className="font-medium text-foreground">{formatDate(profile.last_login)}</span></p>
+                        <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 mt-auto">
+                          <p className="truncate">Trust score: <span className="font-medium text-foreground">{profile.trust_score || 0}</span></p>
+                          <p className="truncate">Uploads: <span className="font-medium text-foreground">{profile.upload_count || 0}</span></p>
+                          <p className="truncate">Downloads: <span className="font-medium text-foreground">{profile.download_count || 0}</span></p>
+                          <p className="truncate">Last login: <span className="font-medium text-foreground">{formatDate(profile.last_login)}</span></p>
                         </div>
                       </CardContent>
                     </Card>
@@ -772,7 +800,7 @@ export default function AdminPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:grid-cols-4">
             <Card className="theme-panel">
               <CardContent className="p-4 text-center">
                 <p className="text-lg font-semibold text-foreground">{pendingPapers.length}</p>
@@ -808,6 +836,19 @@ export default function AdminPage() {
                       <h4 className="theme-title truncate font-medium">{paper.title}</h4>
                       <PaperVerificationBadge status={paper.verification_status} />
                       {paper.is_hidden && <Badge className="theme-error-note border-0">hidden</Badge>}
+                    </div>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="h-8 w-8 overflow-hidden rounded-full">
+                        <AvatarFallback
+                          name={uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                          imageUrl={uploaderProfiles[paper.user_id]?.imageUrl ?? undefined}
+                          imageAlt={`${uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Uploader'} avatar`}
+                        />
+                      </div>
+                      <div className="text-xs theme-muted">
+                        <div className="font-medium text-sm">{uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}</div>
+                        <div>{paper.course_code} · {paper.year}</div>
+                      </div>
                     </div>
                     <div className="theme-muted flex flex-wrap items-center gap-3 text-xs">
                       <span>{paper.course_code}</span>

@@ -6,6 +6,7 @@ import {
   getStorageDownloadUrl,
   updateUserProfile,
   uploadFileObject,
+  clearResolvedPublicProfile,
   type UserProfile,
 } from '../lib/client';
 import { authApi } from '../lib/auth';
@@ -286,6 +287,12 @@ export default function ProfilePage() {
       setProfileImageFile(null);
       setEditing(false);
       await refetch();
+      // Clear cached resolved public profile so other views refresh avatar/display name
+      try {
+        clearResolvedPublicProfile(user.id);
+      } catch {
+        // ignore
+      }
       toast.success('Profile updated');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update profile';
@@ -418,14 +425,34 @@ export default function ProfilePage() {
                   onChange={handleProfileImageChange}
                   className="theme-form-input mt-2 h-11 rounded-xl cursor-pointer"
                 />
-                <div className="mt-2 flex items-center gap-2">
-                  <Input placeholder="Or paste image URL" value={profileImageUrlInput} onChange={(e) => setProfileImageUrlInput(e.target.value)} className="theme-form-input h-11 rounded-xl" />
-                  <Button type="button" onClick={() => {
-                    const url = profileImageUrlInput.trim();
-                    if (!url) return;
-                    setProfileImageFile(null);
-                    setProfileImagePreview(url);
-                  }}>Use URL</Button>
+                <div className="mt-2">
+                  <Input
+                    id="profile-image"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProfileImageChange}
+                    className="theme-form-input h-11 rounded-xl cursor-pointer w-full"
+                  />
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <Input
+                    placeholder="Or paste image URL"
+                    value={profileImageUrlInput}
+                    onChange={(e) => setProfileImageUrlInput(e.target.value)}
+                    className="theme-form-input h-11 rounded-xl flex-1"
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      const url = profileImageUrlInput.trim();
+                      if (!url) return;
+                      setProfileImageFile(null);
+                      setProfileImagePreview(url);
+                    }}
+                  >
+                    Use URL
+                  </Button>
                 </div>
                 <p className="theme-muted mt-2 text-xs">
                   Upload a photo or logo to make your profile easier to recognize.

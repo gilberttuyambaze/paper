@@ -9,6 +9,7 @@ const apiClient = axios.create({
 });
 
 const storageDownloadUrls = new Map<string, Promise<string | null>>();
+const resolvedPublicProfiles = new Map<string, Promise<{ profile: PublicUserProfile | null; imageUrl: string | null }>>();
 
 apiClient.interceptors.request.use((config) => {
   const token = getStoredAuthToken();
@@ -616,6 +617,54 @@ export async function fetchUserProfile(): Promise<UserProfile | null> {
 export async function fetchPublicUserProfile(userId: string): Promise<PublicUserProfile> {
   const response = await apiClient.get(apiUrl(`/api/v1/community/profiles/${encodeURIComponent(userId)}`));
   return response.data as PublicUserProfile;
+}
+
+export async function resolvePublicUserProfile(userId: string): Promise<{ profile: PublicUserProfile | null; imageUrl: string | null }> {
+  const existing = resolvedPublicProfiles.get(userId);
+  if (existing) return existing;
+
+  const request = (async () => {
+    try {
+      const profile = await fetchPublicUserProfile(userId);
+      if (!profile) return { profile: null, imageUrl: null };
+
+      const key = profile.profile_picture_key;
+      if (!key) return { profile, imageUrl: null };
+
+      if (/^https?:\/\//i.test(key)) {
+        return { profile, imageUrl: key };
+      }
+
+      try {
+        const url = await getStorageDownloadUrl('profiles', key);
+        return { profile, imageUrl: url };
+      } catch {
+        return { profile, imageUrl: null };
+      }
+    } catch {
+      return { profile: null, imageUrl: null };
+    }
+  })();
+
+  resolvedPublicProfiles.set(userId, request);
+  return request;
+}
+
+export async function resolvePublicUserProfiles(userIds: string[]): Promise<Record<string, { profile: PublicUserProfile | null; imageUrl: string | null }>> {
+  const results: Record<string, { profile: PublicUserProfile | null; imageUrl: string | null }> = {};
+  await Promise.all(userIds.map(async (id) => {
+    results[id] = await resolvePublicUserProfile(id);
+  }));
+  return results;
+}
+
+// Cache invalidation helpers for resolved public profiles.
+export function clearResolvedPublicProfile(userId: string) {
+  resolvedPublicProfiles.delete(userId);
+}
+
+export function clearAllResolvedPublicProfiles() {
+  resolvedPublicProfiles.clear();
 }
 
 export async function createUserProfile(data: {

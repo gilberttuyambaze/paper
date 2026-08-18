@@ -173,15 +173,17 @@ export default function DashboardPage() {
       {showOfflineBanner && (
         <OfflineDataBanner message="Your dashboard charts and upload list are currently using cached paper data." />
       )}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 gap-3">
         <div>
           <h1 className="theme-title text-3xl font-bold">My Dashboard</h1>
           <p className="theme-muted mt-1">{user?.email || 'Welcome back!'}</p>
         </div>
-        <Button onClick={() => navigate('/upload')} className="theme-accent-bg">
-          <Upload className="h-4 w-4 mr-2" />
-          Upload Paper
-        </Button>
+        <div className="w-full sm:w-auto flex justify-start sm:justify-end">
+          <Button onClick={() => navigate('/upload')} className="theme-accent-bg">
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Paper
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}

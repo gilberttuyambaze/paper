@@ -16,7 +16,10 @@ import {
   saveDocumentOffline,
   getOfflineDocumentUrl,
   getStorageDownloadUrl,
+  fetchUserProfile,
   fetchAcademicTaxonomy,
+  resolvePublicUserProfile,
+  resolvePublicUserProfiles,
   Paper,
   Comment,
   Solution,
@@ -116,7 +119,9 @@ export default function PaperDetails() {
   const [offlinePaperUrl, setOfflinePaperUrl] = useState<string | null>(null);
   const [offlineSolutionUrl, setOfflineSolutionUrl] = useState<string | null>(null);
   const [uploaderImageUrl, setUploaderImageUrl] = useState<string | null>(null);
+  const [currentUserImageUrl, setCurrentUserImageUrl] = useState<string | null>(null);
   const [academicNames, setAcademicNames] = useState<Record<string, string>>({});
+  const [authorProfiles, setAuthorProfiles] = useState<Record<string, { display_name?: string | null; imageUrl?: string | null }>>({});
 
   useEffect(() => {
     if (id) loadPaper(parseInt(id));
@@ -135,30 +140,80 @@ export default function PaperDetails() {
 
   useEffect(() => {
     let cancelled = false;
+    async function loadCurrentUserImage() {
+      if (!user) {
+        setCurrentUserImageUrl(null);
+        return;
+      }
+      try {
+        const profile = await fetchUserProfile();
+        if (cancelled) return;
+        if (!profile || !profile.profile_picture_key) {
+          setCurrentUserImageUrl(null);
+          return;
+        }
+        if (/^https?:\/\//i.test(profile.profile_picture_key)) {
+          setCurrentUserImageUrl(profile.profile_picture_key);
+          return;
+        }
+        const url = await getStorageDownloadUrl('profiles', profile.profile_picture_key);
+        if (!cancelled) setCurrentUserImageUrl(url);
+      } catch (e) {
+        if (!cancelled) setCurrentUserImageUrl(null);
+      }
+    }
+
+    void loadCurrentUserImage();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
 
     if (!paper?.uploader_profile_picture_key) {
       setUploaderImageUrl(null);
-      return () => {
-        cancelled = true;
-      };
+    } else {
+      void getStorageDownloadUrl('profiles', paper.uploader_profile_picture_key)
+        .then((url) => {
+          if (!cancelled) setUploaderImageUrl(url);
+        })
+        .catch(() => {
+          if (!cancelled) setUploaderImageUrl(null);
+        });
     }
-
-    void getStorageDownloadUrl('profiles', paper.uploader_profile_picture_key)
-      .then((url) => {
-        if (!cancelled) {
-          setUploaderImageUrl(url);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setUploaderImageUrl(null);
-        }
-      });
 
     return () => {
       cancelled = true;
     };
   }, [paper?.uploader_profile_picture_key]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = new Set<string>();
+    comments.forEach((c) => ids.add(c.user_id));
+    solutions.forEach((s) => ids.add(s.user_id));
+    // Also include uploader
+    if (paper?.user_id) ids.add(paper.user_id);
+
+    const toFetch = Array.from(ids).filter((id) => !authorProfiles[id] && id !== user?.id);
+    if (toFetch.length === 0) return;
+
+    (async () => {
+      const resolved = await resolvePublicUserProfiles(toFetch);
+      if (cancelled) return;
+      const next: Record<string, { display_name?: string | null; imageUrl?: string | null }> = {};
+      for (const [uid, data] of Object.entries(resolved)) {
+        next[uid] = { display_name: data.profile?.display_name || null, imageUrl: data.imageUrl || null };
+      }
+      setAuthorProfiles((prev) => ({ ...prev, ...next }));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [comments, solutions, paper?.user_id]);
 
   const loadPaper = async (paperId: number) => {
     try {
@@ -497,16 +552,20 @@ export default function PaperDetails() {
                 onClick={() => navigate(`/profile/${paper.user_id}`)}
                 className="theme-soft-panel flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-secondary"
               >
-                <div className="theme-accent-soft h-11 w-11 overflow-hidden rounded-full text-sm">
-                  <AvatarFallback name={paper.uploader_display_name || `Student ${paper.user_id}`} imageUrl={uploaderImageUrl} imageAlt={`${paper.uploader_display_name || 'Uploader'} profile picture`} />
-                </div>
-                <div className="min-w-0">
-                  <p className="theme-muted text-xs uppercase tracking-[0.2em]">Uploaded by</p>
-                  <p className="theme-title truncate text-sm font-medium">
-                    {paper.uploader_display_name || `Student ${paper.user_id}`}
-                  </p>
-                  <p className="theme-link-accent text-xs">View uploader profile</p>
-                </div>
+                  <div className="theme-accent-soft h-11 w-11 overflow-hidden rounded-full text-sm">
+                    <AvatarFallback
+                      name={authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                      imageUrl={authorProfiles[paper.user_id]?.imageUrl ?? uploaderImageUrl ?? undefined}
+                      imageAlt={`${authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Uploader'} profile picture`}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="theme-muted text-xs uppercase tracking-[0.2em]">Uploaded by</p>
+                    <p className="theme-title truncate text-sm font-medium">
+                      {authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                    </p>
+                    <p className="theme-link-accent text-xs">View uploader profile</p>
+                  </div>
               </button>
               <p className="flex items-center gap-2">
                 <Clock className="theme-section-icon h-4 w-4" />
@@ -767,8 +826,17 @@ export default function PaperDetails() {
                 <Card key={comment.id} className="theme-panel">
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className="theme-accent-soft h-8 w-8 overflow-hidden rounded-full text-xs"><AvatarFallback name="Student" imageAlt="Student avatar" /></div>
-                      <span className="theme-title text-sm font-medium">Student</span>
+                      <div className="theme-accent-soft h-8 w-8 overflow-hidden rounded-full text-xs">
+                        {
+                          (() => {
+                            const p = authorProfiles[comment.user_id];
+                            const name = p?.display_name || `Student ${comment.user_id}`;
+                            const img = p?.imageUrl ?? (comment.user_id === user?.id ? currentUserImageUrl : null);
+                            return <AvatarFallback name={name} imageUrl={img ?? undefined} imageAlt={`${name} avatar`} />;
+                          })()
+                        }
+                      </div>
+                      <span className="theme-title text-sm font-medium">{authorProfiles[comment.user_id]?.display_name || `Student ${comment.user_id}`}</span>
                       <span className="theme-muted text-xs">
                         {comment.created_at ? new Date(comment.created_at).toLocaleDateString() : ''}
                       </span>
@@ -897,8 +965,17 @@ export default function PaperDetails() {
                 <Card key={solution.id} className="theme-panel">
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="theme-accent-soft h-8 w-8 overflow-hidden rounded-full text-xs"><AvatarFallback name="Contributor" imageAlt="Contributor avatar" /></div>
-                      <span className="theme-title text-sm font-medium">Contributor</span>
+                      <div className="theme-accent-soft h-8 w-8 overflow-hidden rounded-full text-xs">
+                        {
+                          (() => {
+                            const p = authorProfiles[solution.user_id];
+                            const name = p?.display_name || `Contributor ${solution.user_id}`;
+                            const img = p?.imageUrl ?? (solution.user_id === user?.id ? currentUserImageUrl : null);
+                            return <AvatarFallback name={name} imageUrl={img ?? undefined} imageAlt={`${name} avatar`} />;
+                          })()
+                        }
+                      </div>
+                      <span className="theme-title text-sm font-medium">{authorProfiles[solution.user_id]?.display_name || `Contributor ${solution.user_id}`}</span>
                       {solution.is_best && <Badge className="theme-status-badge--verified hover:bg-inherit">Best Answer</Badge>}
                       <span className="theme-muted ml-auto text-xs">
                         {solution.created_at ? new Date(solution.created_at).toLocaleDateString() : ''}

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, BadgeCheck, BookOpen, School, UserCircle2 } from 'lucide-react';
-import { fetchPublicUserProfile, getStorageDownloadUrl, type PublicUserProfile } from '../lib/client';
+import { resolvePublicUserProfile, type PublicUserProfile } from '../lib/client';
 import { toast } from 'sonner';
 import AvatarFallback from '../components/AvatarFallback';
 
@@ -35,48 +35,18 @@ export default function PublicProfilePage() {
     void loadProfile(userId);
   }, [userId]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!profile?.profile_picture_key) {
-      setProfileImageUrl(null);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (/^https?:\/\//i.test(profile.profile_picture_key)) {
-      setProfileImageUrl(profile.profile_picture_key);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void getStorageDownloadUrl('profiles', profile.profile_picture_key)
-      .then((url) => {
-        if (!cancelled) {
-          setProfileImageUrl(url);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setProfileImageUrl(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.profile_picture_key]);
+  // profile image resolved by resolvePublicUserProfile during loadProfile
 
   const loadProfile = async (nextUserId: string) => {
     try {
       setLoading(true);
-      const response = await fetchPublicUserProfile(nextUserId);
-      setProfile(response);
+      const resolved = await resolvePublicUserProfile(nextUserId);
+      setProfile(resolved.profile || null);
+      setProfileImageUrl(resolved.imageUrl || null);
     } catch {
       toast.error('Failed to load uploader profile');
       setProfile(null);
+      setProfileImageUrl(null);
     } finally {
       setLoading(false);
     }

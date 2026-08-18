@@ -7,7 +7,9 @@ import {
   getCachedPersonalizedRecommendationsSnapshot,
   Paper,
   PersonalizedRecommendationsResponse,
+  resolvePublicUserProfiles,
 } from '../lib/client';
+import AvatarFallback from '../components/AvatarFallback';
 import OfflineDataBanner from '../components/OfflineDataBanner';
 import ExpandableContentSection from '../components/ExpandableContentSection';
 import { useAuth } from '../contexts/AuthContext';
@@ -60,7 +62,7 @@ function VerificationBadge({ status }: { status: string }) {
   );
 }
 
-function PaperCard({ paper }: { paper: Paper }) {
+function PaperCard({ paper, uploaderProfiles }: { paper: Paper; uploaderProfiles?: Record<string, { profile?: any; imageUrl?: string | null }>; }) {
   return (
     <Link to={`/paper/${paper.id}`} className="block">
       <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
@@ -96,6 +98,19 @@ function PaperCard({ paper }: { paper: Paper }) {
               </Badge>
             )}
           </div>
+          <div className="mt-3 flex items-center gap-3">
+            <div className="h-8 w-8 overflow-hidden rounded-full">
+              <AvatarFallback
+                name={uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                imageUrl={uploaderProfiles?.[paper.user_id]?.imageUrl ?? undefined}
+                imageAlt={`${uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Uploader'} avatar`}
+              />
+            </div>
+            <div className="text-xs theme-muted">
+              <div className="font-medium text-sm">{uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}</div>
+              <div>{paper.course_code} · {paper.year}</div>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </Link>
@@ -112,6 +127,7 @@ export default function HomePage() {
   const [personalizedLoading, setPersonalizedLoading] = useState(false);
   const [stats, setStats] = useState({ total: 0, downloads: 0, verified: 0 });
   const [showOfflineBanner, setShowOfflineBanner] = useState(false);
+  const [uploaderProfiles, setUploaderProfiles] = useState<Record<string, { profile?: any; imageUrl?: string | null }>>({});
   const [showPersonalizedOfflineBanner, setShowPersonalizedOfflineBanner] = useState(false);
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const navigate = useNavigate();
@@ -128,6 +144,27 @@ export default function HomePage() {
     }
     loadPapers();
   }, []);
+
+  useEffect(() => {
+    const ids = Array.from(new Set([...featuredPapers, ...trendingPapers, ...recentPapers].map((p) => p.user_id)));
+    if (ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resolved = await resolvePublicUserProfiles(ids);
+        if (cancelled) return;
+        const next: Record<string, { profile?: any; imageUrl?: string | null }> = {};
+        for (const id of ids) {
+          const r = resolved[id];
+          next[id] = { profile: r.profile || undefined, imageUrl: r.imageUrl || null };
+        }
+        setUploaderProfiles(next);
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [papers]);
 
   useEffect(() => {
     if (!user) {
@@ -236,7 +273,7 @@ export default function HomePage() {
                 Search the most downloaded papers, discover lecturer-linked material, and learn from a growing community that keeps useful content visible.
               </p>
 
-              <form onSubmit={handleSearch} className="mb-8 flex gap-2">
+              <form onSubmit={handleSearch} className="mb-8 flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
                   <Search className="theme-muted absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2" />
                   <Input
@@ -246,7 +283,7 @@ export default function HomePage() {
                     className="theme-hero-input h-12 pl-10"
                   />
                 </div>
-                <Button type="submit" className="theme-accent-bg h-12 px-6">
+                <Button type="submit" className="theme-accent-bg h-12 px-6 w-full sm:w-auto">
                   Search
                 </Button>
               </form>
@@ -355,7 +392,7 @@ export default function HomePage() {
                   </div>
                 )}
 
-                {featuredPapers.length > 1 && (
+                    {featuredPapers.length > 1 && (
                   <div className="mt-4 flex items-center justify-center gap-2">
                     {featuredPapers.map((paper, index) => (
                       <button

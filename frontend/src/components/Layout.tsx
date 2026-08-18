@@ -6,6 +6,7 @@ import AvatarFallback from '@/components/AvatarFallback';
 import SeoMeta from '@/components/SeoMeta';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchNotifications } from '@/lib/client';
+import { fetchUserProfile, getStorageDownloadUrl } from '@/lib/client';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +40,7 @@ export default function Layout({ children }: LayoutProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -72,6 +74,36 @@ export default function Layout({ children }: LayoutProps) {
       .then((items) => setNotificationCount(items.filter((item) => !item.is_read).length))
       .catch(() => setNotificationCount(0));
   }, [user, location.pathname]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadProfileImage() {
+      try {
+        const profile = await fetchUserProfile();
+        if (!mounted) return;
+        if (!profile || !profile.profile_picture_key) {
+          setProfileImageUrl(null);
+          return;
+        }
+
+        // If the key is an external URL, use it directly.
+        if (/^https?:\/\//i.test(profile.profile_picture_key)) {
+          setProfileImageUrl(profile.profile_picture_key);
+          return;
+        }
+
+        const url = await getStorageDownloadUrl('profiles', profile.profile_picture_key);
+        if (mounted) setProfileImageUrl(url);
+      } catch (e) {
+        if (mounted) setProfileImageUrl(null);
+      }
+    }
+
+    if (user) void loadProfileImage();
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
 
   const navItems = [
     { path: '/', label: 'Home', icon: BookOpen },
@@ -266,7 +298,7 @@ export default function Layout({ children }: LayoutProps) {
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="theme-icon-button overflow-hidden rounded-full p-0" aria-label="Open account menu">
-                        <AvatarFallback name={user.name || user.email} imageAlt="Account avatar" className="text-xs" />
+                        <AvatarFallback name={user.name || user.email} imageUrl={profileImageUrl ?? undefined} imageAlt="Account avatar" className="text-xs" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent

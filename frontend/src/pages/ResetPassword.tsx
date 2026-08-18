@@ -1,11 +1,10 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState, useEffect } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import SeoMeta from '@/components/SeoMeta';
-import AuthShowcase from '../components/AuthShowcase';
 import { authApi } from '../lib/auth';
 
 export default function ResetPasswordPage() {
@@ -19,6 +18,21 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const current = await authApi.getCurrentUser();
+        if (!cancelled && current) {
+          navigate('/past-papers?sort=-download_count', { replace: true });
+        }
+      } catch (_) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [navigate]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -63,10 +77,8 @@ export default function ResetPasswordPage() {
         canonicalPath="/reset-password"
         robots="noindex,nofollow"
       />
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <AuthShowcase />
-
-        <div className="flex items-center justify-center">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-7xl items-center justify-center gap-6">
+        <div className="flex items-center justify-center w-full">
           <div className="theme-auth-card w-full max-w-xl rounded-[2rem] p-8 md:p-10">
             <div className="mb-8">
               <p className="theme-link-accent mb-3 text-xs font-semibold uppercase tracking-[0.28em]">New password</p>

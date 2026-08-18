@@ -5,6 +5,9 @@ import re
 import unicodedata
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -87,22 +90,39 @@ async def find_programme_matches(db: AsyncSession, *, institution_id: str, campu
         similarity = _similarity(normalized, candidate["normalized"])
         score = round(100 * ((0.70 * similarity) + _context_score(candidate, campus_id, college_id, school_id)))
         band = confidence_band(score)
-        if band:
-            # Map candidate info into canonical recommendation structure
-            rec = {
-                "programme_id": candidate.get("programme_id"),
-                "programme_name": candidate.get("programme_name") or candidate.get("name"),
-                "submission_id": candidate.get("submission_id"),
-                "score": score,
-                "match_level": band,
-                "source": candidate.get("kind"),
-                "matched_alias": candidate.get("alias") if candidate.get("kind") == "alias" else None,
-                "occurrences": candidate.get("occurrences", 0),
-                "campus_id": candidate.get("campus_id"),
-                "college_id": candidate.get("college_id"),
-                "school_id": candidate.get("school_id"),
-            }
-            ranked.append(rec)
+        # Log scoring details for debugging and diagnostics
+        try:
+            identity_key = identity_key  # keep identity in scope if available
+        except Exception:
+            identity_key = candidate.get("programme_id") or candidate.get("submission_id") or candidate.get("alias") or candidate.get("name")
+        logger.debug(
+            "programme_candidate score debug: id=%s kind=%s name=%s similarity=%.4f score=%d band=%s campus=%s college=%s school=%s",
+            identity_key,
+            candidate.get("kind"),
+            candidate.get("programme_name") or candidate.get("name"),
+            similarity,
+            score,
+            band,
+            candidate.get("campus_id"),
+            candidate.get("college_id"),
+            candidate.get("school_id"),
+        )
+
+        # Map candidate info into canonical recommendation structure. Include weak matches
+        rec = {
+            "programme_id": candidate.get("programme_id"),
+            "programme_name": candidate.get("programme_name") or candidate.get("name"),
+            "submission_id": candidate.get("submission_id"),
+            "score": score,
+            "match_level": band or "weak",
+            "source": candidate.get("kind"),
+            "matched_alias": candidate.get("alias") if candidate.get("kind") == "alias" else None,
+            "occurrences": candidate.get("occurrences", 0),
+            "campus_id": candidate.get("campus_id"),
+            "college_id": candidate.get("college_id"),
+            "school_id": candidate.get("school_id"),
+        }
+        ranked.append(rec)
     return sorted(ranked, key=lambda item: (-item.get("score", 0), (item.get("programme_name") or "").lower()))[:3]
 
 async def record_submission(db: AsyncSession, *, user_id: Optional[str], institution_id: str, campus_id: str, college_id: str, school_id: str, raw_name: str, source: str = "profile", accepted_programme_id: Optional[str] = None, accepted_candidate_id: Optional[int] = None) -> AcademicProgrammeSubmission:

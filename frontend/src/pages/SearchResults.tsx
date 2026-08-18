@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { fetchAllPapers, getCachedPaperListSnapshot, Paper } from '../lib/client';
+import { fetchAllPapers, getCachedPaperListSnapshot, Paper, resolvePublicUserProfiles } from '../lib/client';
+import AvatarFallback from '../components/AvatarFallback';
 import OfflineDataBanner from '../components/OfflineDataBanner';
 import ExpandableContentSection from '../components/ExpandableContentSection';
 import { Button } from '@/components/ui/button';
@@ -68,6 +69,7 @@ export default function SearchResults() {
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || '-download_count');
   const [showFilters, setShowFilters] = useState(false);
   const [showOfflineBanner, setShowOfflineBanner] = useState(false);
+  const [uploaderProfiles, setUploaderProfiles] = useState<Record<string, { profile?: any; imageUrl?: string | null }>>({});
 
   useEffect(() => {
     const cached = getCachedPaperListSnapshot();
@@ -89,6 +91,9 @@ export default function SearchResults() {
     setUploader(searchParams.get('uploader') || '');
     setSortBy(searchParams.get('sort') || '-download_count');
   }, [searchParams]);
+
+  // uploaderProfiles effect moved below filteredPapers declaration to avoid
+  // referencing the memoized value before initialization.
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -178,6 +183,28 @@ export default function SearchResults() {
 
     return result;
   }, [papers, searchQuery, college, department, course, paperType, year, uploader, sortBy]);
+
+  // resolve uploader public profiles for visible results
+  useEffect(() => {
+    const ids = Array.from(new Set(filteredPapers.map((p) => p.user_id)));
+    if (ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resolved = await resolvePublicUserProfiles(ids);
+        if (cancelled) return;
+        const next: Record<string, { profile?: any; imageUrl?: string | null }> = {};
+        for (const id of ids) {
+          const r = resolved[id];
+          next[id] = { profile: r?.profile || undefined, imageUrl: r?.imageUrl ?? null };
+        }
+        setUploaderProfiles(next);
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [filteredPapers]);
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -412,6 +439,19 @@ export default function SearchResults() {
                     <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">
                       {paper.title}
                     </h3>
+                    <div className="flex items-center gap-3 mt-2">
+                      <div className="h-8 w-8 overflow-hidden rounded-full">
+                        <AvatarFallback
+                          name={uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                          imageUrl={uploaderProfiles[paper.user_id]?.imageUrl ?? undefined}
+                          imageAlt={`${uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Uploader'} avatar`}
+                        />
+                      </div>
+                      <div className="text-xs theme-muted">
+                        <div className="font-medium text-sm">{uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}</div>
+                        <div>{paper.course_code} · {paper.year}</div>
+                      </div>
+                    </div>
                     <div className="theme-muted space-y-1 text-sm">
                       <p className="flex items-center gap-1">
                         <BookOpen className="h-3.5 w-3.5" />
