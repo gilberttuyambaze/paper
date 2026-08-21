@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Upload as UploadIcon, FileText, ArrowLeft, CheckCircle, Sparkles, LoaderCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import AcademicContextFields, { type AcademicContextValue } from '@/components/AcademicContextFields';
+import { createBook, createCourse, createModule, fetchModules, searchCourses, type Book, type Course, type Module } from '@/lib/books';
 
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
 
@@ -205,11 +206,13 @@ export default function UploadPage() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [uploadKind, setUploadKind] = useState<'paper' | 'book'>('paper');
   const [submitting, setSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState<'paper' | 'solution' | 'publishing' | null>(null);
   const [success, setSuccess] = useState(false);
   const [uploadedPaper, setUploadedPaper] = useState<Paper | null>(null);
+  const [uploadedBook, setUploadedBook] = useState<Book | null>(null);
   const [paperCatalog, setPaperCatalog] = useState<Paper[]>([]);
   const [selectedCourseOption, setSelectedCourseOption] = useState(CUSTOM_COURSE_OPTION);
   const [analyzingPaperFile, setAnalyzingPaperFile] = useState(false);
@@ -237,6 +240,31 @@ export default function UploadPage() {
   const [solutionFile, setSolutionFile] = useState<File | null>(null);
   const [paperDragActive, setPaperDragActive] = useState(false);
   const [solutionDragActive, setSolutionDragActive] = useState(false);
+  const [bookTitle, setBookTitle] = useState('');
+  const [bookDescription, setBookDescription] = useState('');
+  const [bookIsbn, setBookIsbn] = useState('');
+  const [bookEdition, setBookEdition] = useState('');
+  const [bookYear, setBookYear] = useState('');
+  const [bookLanguage, setBookLanguage] = useState('');
+  const [bookPublisher, setBookPublisher] = useState('');
+  const [bookCategory, setBookCategory] = useState('');
+  const [bookSubject, setBookSubject] = useState('');
+  const [bookAuthors, setBookAuthors] = useState<Array<{ name: string }>>([]);
+  const [authorInput, setAuthorInput] = useState('');
+  const [bookCourses, setBookCourses] = useState<Course[]>([]);
+  const [courseQuery, setCourseQuery] = useState('');
+  const [courseOptions, setCourseOptions] = useState<Course[]>([]);
+  const [newCourseCode, setNewCourseCode] = useState('');
+  const [newCourseDescription, setNewCourseDescription] = useState('');
+  const [bookModules, setBookModules] = useState<Module[]>([]);
+  const [moduleOptions, setModuleOptions] = useState<Module[]>([]);
+  const [moduleQuery, setModuleQuery] = useState('');
+  const [newModuleCode, setNewModuleCode] = useState('');
+  const [newModuleDescription, setNewModuleDescription] = useState('');
+  const [bookFile, setBookFile] = useState<File | null>(null);
+  const [bookCover, setBookCover] = useState<File | null>(null);
+  const [bookFileDragActive, setBookFileDragActive] = useState(false);
+  const [bookCoverDragActive, setBookCoverDragActive] = useState(false);
 
   const handleDragOver = (
     event: DragEvent<HTMLDivElement>,
@@ -513,6 +541,8 @@ export default function UploadPage() {
   const resetForm = () => {
     setSuccess(false);
     setUploadedPaper(null);
+    setUploadedBook(null);
+    setUploadKind('choose');
     setSelectedCourseOption(CUSTOM_COURSE_OPTION);
     setDetectedHints(null);
     setSuggestionFeedback(null);
@@ -529,6 +559,7 @@ export default function UploadPage() {
     setDescription('');
     setPaperFile(null);
     setSolutionFile(null);
+    setBookTitle(''); setBookDescription(''); setBookIsbn(''); setBookEdition(''); setBookYear(''); setBookLanguage(''); setBookPublisher(''); setBookCategory(''); setBookSubject(''); setBookAuthors([]); setAuthorInput(''); setBookCourses([]); setCourseQuery(''); setBookModules([]); setModuleQuery(''); setBookFile(null); setBookCover(null);
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -621,6 +652,41 @@ export default function UploadPage() {
     }
   };
 
+  const handleBookUpload = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const authors = bookAuthors.map((author) => author.name);
+    const courseIds = bookCourses.map((course) => course.id);
+    if (!bookTitle.trim() || !bookLanguage || !authors.length || !courseIds.length || !bookFile || !bookCover) {
+      toast.error('Title, language, authors, related courses, cover, and book file are required.');
+      return;
+    }
+    const isBookDocument = /\.(pdf|epub)$/i.test(bookFile.name) || ['application/pdf', 'application/epub+zip'].includes(bookFile.type);
+    if (!isBookDocument || !bookCover.type.startsWith('image/')) {
+      toast.error('Use a PDF or EPUB book file and an image cover.');
+      return;
+    }
+    try {
+      setSubmitting(true); setUploadProgress(0); setUploadStage('paper');
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const bookKey = `books/${stamp}-${bookFile.name}`;
+      await uploadFileObject('books', bookKey, bookFile, (percent) => setUploadProgress(Math.round(percent * 0.7)));
+      setUploadStage('solution'); setUploadProgress(70);
+      const coverKey = `book-covers/${stamp}-${bookCover.name}`;
+      await uploadFileObject('books', coverKey, bookCover, (percent) => setUploadProgress(70 + Math.round(percent * 0.25)));
+      setUploadStage('publishing'); setUploadProgress(96);
+      const created = await createBook({
+        title: bookTitle.trim(), description: bookDescription || undefined, isbn: bookIsbn || undefined, edition: bookEdition || undefined,
+        publication_year: bookYear ? Number(bookYear) : undefined, language: bookLanguage || undefined, publisher: bookPublisher || undefined,
+        category: bookCategory || undefined, subject: bookSubject || undefined, status: 'draft', authors, course_ids: courseIds, module_ids: bookModules.map((module) => module.id),
+        file: { key: bookKey, original_filename: bookFile.name, mime_type: bookFile.type, size: bookFile.size },
+        cover: { key: coverKey, original_filename: bookCover.name, mime_type: bookCover.type, size: bookCover.size },
+      });
+      setUploadedBook(created); setUploadProgress(100); setSuccess(true); toast.success('Book uploaded successfully!');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Failed to upload book');
+    } finally { setSubmitting(false); setUploadStage(null); }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -659,7 +725,7 @@ export default function UploadPage() {
         </div>
         <h2 className="theme-title mb-4 text-2xl font-bold">Upload Successful!</h2>
         <p className="theme-muted mb-6">
-          Your paper has been submitted with a {uploadedPaper?.verification_status || inferVerificationStatus()} verification status.
+          {uploadedBook ? `“${uploadedBook.title}” has been uploaded. Your management window is calculated securely by the server.` : `Your paper has been submitted with a ${uploadedPaper?.verification_status || inferVerificationStatus()} verification status.`}
           {profile?.requested_role_status === 'pending'
             ? ` Your ${profile.requested_role || 'special access'} request is still pending, so this upload was handled as a normal community upload.`
             : ' Thank you for contributing!'}
@@ -676,6 +742,35 @@ export default function UploadPage() {
     );
   }
 
+  if (uploadKind === 'book') {
+    return <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="theme-muted mb-6 hover:bg-transparent hover:text-primary"><ArrowLeft className="h-4 w-4 mr-2" />Back</Button>
+      <Card className="theme-panel"><CardHeader><CardTitle className="theme-title flex items-center gap-2"><UploadIcon className="theme-section-icon h-6 w-6" />Upload</CardTitle><div className="mt-4 grid grid-cols-2 rounded-lg border p-1"><Button type="button" variant="ghost" onClick={() => setUploadKind('paper')}>📄 Paper</Button><Button type="button" className="theme-accent-bg" onClick={() => setUploadKind('book')}>📚 Book</Button></div></CardHeader><CardContent>
+        <form onSubmit={handleBookUpload} className="space-y-6">
+          <div className="theme-soft-panel rounded-lg p-4 text-sm"><p className="theme-title flex items-center gap-2 font-medium"><Sparkles className="h-4 w-4" />Book upload</p><p className="theme-muted mt-2">Add the book file, cover, and catalogue details. Your account is automatically recorded as the uploader.</p></div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Label className="theme-form-label">Book title *</Label><Input className="theme-form-input mt-1" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="e.g., Database System Concepts" required /></div>
+            <div><Label className="theme-form-label">ISBN</Label><Input className="theme-form-input mt-1" value={bookIsbn} onChange={(e) => setBookIsbn(e.target.value)} /></div><div><Label className="theme-form-label">Edition</Label><Input className="theme-form-input mt-1" value={bookEdition} onChange={(e) => setBookEdition(e.target.value)} /></div>
+            <div><Label className="theme-form-label">Publication year</Label><Input className="theme-form-input mt-1" type="number" value={bookYear} onChange={(e) => setBookYear(e.target.value)} /></div><div><Label className="theme-form-label">Language *</Label><Select value={bookLanguage} onValueChange={setBookLanguage}><SelectTrigger className="theme-form-input mt-1"><SelectValue placeholder="Select language" /></SelectTrigger><SelectContent>{[['en','English'],['fr','French'],['rw','Kinyarwanda'],['sw','Swahili'],['ar','Arabic'],['zh','Chinese'],['es','Spanish'],['pt','Portuguese'],['de','German'],['it','Italian'],['ja','Japanese'],['ko','Korean'],['hi','Hindi'],['ru','Russian'],['other','Other']].map(([value,label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label className="theme-form-label">Publisher</Label><Input className="theme-form-input mt-1" value={bookPublisher} onChange={(e) => setBookPublisher(e.target.value)} /></div><div><Label className="theme-form-label">Category</Label><Input className="theme-form-input mt-1" value={bookCategory} onChange={(e) => setBookCategory(e.target.value)} /></div>
+            <div className="sm:col-span-2"><Label className="theme-form-label">Subject</Label><Input className="theme-form-input mt-1" value={bookSubject} onChange={(e) => setBookSubject(e.target.value)} /></div>
+          </div>
+          <div><Label className="theme-form-label">Authors *</Label><div className="mt-1 flex gap-2"><Input className="theme-form-input" value={authorInput} onChange={(e) => setAuthorInput(e.target.value)} placeholder="Author name" /><Button type="button" variant="outline" onClick={() => { const name = authorInput.trim(); if (name && !bookAuthors.some((author) => author.name === name)) { setBookAuthors([...bookAuthors, { name }]); setAuthorInput(''); } }}>+ Add Author</Button></div><div className="mt-2 flex flex-wrap gap-2">{bookAuthors.map((author) => <span key={author.name} className="rounded-full bg-muted px-3 py-1 text-sm">{author.name}<button type="button" className="ml-2" onClick={() => setBookAuthors(bookAuthors.filter((item) => item.name !== author.name))}>×</button></span>)}</div></div>
+          <div><Label className="theme-form-label">Related courses *</Label><Input className="theme-form-input mt-1" value={courseQuery} onChange={(e) => { const query = e.target.value; setCourseQuery(query); if (query.trim()) void searchCourses(query).then((data) => setCourseOptions(data.items)); else setCourseOptions([]); }} placeholder="Search course code or name..." />{courseOptions.length > 0 && <div className="mt-2 space-y-1 rounded border p-2">{courseOptions.filter((course) => !bookCourses.some((selected) => selected.id === course.id)).map((course) => <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted" key={course.id} type="button" onClick={() => { setBookCourses([...bookCourses, course]); setCourseQuery(''); setCourseOptions([]); }}>{course.code || 'No code'} — {course.name}</button>)}</div>}<div className="mt-2 grid gap-2 sm:grid-cols-3"><Input className="theme-form-input" value={newCourseCode} onChange={(e) => setNewCourseCode(e.target.value)} placeholder="Course code" /><Input className="theme-form-input" value={newCourseDescription} onChange={(e) => setNewCourseDescription(e.target.value)} placeholder="Description (optional)" /><Button type="button" variant="outline" disabled={!courseQuery.trim()} onClick={async () => { const course = await createCourse({ name: courseQuery.trim(), code: newCourseCode || undefined, description: newCourseDescription || undefined }); if (!bookCourses.some((selected) => selected.id === course.id)) setBookCourses([...bookCourses, course]); setCourseQuery(''); setNewCourseCode(''); setNewCourseDescription(''); }}>+ Add Course</Button></div><div className="mt-2 flex flex-wrap gap-2">{bookCourses.map((course) => <span key={course.id} className="rounded-full bg-muted px-3 py-1 text-sm">{course.code || '—'} — {course.name}<button type="button" className="ml-2" onClick={() => setBookCourses(bookCourses.filter((item) => item.id !== course.id))}>×</button></span>)}</div></div>
+          <div><Label className="theme-form-label">Related modules</Label><div className="mt-1 flex gap-2"><Input className="theme-form-input" value={moduleQuery} onChange={(e) => { setModuleQuery(e.target.value); void fetchModules(e.target.value).then((data) => setModuleOptions(data.items)); }} placeholder="Search module" /><Button type="button" variant="outline" onClick={async () => { const name = moduleQuery.trim(); if (!name) return; const module = await createModule({ name, code: newModuleCode || undefined, description: newModuleDescription || undefined, course_id: bookCourses[0]?.id }); if (!bookModules.some((item) => item.id === module.id)) setBookModules([...bookModules, module]); setModuleQuery(''); setNewModuleCode(''); setNewModuleDescription(''); }}>+ Add Module</Button></div>{moduleOptions.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{moduleOptions.map((module) => <Button key={module.id} type="button" size="sm" variant="outline" onClick={() => !bookModules.some((item) => item.id === module.id) && setBookModules([...bookModules, module])}>{module.name}</Button>)}</div>}<div className="mt-2 grid gap-2 sm:grid-cols-2"><Input className="theme-form-input" value={newModuleCode} onChange={(e) => setNewModuleCode(e.target.value)} placeholder="New module code (optional)" /><Input className="theme-form-input" value={newModuleDescription} onChange={(e) => setNewModuleDescription(e.target.value)} placeholder="New module description (optional)" /></div><div className="mt-2 flex flex-wrap gap-2">{bookModules.map((module) => <span key={module.id} className="rounded-full bg-muted px-3 py-1 text-sm">{module.name}<button type="button" className="ml-2" onClick={() => setBookModules(bookModules.filter((item) => item.id !== module.id))}>×</button></span>)}</div></div>
+          <div><Label className="theme-form-label">Description</Label><Textarea className="theme-form-input mt-1" value={bookDescription} onChange={(e) => setBookDescription(e.target.value)} rows={3} placeholder="Brief description of the book..." /></div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div><Label className="theme-form-label">Book file (PDF or EPUB) *</Label><div className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${submitting && uploadStage === 'paper' ? 'file-upload-card--transferring' : ''} ${bookFileDragActive ? 'theme-dropzone--active' : ''}`} onClick={() => document.getElementById('bookFile')?.click()} onDragOver={(e) => handleDragOver(e, setBookFileDragActive)} onDragEnter={(e) => handleDragOver(e, setBookFileDragActive)} onDragLeave={(e) => handleDragLeave(e, setBookFileDragActive)} onDrop={(e) => { e.preventDefault(); setBookFileDragActive(false); setBookFile(e.dataTransfer.files?.[0] || null); }}><input id="bookFile" className="hidden" type="file" accept=".pdf,.epub,application/pdf,application/epub+zip" onChange={(e) => setBookFile(e.target.files?.[0] || null)} /><label htmlFor="bookFile" className="cursor-pointer"><FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground" /><p className="theme-muted text-sm">{bookFile ? `${bookFile.name} · ${(bookFile.size / 1024 / 1024).toFixed(2)} MB` : 'Click to choose book file'}</p><p className="theme-muted mt-1 text-xs">PDF or EPUB</p></label></div></div>
+            <div><Label className="theme-form-label">Book cover *</Label><div className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${submitting && uploadStage === 'solution' ? 'file-upload-card--transferring' : ''} ${bookCoverDragActive ? 'theme-dropzone--active' : ''}`} onClick={() => document.getElementById('bookCover')?.click()} onDragOver={(e) => handleDragOver(e, setBookCoverDragActive)} onDragEnter={(e) => handleDragOver(e, setBookCoverDragActive)} onDragLeave={(e) => handleDragLeave(e, setBookCoverDragActive)} onDrop={(e) => { e.preventDefault(); setBookCoverDragActive(false); setBookCover(e.dataTransfer.files?.[0] || null); }}><input id="bookCover" className="hidden" type="file" accept="image/*" onChange={(e) => setBookCover(e.target.files?.[0] || null)} /><label htmlFor="bookCover" className="cursor-pointer">{bookCover?.type.startsWith('image/') ? <img className="mx-auto mb-2 h-16 w-12 rounded object-cover" src={URL.createObjectURL(bookCover)} alt="Book cover preview" /> : <UploadIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />}<p className="theme-muted text-sm">{bookCover ? bookCover.name : 'Click to choose cover image'}</p><p className="theme-muted mt-1 text-xs">Image file</p></label></div></div>
+          </div>
+          {submitting && <div className="upload-progress-panel rounded-2xl border p-5"><div className="flex items-start gap-4"><div className="upload-progress-orb flex h-12 w-12 shrink-0 items-center justify-center rounded-full" style={{ '--upload-progress': `${uploadProgress}%` } as React.CSSProperties}><span className="rounded-full bg-background px-1 text-xs font-bold">{uploadProgress}%</span></div><div><p className="theme-title flex items-center gap-2 font-semibold"><LoaderCircle className="h-4 w-4 animate-spin text-primary" />{uploadStage === 'solution' ? 'Uploading book cover' : uploadStage === 'publishing' ? 'Saving book details' : 'Uploading book file'}</p><p className="theme-muted mt-1 text-sm">Please keep this page open while we securely transfer your book.</p></div></div></div>}
+          <div className="theme-accent-soft-border rounded-lg border-dashed p-4 text-sm"><p className="theme-title font-medium">Review Book</p><div className="theme-muted mt-2 grid gap-1 sm:grid-cols-2"><p>Title: <span className="text-foreground">{bookTitle || '—'}</span></p><p>Language: <span className="text-foreground">{bookLanguage || '—'}</span></p><p>Authors: <span className="text-foreground">{bookAuthors.map((author) => author.name).join(', ') || '—'}</span></p><p>Courses: <span className="text-foreground">{bookCourses.map((course) => `${course.code || '—'} — ${course.name}`).join(', ') || '—'}</span></p><p>Modules: <span className="text-foreground">{bookModules.map((module) => module.name).join(', ') || '—'}</span></p><p>File: <span className="text-foreground">{bookFile?.name || '—'}</span></p><p>Cover: <span className="text-foreground">{bookCover ? 'Selected' : '—'}</span></p><p>Uploaded by: <span className="text-foreground">{user.name || user.email}</span></p></div><p className="theme-muted mt-2">The server assigns ownership and the 48-hour CP management deadline.</p></div>
+          <Button type="submit" disabled={submitting} className="theme-accent-bg h-12 w-full text-lg">{submitting ? <><LoaderCircle className="mr-2 h-5 w-5 animate-spin" />Uploading...</> : <><UploadIcon className="mr-2 h-5 w-5" />Upload Book</>}</Button>
+        </form>
+      </CardContent></Card>
+    </div>;
+  }
+
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <Button variant="ghost" onClick={() => navigate(-1)} className="theme-muted mb-6 hover:bg-transparent hover:text-primary">
@@ -687,8 +782,9 @@ export default function UploadPage() {
         <CardHeader>
           <CardTitle className="theme-title flex items-center gap-2">
             <UploadIcon className="theme-section-icon h-6 w-6" />
-            Upload Past Paper
+            Upload
           </CardTitle>
+          <div className="mt-4 grid grid-cols-2 rounded-lg border p-1"><Button type="button" className="theme-accent-bg" onClick={() => setUploadKind('paper')}>📄 Paper</Button><Button type="button" variant="ghost" onClick={() => setUploadKind('book')}>📚 Book</Button></div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleUpload} className="space-y-6">

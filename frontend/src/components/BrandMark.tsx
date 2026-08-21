@@ -20,7 +20,7 @@ export default function BrandMark({
         alt="UR Academic Resource Hub logo"
         className={cn('h-10 w-10 object-contain', imageClassName)}
       />
-      {label && <span className={cn('font-bold', labelClassName)}>UR Past Papers</span>}
+      {label && <span className={cn('font-bold', labelClassName)}>UR Academic Resource Hub</span>}
     </span>
   );
 }

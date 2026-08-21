@@ -34,12 +34,13 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_UPLOAD_MIME_TYPES = {
     "application/pdf",
+    "application/epub+zip",
     "image/png",
     "image/jpeg",
     "image/jpg",
     "text/plain",
 }
-ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".txt"}
+ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".txt"}
 
 
 def _normalize_content_type(content_type: Optional[str]) -> Optional[str]:

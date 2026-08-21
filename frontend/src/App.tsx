@@ -2,7 +2,7 @@ import { Suspense, lazy } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import ScrollToTop from './components/ScrollToTop';
 import ProtectedAdminRoute from './components/ProtectedAdminRoute';
@@ -53,16 +53,25 @@ const App = () => (
             <Route path="/auth/error" element={<AuthError />} />
             <Route path="/auth/logout-callback" element={<LogoutCallbackPage />} />
             <Route path="/" element={<Layout><Index /></Layout>} />
-            <Route path="/search" element={<Layout><SearchResults /></Layout>} />
-            <Route path="/past-papers" element={<Layout><SearchResults /></Layout>} />
+            <Route path="/resources" element={<Layout><SearchResults /></Layout>} />
+            <Route path="/search" element={<Navigate to="/resources" replace />} />
+            <Route path="/past-papers" element={<Navigate to="/resources?type=paper" replace />} />
             <Route path="/study-resources" element={<Layout><Index /></Layout>} />
             <Route path="/story" element={<Layout><Story /></Layout>} />
             <Route path="/student-stories" element={<Layout><Story /></Layout>} />
             <Route path="/terms" element={<Layout><Terms /></Layout>} />
             <Route path="/privacy" element={<Layout><Privacy /></Layout>} />
             <Route path="/paper/:id" element={<Layout><PaperDetails /></Layout>} />
-            <Route path="/upload" element={<Layout><Upload /></Layout>} />
+            <Route
+              path="/upload"
+              element={
+                <ProtectedAdminRoute allowedRoles={['admin', 'cp']} title="upload">
+                  <Layout><Upload /></Layout>
+                </ProtectedAdminRoute>
+              }
+            />
             <Route path="/dashboard" element={<Layout><Dashboard /></Layout>} />
+            <Route path="/books" element={<Navigate to="/resources?type=book" replace />} />
             <Route path="/profile" element={<Layout><Profile /></Layout>} />
             <Route path="/profile/:userId" element={<Layout><PublicProfile /></Layout>} />
             <Route

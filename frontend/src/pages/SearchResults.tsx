@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { fetchAllPapers, getCachedPaperListSnapshot, Paper, resolvePublicUserProfiles } from '../lib/client';
+import { fetchBooks, type Book } from '../lib/books';
 import AvatarFallback from '../components/AvatarFallback';
 import OfflineDataBanner from '../components/OfflineDataBanner';
 import ExpandableContentSection from '../components/ExpandableContentSection';
@@ -58,6 +59,8 @@ export default function SearchResults() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [papers, setPapers] = useState<Paper[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [resourceType, setResourceType] = useState<'all' | 'paper' | 'book'>((searchParams.get('resource') as 'all' | 'paper' | 'book') || 'all');
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [college, setCollege] = useState(searchParams.get('college') || '');
@@ -79,6 +82,7 @@ export default function SearchResults() {
       setLoading(false);
     }
     void loadPapers();
+    void fetchBooks().then((data) => setBooks(data.items)).catch(() => setBooks([]));
   }, []);
 
   useEffect(() => {
@@ -90,6 +94,8 @@ export default function SearchResults() {
     setYear(searchParams.get('year') || '');
     setUploader(searchParams.get('uploader') || '');
     setSortBy(searchParams.get('sort') || '-download_count');
+    const resource = searchParams.get('resource');
+    setResourceType(resource === 'paper' || resource === 'book' ? resource : 'all');
   }, [searchParams]);
 
   // uploaderProfiles effect moved below filteredPapers declaration to avoid
@@ -105,8 +111,9 @@ export default function SearchResults() {
     if (year) params.set('year', year);
     if (uploader) params.set('uploader', uploader);
     if (sortBy) params.set('sort', sortBy);
+    if (resourceType !== 'all') params.set('resource', resourceType);
     setSearchParams(params);
-  }, [searchQuery, college, department, course, paperType, year, uploader, sortBy, setSearchParams]);
+  }, [searchQuery, college, department, course, paperType, year, uploader, sortBy, resourceType, setSearchParams]);
 
   const loadPapers = async () => {
     try {
@@ -184,6 +191,14 @@ export default function SearchResults() {
     return result;
   }, [papers, searchQuery, college, department, course, paperType, year, uploader, sortBy]);
 
+  const filteredBooks = useMemo(() => books.filter((book) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q && ![book.title, book.description, book.isbn, book.publisher, book.authors.join(' '), book.uploader_name, book.course_ids.join(' ')].filter(Boolean).some((value) => String(value).toLowerCase().includes(q))) return false;
+    return (!year || book.publication_year === Number(year));
+  }), [books, searchQuery, year]);
+  const visiblePaperResults = resourceType !== 'book' ? filteredPapers : [];
+  const visibleBookResults = resourceType !== 'paper' ? filteredBooks : [];
+
   // resolve uploader public profiles for visible results
   useEffect(() => {
     const ids = Array.from(new Set(filteredPapers.map((p) => p.user_id)));
@@ -233,10 +248,11 @@ export default function SearchResults() {
         <OfflineDataBanner message="These search results are coming from cached paper data while the live service is unavailable." />
       )}
       <div className="theme-overlay-card mb-8 rounded-2xl border p-4 backdrop-blur">
-        <h1 className="theme-title mb-4 text-3xl font-bold">Browse Papers</h1>
+        <h1 className="theme-title mb-4 text-3xl font-bold">Browse Resources</h1>
         <p className="theme-muted mb-4 max-w-4xl text-sm leading-7">
-          Search <strong>University of Rwanda past papers</strong>, browse <strong>UR exam papers</strong> by course and year, and compare the most relevant <strong>study materials Rwanda</strong> students use when revising for tests, CATs, assignments, and final exams.
+          Search <strong>University of Rwanda academic resources</strong>, including past papers, books, courses, and revision materials.
         </p>
+        <div className="mb-4 flex flex-wrap gap-2"><Button size="sm" variant={resourceType === 'all' ? 'default' : 'outline'} onClick={() => setResourceType('all')}>All</Button><Button size="sm" variant={resourceType === 'paper' ? 'default' : 'outline'} onClick={() => setResourceType('paper')}>📄 Papers</Button><Button size="sm" variant={resourceType === 'book' ? 'default' : 'outline'} onClick={() => setResourceType('book')}>📚 Books</Button></div>
         <form
           onSubmit={(event) => event.preventDefault()}
           className="flex flex-col gap-2 md:flex-row"
@@ -246,7 +262,7 @@ export default function SearchResults() {
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by course code, course name, lecturer, uploader, or keyword..."
+              placeholder="Search by course code, course name, title, author, module, lecturer, uploader, ISBN, or keyword..."
               className="h-11 pl-10"
             />
           </div>
@@ -395,7 +411,7 @@ export default function SearchResults() {
 
       <div className="mb-4 flex items-center justify-between">
         <p className="theme-muted text-sm">
-          {loading ? 'Loading...' : `${filteredPapers.length} paper${filteredPapers.length !== 1 ? 's' : ''} found`}
+          {loading ? 'Loading...' : resourceType === 'all' ? `${visiblePaperResults.length + visibleBookResults.length} resources found` : resourceType === 'paper' ? `${visiblePaperResults.length} papers found` : `${visibleBookResults.length} books found`}
         </p>
       </div>
 
@@ -411,14 +427,14 @@ export default function SearchResults() {
             </Card>
           ))}
         </div>
-      ) : filteredPapers.length === 0 ? (
+      ) : visiblePaperResults.length + visibleBookResults.length === 0 ? (
         <div className="py-16 text-center">
           <img
             src="/assets/illustrations/search-empty.svg"
             alt="No matching academic papers"
             className="mx-auto mb-6 h-48 w-48 rounded-lg opacity-70"
           />
-          <h3 className="theme-title mb-2 text-xl font-semibold">No papers found</h3>
+          <h3 className="theme-title mb-2 text-xl font-semibold">No resources found</h3>
           <p className="theme-muted mb-4">Try adjusting your search or filters</p>
           <Button onClick={clearFilters} className="theme-accent-bg">
             Clear Filters
@@ -426,13 +442,13 @@ export default function SearchResults() {
         </div>
       ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredPapers.map((paper) => (
+            {visiblePaperResults.map((paper) => (
               <Link key={paper.id} to={`/paper/${paper.id}`} className="block">
                 <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
                   <CardContent className="p-5">
                     <div className="mb-3 flex items-start justify-between">
                       <Badge variant="outline" className="border-primary text-xs font-medium text-primary">
-                        {paper.paper_type}
+                        📄 PAPER · {paper.paper_type}
                       </Badge>
                       <VerificationBadge status={paper.verification_status} />
                     </div>
@@ -481,6 +497,9 @@ export default function SearchResults() {
                   </CardContent>
                 </Card>
               </Link>
+            ))}
+            {visibleBookResults.map((book) => (
+              <Card key={`book-${book.id}`} className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"><CardContent className="p-5"><div className="mb-3 flex items-start justify-between"><Badge variant="outline" className="border-primary text-xs font-medium text-primary">📚 BOOK</Badge>{book.cover_key && <BookOpen className="h-5 w-5 text-muted-foreground" />}</div><h3 className="theme-title mb-2 line-clamp-2 font-semibold">{book.title}</h3><div className="theme-muted space-y-1 text-sm"><p>{book.authors.join(', ') || 'Author not specified'}</p><p>{book.course_ids.join(' · ') || 'No related course'}</p><p>{book.modules?.map((module) => module.name).join(' · ')}</p><p>{book.language} {book.edition ? `· ${book.edition}` : ''}</p><p>Uploaded by {book.uploader_name || book.uploaded_by}</p></div><div className="mt-4 border-t pt-3 text-sm font-medium text-primary">View Book</div></CardContent></Card>
             ))}
           </div>
       )}

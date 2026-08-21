@@ -16,6 +16,9 @@ from services.papers import PapersService
 from services.passage_indexing import PassageIndexService
 from dependencies.auth import get_current_user
 from schemas.auth import UserResponse
+from services.authorization import require_upload_permission
+from services.authorization import require_paper_management
+from models.papers import Papers
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -325,6 +328,7 @@ async def create_papers(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new papers"""
+    await require_upload_permission(current_user)
     logger.debug(f"Creating new papers with data: {data}")
     
     service = PapersService(db)
@@ -350,6 +354,7 @@ async def create_paperss_batch(
     db: AsyncSession = Depends(get_db),
 ):
     """Create multiple paperss in a single request"""
+    await require_upload_permission(current_user)
     logger.debug(f"Batch creating {len(request.items)} paperss")
     
     service = PapersService(db)
@@ -406,6 +411,10 @@ async def update_papers(
 ):
     """Update an existing papers (requires ownership)"""
     logger.debug(f"Updating papers {id} with data: {data}")
+    existing = await db.get(Papers, id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Papers not found")
+    await require_paper_management(db, current_user, existing)
 
     service = PapersService(db)
     try:
@@ -462,6 +471,10 @@ async def delete_papers(
 ):
     """Delete a single papers by ID (requires ownership)"""
     logger.debug(f"Deleting papers with id: {id}")
+    existing = await db.get(Papers, id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Papers not found")
+    await require_paper_management(db, current_user, existing)
     
     service = PapersService(db)
     try:

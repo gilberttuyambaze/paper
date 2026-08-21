@@ -1067,6 +1067,33 @@ select:disabled {
   }
 }
 
+.resource-highlight-viewport {
+  height: 22rem;
+  overflow: hidden;
+}
+
+.resource-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.resource-highlight-tile {
+  min-width: 0;
+  height: 7rem;
+  overflow: hidden;
+  animation: resource-highlight-switch 420ms ease both;
+}
+
+@keyframes resource-highlight-switch {
+  from { opacity: 0; transform: scale(0.975); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-highlight-tile { animation: none; }
+}
+
 @media (max-width: 640px) {
   .startup-card {
     padding: 1.5rem;

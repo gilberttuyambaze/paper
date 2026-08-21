@@ -107,10 +107,11 @@ export default function Layout({ children }: LayoutProps) {
 
   const navItems = [
     { path: '/', label: 'Home', icon: BookOpen },
-    { path: '/past-papers', label: 'Browse Papers', icon: Search },
-    { path: '/upload', label: 'Upload', icon: Upload, auth: true },
+    { path: '/resources', label: 'Browse Resources', icon: Search },
+    { path: '/upload', label: 'Upload', icon: Upload, auth: true, roles: ['admin', 'cp'] },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, auth: true },
   ];
+  const canUpload = user?.role === 'admin' || user?.role === 'cp';
   const canAccessManagement = user?.role === 'admin' || user?.role === 'content_manager';
   const managementPath = user?.role === 'content_manager' ? '/content-manager' : '/admin';
   const managementLabel = user?.role === 'content_manager' ? 'Content Manager' : 'Admin';
@@ -124,12 +125,12 @@ export default function Layout({ children }: LayoutProps) {
       };
     }
 
-    if (location.pathname === '/past-papers' || location.pathname === '/search') {
+    if (location.pathname === '/resources') {
       return {
-        title: 'UR exam papers and University of Rwanda past papers',
+        title: 'University of Rwanda academic resources',
         description:
           'Browse UR exam papers, University of Rwanda past papers, and study materials Rwanda learners can filter by course, department, year, and paper type.',
-        canonicalPath: location.pathname === '/past-papers' ? '/past-papers' : '/search',
+        canonicalPath: '/resources',
       };
     }
 
@@ -236,6 +237,7 @@ export default function Layout({ children }: LayoutProps) {
             <nav className="hidden items-center gap-1 md:flex">
               {navItems.map((item) => {
                 if (item.auth && !user) return null;
+                if (item.roles && (!user || !item.roles.includes(user.role))) return null;
                 const Icon = item.icon;
 
                 return (
@@ -368,6 +370,7 @@ export default function Layout({ children }: LayoutProps) {
                     )}
                     {navItems.map((item) => {
                       if (item.auth && !user) return null;
+                      if (item.roles && (!user || !item.roles.includes(user.role))) return null;
                       const Icon = item.icon;
 
                       return (
@@ -421,8 +424,8 @@ export default function Layout({ children }: LayoutProps) {
               <h3 className="theme-title mb-3 font-semibold">Quick Links</h3>
               <div className="theme-muted flex flex-col gap-2 text-sm">
                 <Link to="/" className="transition-colors hover:text-primary">Home</Link>
-                <Link to="/past-papers" className="transition-colors hover:text-primary">Browse Papers</Link>
-                <Link to="/upload" className="transition-colors hover:text-primary">Upload Paper</Link>
+                <Link to="/resources" className="transition-colors hover:text-primary">Browse Resources</Link>
+                {canUpload && <Link to="/upload" className="transition-colors hover:text-primary">Upload</Link>}
                 <Link to="/student-stories" className="transition-colors hover:text-primary">Story Behind This Website</Link>
               </div>
             </div>

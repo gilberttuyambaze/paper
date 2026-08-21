@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useEffect, useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   fetchAdminRoleRequests,
@@ -116,6 +116,15 @@ function createDraft(profile: UserProfile): UserDraft {
   };
 }
 
+function useDebounced<T>(value: T, delay = 250) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 function RoleBadge({ role }: { role: string }) {
   const styles =
     role === 'admin'
@@ -228,55 +237,84 @@ export default function AdminPage() {
     }
   }, [user]);
 
-  const openUserDialog = (profile: UserProfile) => {
-    setSelectedUser(profile);
-    setDraft(createDraft(profile));
-    setDialogOpen(true);
-  };
+  const debouncedUserSearch = useDebounced(userSearch, 250);
+  const debouncedPaperSearch = useDebounced(paperSearch, 250);
 
-  const updateDraft = <K extends keyof UserDraft>(field: K, value: UserDraft[K]) => {
-    setDraft((current) => (current ? { ...current, [field]: value } : current));
-  };
-
-  const filteredUsers = users.filter((profile) => {
-    if (!userSearch) return true;
-    const q = userSearch.toLowerCase();
-    return (
+  const filteredUsers = useMemo(() => {
+    if (!debouncedUserSearch) return users;
+    const q = debouncedUserSearch.toLowerCase();
+    return users.filter((profile) =>
       profile.display_name.toLowerCase().includes(q) ||
       (profile.email || '').toLowerCase().includes(q) ||
       profile.role.toLowerCase().includes(q) ||
       (profile.university_name || '').toLowerCase().includes(q) ||
       (profile.ur_student_code || '').toLowerCase().includes(q)
     );
-  });
+  }, [users, debouncedUserSearch]);
 
-  const filteredRoleRequests = roleRequests.filter((profile) => {
-    if (!userSearch) return true;
-    const q = userSearch.toLowerCase();
-    return (
+  const filteredRoleRequests = useMemo(() => {
+    if (!debouncedUserSearch) return roleRequests;
+    const q = debouncedUserSearch.toLowerCase();
+    return roleRequests.filter((profile) =>
       profile.display_name.toLowerCase().includes(q) ||
       (profile.email || '').toLowerCase().includes(q) ||
       (profile.requested_role || '').toLowerCase().includes(q) ||
       (profile.university_name || '').toLowerCase().includes(q) ||
       (profile.ur_student_code || '').toLowerCase().includes(q)
     );
-  });
+  }, [roleRequests, debouncedUserSearch]);
 
-  const filteredPapers = papers.filter((paper) => {
-    if (!paperSearch) return true;
-    const q = paperSearch.toLowerCase();
-    return (
+  const filteredPapers = useMemo(() => {
+    if (!debouncedPaperSearch) return papers;
+    const q = debouncedPaperSearch.toLowerCase();
+    return papers.filter((paper) =>
       paper.title.toLowerCase().includes(q) ||
       paper.course_code.toLowerCase().includes(q) ||
       paper.course_name.toLowerCase().includes(q) ||
       (paper.lecturer || '').toLowerCase().includes(q)
     );
-  });
+  }, [papers, debouncedPaperSearch]);
 
-  const pendingPapers = filteredPapers.filter((paper) => paper.verification_status === 'unverified');
-  const reportedPapers = filteredPapers.filter((paper) => (paper.report_count || 0) > 0);
-  const hiddenPapers = filteredPapers.filter((paper) => paper.is_hidden);
-  const totalDownloads = papers.reduce((sum, paper) => sum + (paper.download_count || 0), 0);
+  const pendingPapers = useMemo(() => filteredPapers.filter((paper) => paper.verification_status === 'unverified'), [filteredPapers]);
+  const reportedPapers = useMemo(() => filteredPapers.filter((paper) => (paper.report_count || 0) > 0), [filteredPapers]);
+  const hiddenPapers = useMemo(() => filteredPapers.filter((paper) => paper.is_hidden), [filteredPapers]);
+  const totalDownloads = useMemo(() => papers.reduce((sum, paper) => sum + (paper.download_count || 0), 0), [papers]);
+  // Pagination state to avoid rendering huge lists at once
+  const [userPage, setUserPage] = useState(1);
+  const USERS_PER_PAGE = 50;
+  const userPageCount = Math.max(1, Math.ceil(filteredUsers.length / USERS_PER_PAGE));
+  const paginatedUsers = useMemo(() => {
+    const start = (userPage - 1) * USERS_PER_PAGE;
+    return filteredUsers.slice(start, start + USERS_PER_PAGE);
+  }, [filteredUsers, userPage]);
+
+  useEffect(() => {
+    if (userPage > userPageCount) setUserPage(1);
+  }, [userPageCount]);
+
+  const [roleRequestPage, setRoleRequestPage] = useState(1);
+  const ROLE_REQUESTS_PER_PAGE = 50;
+  const roleRequestPageCount = Math.max(1, Math.ceil(filteredRoleRequests.length / ROLE_REQUESTS_PER_PAGE));
+  const paginatedRoleRequests = useMemo(() => {
+    const start = (roleRequestPage - 1) * ROLE_REQUESTS_PER_PAGE;
+    return filteredRoleRequests.slice(start, start + ROLE_REQUESTS_PER_PAGE);
+  }, [filteredRoleRequests, roleRequestPage]);
+
+  useEffect(() => {
+    if (roleRequestPage > roleRequestPageCount) setRoleRequestPage(1);
+  }, [roleRequestPageCount]);
+
+  const [paperPage, setPaperPage] = useState(1);
+  const PAPERS_PER_PAGE = 50;
+  const paperPageCount = Math.max(1, Math.ceil(filteredPapers.length / PAPERS_PER_PAGE));
+  const paginatedPapers = useMemo(() => {
+    const start = (paperPage - 1) * PAPERS_PER_PAGE;
+    return filteredPapers.slice(start, start + PAPERS_PER_PAGE);
+  }, [filteredPapers, paperPage]);
+
+  useEffect(() => {
+    if (paperPage > paperPageCount) setPaperPage(1);
+  }, [paperPageCount]);
   const [uploaderProfiles, setUploaderProfiles] = useState<Record<string, { profile?: any; imageUrl?: string | null }>>({});
   const selectedUserIsAdmin = selectedUser?.role === 'admin';
   const adminProtected = selectedUserIsAdmin && !canAssignAdmin;
@@ -321,26 +359,32 @@ export default function AdminPage() {
     }
   };
 
+  const visiblePaperIds = useMemo(() => Array.from(new Set(paginatedPapers.map((p) => p.user_id))).filter(Boolean), [paginatedPapers]);
+
   useEffect(() => {
-    const ids = Array.from(new Set(filteredPapers.map((p) => p.user_id)));
-    if (ids.length === 0) return;
+    if (visiblePaperIds.length === 0) {
+      setUploaderProfiles({});
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
-        const resolved = await resolvePublicUserProfiles(ids);
+        const resolved = await resolvePublicUserProfiles(visiblePaperIds);
         if (cancelled) return;
         const next: Record<string, { profile?: any; imageUrl?: string | null }> = {};
-        for (const id of ids) {
-          const r = resolved[id];
-          next[id] = { profile: r.profile || undefined, imageUrl: r.imageUrl || null };
+        for (const id of visiblePaperIds) {
+          const r = resolved[id] || {};
+          next[id] = { profile: r.profile || undefined, imageUrl: r.imageUrl ?? null };
         }
         setUploaderProfiles(next);
       } catch (e) {
         // ignore
       }
     })();
-    return () => { cancelled = true; };
-  }, [filteredPapers]);
+    return () => {
+      cancelled = true;
+    };
+  }, [visiblePaperIds]);
 
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
@@ -534,81 +578,59 @@ export default function AdminPage() {
                   No users match the current search.
                 </div>
               ) : (
-                <div className="grid gap-4 xl:grid-cols-2 items-stretch">
-                  {filteredUsers.map((profile) => (
-                    <Card key={profile.id} className="border-border/80 bg-card/85 h-full">
-                      <CardContent className="space-y-4 p-5 flex flex-col h-full overflow-hidden">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="mb-2 flex flex-wrap items-center gap-2">
-                              <h3 className="text-lg font-semibold text-foreground truncate">{profile.display_name}</h3>
-                              <RoleBadge role={profile.role} />
-                              <StatusBadge status={profile.account_status} />
-                              <RequestedRoleBadge requestedRole={profile.requested_role} requestedRoleStatus={profile.requested_role_status} />
-                            </div>
-                            <p className="flex items-center gap-2 text-sm text-muted-foreground truncate">
-                              <Mail className="h-4 w-4" />
-                              <span className="truncate">{profile.email || 'No email saved'}</span>
-                            </p>
-                            <p className="mt-2 text-sm text-muted-foreground truncate">
-                              <span className="block truncate">{profile.institution_type === 'ur_student'
-                                ? `University of Rwanda - ${profile.ur_student_code || 'UR code missing'}`
-                                : profile.university_name || 'University not specified'}</span>
-                            </p>
-                          </div>
-                          <div className="shrink-0 mt-2 sm:mt-0">
-                            <Button variant="outline" size="sm" onClick={() => openUserDialog(profile)} className="whitespace-nowrap">
-                              View details
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 mt-auto">
-                          <p className="truncate">Trust score: <span className="font-medium text-foreground">{profile.trust_score || 0}</span></p>
-                          <p className="truncate">Uploads: <span className="font-medium text-foreground">{profile.upload_count || 0}</span></p>
-                          <p className="truncate">Downloads: <span className="font-medium text-foreground">{profile.download_count || 0}</span></p>
-                          <p className="truncate">Last login: <span className="font-medium text-foreground">{formatDate(profile.last_login)}</span></p>
-                        </div>
-                      </CardContent>
-                    </Card>
+                <div className="space-y-2">
+                  {paginatedUsers.map((profile) => (
+                    <div key={profile.id} className="p-2 rounded border">
+                      <div className="font-medium">{profile.display_name}</div>
+                      <div className="text-xs text-muted-foreground">{profile.email || ''}</div>
+                    </div>
                   ))}
+                  <div className="mt-2 flex items-center justify-center gap-2">
+                    <Button disabled={userPage <= 1} onClick={() => setUserPage((p) => Math.max(1, p - 1))}>{'<'}</Button>
+                    <div className="text-sm">Page {userPage} / {userPageCount}</div>
+                    <Button disabled={userPage >= userPageCount} onClick={() => setUserPage((p) => Math.min(userPageCount, p + 1))}>{'>'}</Button>
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        <Dialog open={detailsOpen} onOpenChange={(open) => setDetailsOpen(open)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Submissions for {selectedCandidateName}</DialogTitle>
-              <DialogDescription>Original submitted values (user identity hidden) and status.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2">
-              {selectedCandidateSubmissions.length === 0 ? <p className="theme-muted">No submissions found.</p> : selectedCandidateSubmissions.map((s) => (
-                <div key={s.id} className="theme-soft-panel p-2 rounded">
-                  <p className="theme-title text-sm">{s.raw_programme_name}</p>
-                  <p className="theme-muted text-xs">Normalized: {s.normalized_programme_name} · Status: {s.status} · Created: {s.created_at || 'n/a'}</p>
-                </div>
-              ))}
-            </div>
-            <DialogFooter>
-              <Button onClick={() => setDetailsOpen(false)}>Close</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          <Dialog open={detailsOpen} onOpenChange={(open) => setDetailsOpen(open)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Submissions for {selectedCandidateName}</DialogTitle>
+                <DialogDescription>Original submitted values (user identity hidden) and status.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                {selectedCandidateSubmissions.length === 0 ? (
+                  <p className="theme-muted">No submissions found.</p>
+                ) : (
+                  selectedCandidateSubmissions.map((s) => (
+                    <div key={s.id} className="theme-soft-panel p-2 rounded">
+                      <p className="theme-title text-sm">{s.raw_programme_name}</p>
+                      <p className="theme-muted text-xs">Normalized: {s.normalized_programme_name} · Status: {s.status} · Created: {s.created_at || 'n/a'}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setDetailsOpen(false)}>Close</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
-        <TabsContent value="programme-candidates">
-          <Card className="theme-panel">
-            <CardHeader>
-              <CardTitle className="theme-title flex items-center gap-2">Programme Discovery</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <p className="theme-muted text-sm">Aggregated unlisted programme submissions grouped by normalized value. Use these tools to verify aliases or reject noisy entries.</p>
-                <div>
-                  <Button onClick={async () => { try { setLoading(true); const res = await fetchProgrammeCandidatesDetailed(); setProgrammeCandidates(res.items); } finally { setLoading(false); } }}>Refresh candidates</Button>
-                </div>
+          <TabsContent value="programme-candidates">
+            <Card className="theme-panel">
+              <CardHeader>
+                <CardTitle className="theme-title flex items-center gap-2">Programme Discovery</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <p className="theme-muted text-sm">Aggregated unlisted programme submissions grouped by normalized value. Use these tools to verify aliases or reject noisy entries.</p>
+                  <div>
+                    <Button onClick={async () => { try { setLoading(true); const res = await fetchProgrammeCandidatesDetailed(); setProgrammeCandidates(res.items); } finally { setLoading(false); } }}>Refresh candidates</Button>
+                  </div>
                 {programmeCandidates.length === 0 ? (
                   <p className="theme-muted">No programme candidates found.</p>
                 ) : (
@@ -686,8 +708,9 @@ export default function AdminPage() {
                   No pending CP or lecturer requests right now.
                 </div>
               ) : (
+                <>
                 <div className="grid gap-4 xl:grid-cols-2">
-                  {filteredRoleRequests.map((profile) => (
+                  {paginatedRoleRequests.map((profile) => (
                     <Card key={profile.id} className="border-border/80 bg-card/85">
                       <CardContent className="space-y-4 p-5">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -736,6 +759,12 @@ export default function AdminPage() {
                     </Card>
                   ))}
                 </div>
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <Button disabled={roleRequestPage <= 1} onClick={() => setRoleRequestPage((p) => Math.max(1, p - 1))}>{'<'}</Button>
+                  <div className="text-sm">Page {roleRequestPage} / {roleRequestPageCount}</div>
+                  <Button disabled={roleRequestPage >= roleRequestPageCount} onClick={() => setRoleRequestPage((p) => Math.min(roleRequestPageCount, p + 1))}>{'>'}</Button>
+                </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -827,8 +856,8 @@ export default function AdminPage() {
             </Card>
           </div>
 
-          <div className="space-y-3">
-            {filteredPapers.map((paper) => (
+            <div className="space-y-3">
+            {paginatedPapers.map((paper) => (
               <Card key={paper.id} className="theme-panel">
                 <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center">
                   <div className="min-w-0 flex-1">
@@ -897,6 +926,11 @@ export default function AdminPage() {
                 </CardContent>
               </Card>
             ))}
+          </div>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <Button disabled={paperPage <= 1} onClick={() => setPaperPage((p) => Math.max(1, p - 1))}>{'<'}</Button>
+            <div className="text-sm">Page {paperPage} / {paperPageCount}</div>
+            <Button disabled={paperPage >= paperPageCount} onClick={() => setPaperPage((p) => Math.min(paperPageCount, p + 1))}>{'>'}</Button>
           </div>
         </TabsContent>
       </Tabs>
@@ -1050,9 +1084,6 @@ export default function AdminPage() {
                   <Textarea id="user-bio" value={draft.bio} onChange={(event) => updateDraft('bio', event.target.value)} disabled={adminProtected} className="min-h-[120px]" />
                 </div>
               </div>
-            </div>
-          )}
-
           <DialogFooter className="gap-3">
             <Button
               variant="destructive"
@@ -1066,6 +1097,8 @@ export default function AdminPage() {
               {saving ? 'Saving...' : 'Save changes'}
             </Button>
           </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

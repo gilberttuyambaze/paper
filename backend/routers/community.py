@@ -19,6 +19,7 @@ from models.solutions import Solutions
 from models.user_profiles import User_profiles
 from routers.notifications import create_notification
 from schemas.auth import UserResponse
+from services.authorization import require_upload_permission
 from services.auth import ensure_user_profile_record
 from services.academic_taxonomy import context_names, validate_context
 from services.programme_discovery import normalize_programme_name, record_submission
@@ -569,6 +570,7 @@ async def create_paper(
     current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await require_upload_permission(current_user)
     validate_context(payload.institution_id, payload.campus_id, payload.college_id, payload.school_id, payload.programme_id, payload.academic_department_id)
     if payload.programme_id == "other":
         if not payload.programme_name_other: raise HTTPException(400, "Enter your programme name")
