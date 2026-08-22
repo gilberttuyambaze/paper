@@ -335,9 +335,7 @@ export default function HomePage() {
               <p className="theme-hero-copy mb-4 mt-4 text-lg">
                 Access past papers, academic books, trusted solutions, and study support that helps University of Rwanda learners prepare faster and study smarter.
               </p>
-              <p className="theme-hero-copy mb-8 max-w-xl text-sm leading-6">
-                Search past papers and course books, discover lecturer-linked material, and learn from a growing community that keeps useful content visible.
-              </p>
+             
 
               <form onSubmit={handleSearch} className="mb-8 flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">

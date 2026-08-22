@@ -270,10 +270,7 @@ export default function SearchResults() {
         <OfflineDataBanner message="These search results are coming from cached paper data while the live service is unavailable." />
       )}
       <div className="theme-overlay-card mb-8 rounded-2xl border p-4 backdrop-blur">
-        <h1 className="theme-title mb-4 text-3xl font-bold">Browse Resources</h1>
-        <p className="theme-muted mb-4 max-w-4xl text-sm leading-7">
-          Search <strong>University of Rwanda academic resources</strong>, including past papers, books, courses, and revision materials.
-        </p>
+        
         <div className="mb-4 flex flex-wrap gap-2"><Button size="sm" variant={resourceType === 'all' ? 'default' : 'outline'} onClick={() => setResourceType('all')}>All Resources</Button><Button size="sm" variant={resourceType === 'paper' ? 'default' : 'outline'} onClick={() => setResourceType('paper')}>📄 Papers</Button><Button size="sm" variant={resourceType === 'book' ? 'default' : 'outline'} onClick={() => setResourceType('book')}>📚 Books</Button></div>
         <form
           onSubmit={(event) => event.preventDefault()}
