@@ -325,7 +325,7 @@ export default function HomePage() {
           }}
         />
         <div className="theme-hero-overlay absolute inset-0 pointer-events-none" />
-        <div className="relative mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 md:py-28"> 
+        <div className="relative mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 md:py-28"> 
           <div className="grid gap-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
             <div className="max-w-2xl">
               <h1 className="text-4xl font-bold leading-tight md:text-5xl">
@@ -396,7 +396,7 @@ export default function HomePage() {
                 <div className="mb-5 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">Highlighted resources</p>
-                    <h2 className="mt-2 text-2xl font-bold">What students are opening most</h2>
+                    <h2 className="mt-2 text-1xl font-bold">What students are opening most</h2>
                   </div>
                   <Badge className="theme-highlight-stat shrink-0 hover:bg-transparent">Live picks</Badge>
                 </div>
@@ -439,7 +439,7 @@ export default function HomePage() {
           <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="theme-link-accent text-xs font-semibold uppercase tracking-[0.28em]">For you</p>
-              <h2 className="theme-title mt-2 text-2xl font-bold">Personalized paper picks</h2>
+              <h2 className="theme-title mt-2 text-1xl font-bold">Personalized paper picks</h2>
               <p className="theme-muted mt-2 max-w-2xl text-sm">
                 We use your recent opens and downloads to suggest papers with similar course, department, lecturer, and paper-type patterns.
               </p>
@@ -520,28 +520,28 @@ export default function HomePage() {
             <div className="text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
                 <FileText className="theme-accent h-5 w-5" />
-                <span className="theme-title text-2xl font-bold">{stats.total}</span>
+                <span className="theme-title text-1xl font-bold">{stats.total}</span>
               </div>
               <p className="theme-muted text-sm">Total Papers</p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
                 <Download className="theme-accent h-5 w-5" />
-                <span className="theme-title text-2xl font-bold">{stats.downloads.toLocaleString()}</span>
+                <span className="theme-title text-1xl font-bold">{stats.downloads.toLocaleString()}</span>
               </div>
               <p className="theme-muted text-sm">Total Downloads</p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
                 <CheckCircle className="h-5 w-5 text-success" />
-                <span className="theme-title text-2xl font-bold">{stats.verified}</span>
+                <span className="theme-title text-1xl font-bold">{stats.verified}</span>
               </div>
               <p className="theme-muted text-sm">Verified Papers</p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
                 <BookOpen className="theme-accent h-5 w-5" />
-                <span className="theme-title text-2xl font-bold">{books.length}</span>
+                <span className="theme-title text-1xl font-bold">{books.length}</span>
               </div>
               <p className="theme-muted text-sm">Academic Books</p>
             </div>
@@ -551,7 +551,7 @@ export default function HomePage() {
 
       {/* Browse by College */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <h2 className="theme-title mb-6 text-2xl font-bold">Browse by College</h2>
+        <h2 className="theme-title mb-6 text-1xl font-bold">Browse by College</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {colleges.map((college) => (
             <Link key={college} to={`/resources?college=${encodeURIComponent(college)}`} className="block">
@@ -571,7 +571,7 @@ export default function HomePage() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
             <TrendingUp className="theme-accent h-6 w-6" />
-            <h2 className="theme-title text-2xl font-bold">Trending Papers</h2>
+            <h2 className="theme-title text-1xl font-bold">Trending Papers</h2>
           </div>
           <Button variant="ghost" asChild className="theme-accent hover:text-primary">
             <Link to="/resources?resource=paper">View All <ArrowRight className="ml-1 h-4 w-4" /></Link>
@@ -604,7 +604,7 @@ export default function HomePage() {
             <div className="flex items-center gap-2">
               <BookOpen className="theme-accent h-6 w-6" />
               <div>
-                <h2 className="theme-title text-2xl font-bold">Trending Books</h2>
+                <h2 className="theme-title text-1xl font-bold">Trending Books</h2>
                 <p className="theme-muted text-sm">Ranked by downloads, complete book details, and recent additions.</p>
               </div>
             </div>
@@ -623,7 +623,7 @@ export default function HomePage() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
             <Clock className="theme-accent h-6 w-6" />
-            <h2 className="theme-title text-2xl font-bold">Recently Added Papers</h2>
+            <h2 className="theme-title text-1xl font-bold">Recently Added Papers</h2>
           </div>
           <Button variant="ghost" asChild className="theme-accent hover:text-primary">
             <Link to="/resources?resource=paper&sort=-created_at">View All <ArrowRight className="ml-1 h-4 w-4" /></Link>
@@ -638,25 +638,7 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* CTA Section */}
-      <section className="theme-header theme-cta-section relative mt-8 overflow-hidden">
-        <div
-          className="theme-cta-media absolute inset-0"
-          style={{
-            backgroundImage: `url(${COLLAB_IMAGE})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-          }}
-        />
-        <div className="theme-cta-overlay absolute inset-0 pointer-events-none" />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
-          <h2 className="text-3xl font-bold mb-4">Contribute to the Community</h2>
-          <p className="theme-cta-copy mx-auto mb-8 max-w-xl">
-            Share past papers, academic books, and solutions to help fellow students. Every contribution makes a difference.
-          </p>
-          <div className="theme-muted text-base">Authenticated CP and admin users can continue their secure upload workflow from the protected area.</div>
-        </div>
-      </section>
+      
 
       <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <ExpandableContentSection
