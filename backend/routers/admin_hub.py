@@ -271,6 +271,7 @@ async def get_overview(
     db: AsyncSession = Depends(get_db),
 ):
     total_papers = await db.scalar(select(func.count(Papers.id)))
+    total_books = await db.scalar(select(func.count(Book.id)).where(Book.deleted_at.is_(None)))
     hidden_papers = await db.scalar(select(func.count(Papers.id)).where(Papers.is_hidden.is_(True)))
     verified_papers = await db.scalar(select(func.count(Papers.id)).where(Papers.verification_status == "verified"))
     total_reports = await db.scalar(select(func.count(Reports.id)))
@@ -297,6 +298,8 @@ async def get_overview(
     return {
         "stats": {
             "total_papers": total_papers or 0,
+            "total_books": total_books or 0,
+            "total_resources": (total_papers or 0) + (total_books or 0),
             "hidden_papers": hidden_papers or 0,
             "verified_papers": verified_papers or 0,
             "total_reports": total_reports or 0,
@@ -388,6 +391,7 @@ async def get_user_resources(
     return {
         "papers": [{"id": paper.id, "title": paper.title, "course_code": paper.course_code, "course_name": paper.course_name, "year": paper.year, "paper_type": paper.paper_type, "verification_status": paper.verification_status, "is_hidden": paper.is_hidden, "created_at": paper.created_at} for paper in papers],
         "books": [{"id": book.id, "title": book.title, "language": book.language, "status": book.status, "visibility": book.visibility, "created_at": book.created_at, "deleted_at": book.deleted_at, "file_name": book.file_name, "file_size": book.file_size} for book in books],
+        "stats": {"papers": len(papers), "books": len(books), "total_resources": len(papers) + len(books)},
         "activity": activity[:20],
     }
 

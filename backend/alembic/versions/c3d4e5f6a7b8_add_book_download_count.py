@@ -15,8 +15,14 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("books", sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")))
-    op.create_index("ix_books_download_count", "books", ["download_count"])
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    columns = [c["name"] for c in insp.get_columns("books")]
+    if "download_count" not in columns:
+        op.add_column("books", sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")))
+    indexes = [idx["name"] for idx in insp.get_indexes("books")]
+    if "ix_books_download_count" not in indexes:
+        op.create_index("ix_books_download_count", "books", ["download_count"])
 
 
 def downgrade():

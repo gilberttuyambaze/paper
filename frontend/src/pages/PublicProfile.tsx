@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, BadgeCheck, BookOpen, School, UserCircle2 } from 'lucide-react';
-import { resolvePublicUserProfile, type PublicUserProfile } from '../lib/client';
+import { fetchPublicUserResources, resolvePublicUserProfile, type PublicUserProfile, type ResourceSummary } from '../lib/client';
 import { toast } from '@/lib/messages';
 import AvatarFallback from '../components/AvatarFallback';
 
@@ -29,6 +29,7 @@ export default function PublicProfilePage() {
   const [profile, setProfile] = useState<PublicUserProfile | null>(null);
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resources, setResources] = useState<ResourceSummary[]>([]);
 
   useEffect(() => {
     if (!userId) return;
@@ -43,10 +44,12 @@ export default function PublicProfilePage() {
       const resolved = await resolvePublicUserProfile(nextUserId);
       setProfile(resolved.profile || null);
       setProfileImageUrl(resolved.imageUrl || null);
+      setResources(await fetchPublicUserResources(nextUserId));
     } catch {
       toast.error('Failed to load uploader profile');
       setProfile(null);
       setProfileImageUrl(null);
+      setResources([]);
     } finally {
       setLoading(false);
     }
@@ -138,6 +141,10 @@ export default function PublicProfilePage() {
           </CardContent>
         </Card>
       </div>
+      <Card className="theme-panel mt-6">
+        <CardHeader><CardTitle className="theme-title">Uploaded Resources</CardTitle></CardHeader>
+        <CardContent className="space-y-3">{resources.length ? resources.map((resource) => <button type="button" key={`${resource.type}-${resource.id}`} onClick={() => navigate(resource.type === 'book' ? `/book/${resource.id}` : `/paper/${resource.id}`)} className="theme-list-row flex w-full items-center gap-3 rounded-lg p-3 text-left"><Badge variant="outline">{resource.type.toUpperCase()}</Badge><div className="min-w-0"><p className="theme-title truncate font-medium">{resource.title}</p><p className="theme-muted text-xs">{resource.type === 'book' ? (resource.metadata.authors || []).join(', ') || 'Author not specified' : `${resource.metadata.course_code || 'Course'} · ${resource.metadata.year || '—'}`}</p></div></button>) : <p className="theme-muted text-sm">No public resources yet.</p>}</CardContent>
+      </Card>
     </div>
   );
 }

@@ -636,7 +636,7 @@ async def get_db() -> AsyncSession:
             try:
                 yield session
             except Exception as e:
-                logger.error(f"Database session error: {e}", exc_info=True)
+                logger.debug("Request handler raised while using database session: %s", e)
                 # Don't manually rollback here - AsyncSession.__aexit__ will automatically rollback on exception
                 # Manual rollback would cause "cannot switch to state 15" error due to double rollback
                 raise

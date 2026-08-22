@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -64,11 +65,10 @@ class FileUpDownRequest(OSSBaseModel):
     def validate_object_key(cls, v):
         if not v or len(v.strip()) == 0:
             raise ValueError("object_key cannot be empty")
-
-        try:
-            return normalize_storage_key(v)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
+        value = unicodedata.normalize("NFKC", str(v)).replace("\\", "/").strip("/")
+        if any(part in {".", ".."} for part in value.split("/")) or any(ord(char) < 32 for char in value):
+            raise ValueError("Storage path contains an invalid segment")
+        return value
 
 
 class FileUpDownResponse(BaseModel):
@@ -81,6 +81,8 @@ class FileUpDownResponse(BaseModel):
 
 class FileUploadResponse(BaseModel):
     object_key: str = Field(..., description="Normalized object key stored in the bucket")
+    provider_file_id: str | None = None
+    storage_provider: str | None = None
 
 
 class RenameRequest(OSSBaseModel):

@@ -291,6 +291,7 @@ export interface PersonalizedRecommendationsResponse {
 
 const PAPERS_CACHE_KEY = 'ur-hud-paper-cache-v1';
 const MY_PAPERS_CACHE_KEY = 'ur-hud-my-paper-cache-v1';
+const DASHBOARD_CACHE_KEY = 'ur-hud-dashboard-cache-v1';
 const PERSONALIZED_CACHE_KEY = 'ur-hud-personalized-cache-v1';
 const PENDING_INTERACTION_EVENTS_KEY = 'ur-hud-pending-paper-events-v1';
 const VIEW_THROTTLE_PREFIX = 'ur-hud-paper-view-throttle';
@@ -435,6 +436,7 @@ export async function getStorageDownloadUrl(
   bucketName: string,
   objectKey: string
 ): Promise<string | null> {
+  if (/^https?:\/\//i.test(objectKey)) return objectKey;
   const cacheKey = `${bucketName}:${objectKey}`;
   const existing = storageDownloadUrls.get(cacheKey);
   if (existing) return existing;
@@ -455,6 +457,16 @@ export async function getStorageDownloadUrl(
 
   storageDownloadUrls.set(cacheKey, request);
   return request;
+}
+
+export type DownloadProgress = { loaded: number; total?: number; percent?: number };
+export async function downloadStorageObject(bucketName: string, objectKey: string, onProgress?: (progress: DownloadProgress) => void): Promise<string> {
+  if (/^https?:\/\//i.test(objectKey)) return objectKey;
+  const response = await apiClient.get(apiUrl('/api/v1/storage/download'), {
+    params: { bucket_name: bucketName, object_key: objectKey }, responseType: 'blob',
+    onDownloadProgress: (event) => onProgress?.({ loaded: event.loaded, total: event.total || undefined, percent: event.total ? Math.round((event.loaded / event.total) * 100) : undefined }),
+  });
+  return URL.createObjectURL(response.data as Blob);
 }
 
 // API helpers
@@ -541,7 +553,44 @@ export async function fetchPaperById(id: number): Promise<Paper> {
 
 export async function createPaper(data: Partial<Paper>): Promise<Paper> {
   const response = await apiClient.post(apiUrl('/api/v1/community/papers'), data);
+  invalidateResourceCaches();
   return response.data as Paper;
+}
+
+export type ResourceSummary = {
+  id: number; type: 'paper' | 'book'; title: string; created_at: string | null;
+  uploader_id: string; downloads: number; visibility: string; verification_status: string | null;
+  metadata: Record<string, any>;
+};
+export type DashboardData = {
+  stats: { total_uploads: number; paper_count: number; book_count: number; total_downloads: number; verified_paper_count: number; average_downloads: number };
+  uploaded_resources: ResourceSummary[];
+  contribution: { upload_count: number; trust_score: number; role: string };
+  leaderboard: UserProfile[];
+};
+
+export function getCachedDashboard(): DashboardData | null {
+  if (typeof window === 'undefined') return null;
+  try { return JSON.parse(window.localStorage.getItem(DASHBOARD_CACHE_KEY) || 'null') as DashboardData | null; } catch { return null; }
+}
+
+export async function fetchDashboard(): Promise<DashboardData> {
+  const response = await apiClient.get(apiUrl('/api/v1/community/dashboard'));
+  const data = response.data as DashboardData;
+  if (typeof window !== 'undefined') window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(data));
+  return data;
+}
+
+export async function fetchPublicUserResources(userId: string): Promise<ResourceSummary[]> {
+  const response = await apiClient.get(apiUrl(`/api/v1/community/profiles/${userId}/resources`));
+  return (response.data?.items || []) as ResourceSummary[];
+}
+
+/** Called only after a committed resource mutation; listeners refresh in the background. */
+export function invalidateResourceCaches() {
+  if (typeof window === 'undefined') return;
+  [PAPERS_CACHE_KEY, MY_PAPERS_CACHE_KEY, DASHBOARD_CACHE_KEY].forEach((key) => window.localStorage.removeItem(key));
+  window.dispatchEvent(new Event('ur-resource-mutated'));
 }
 
 export async function fetchMyPapers(): Promise<PaperListResponse> {
@@ -596,8 +645,7 @@ export async function createComment(data: {
 }
 
 export async function fetchComments(paperId: number): Promise<{ items: Comment[]; total: number }> {
-  try {
-    const response = await apiClient.get(apiUrl('/api/v1/entities/comments/all'), {
+  const response = await apiClient.get(apiUrl('/api/v1/entities/comments/all'), {
       params: {
         query: JSON.stringify({ paper_id: paperId }),
         sort: '-created_at',
@@ -605,21 +653,14 @@ export async function fetchComments(paperId: number): Promise<{ items: Comment[]
         skip: 0,
       },
     });
-    return response.data as { items: Comment[]; total: number };
-  } catch {
-    return { items: [], total: 0 };
-  }
+  return response.data as { items: Comment[]; total: number };
 }
 
 export async function fetchBookComments(bookId: number): Promise<{ items: Comment[]; total: number }> {
-  try {
-    const response = await apiClient.get(apiUrl('/api/v1/entities/comments/all'), {
+  const response = await apiClient.get(apiUrl('/api/v1/entities/comments/all'), {
       params: { query: JSON.stringify({ book_id: bookId }), sort: '-created_at', limit: 100, skip: 0 },
     });
-    return response.data as { items: Comment[]; total: number };
-  } catch {
-    return { items: [], total: 0 };
-  }
+  return response.data as { items: Comment[]; total: number };
 }
 
 export async function createSolution(data: {

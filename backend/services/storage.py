@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -14,6 +15,7 @@ from urllib.parse import quote
 import httpx
 
 from core.config import settings
+from core.input_normalization import normalize_storage_key
 from schemas.storage import (
     BucketInfo,
     BucketListResponse,
@@ -32,6 +34,13 @@ from schemas.storage import (
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True)
+class StorageUploadResult:
+    object_key: str
+    provider_file_id: str | None = None
+    storage_provider: str | None = None
+
 ALLOWED_UPLOAD_MIME_TYPES = {
     "application/pdf",
     "application/epub+zip",
@@ -41,6 +50,56 @@ ALLOWED_UPLOAD_MIME_TYPES = {
     "text/plain",
 }
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".txt"}
+PROVIDER_BUCKET_ROOTS = {
+    "books": "books",
+    "book-covers": "books",
+    "papers": "papers",
+    "paper-covers": "papers",
+    "solutions": "papers",
+    "profiles": "profiles",
+    "avatars": "profiles",
+}
+
+
+def provider_bucket_root(bucket_name: str) -> str:
+    return PROVIDER_BUCKET_ROOTS.get(bucket_name, bucket_name)
+
+
+def storage_key_candidates(bucket_name: str, object_key: str) -> list[str]:
+    """Return exact and legacy key shapes without accepting traversal/URLs.
+
+    Older clients stored ``bucket/name.pdf`` while older provider uploads used
+    ``name.pdf``. The exact database value is always the first candidate.
+    """
+    if not isinstance(object_key, str) or not object_key:
+        raise ValueError("Storage object key is required")
+    if object_key.startswith(("/", "\\")) or any(part in {".", ".."} for part in object_key.replace("\\", "/").split("/")):
+        raise ValueError("Storage path contains an invalid segment")
+
+    prefix = f"{bucket_name}/"
+    alternatives = [object_key]
+    if object_key.startswith(prefix):
+        alternatives.append(object_key[len(prefix):])
+    else:
+        alternatives.append(f"{prefix}{object_key}")
+    if "/" in object_key:
+        alternatives.append(object_key.rsplit("/", 1)[-1])
+
+    # Only use the historical normalizer after the exact key and its bucket
+    # shape have been attempted. Existing DB keys are never rewritten.
+    try:
+        normalized = normalize_storage_key(object_key)
+    except ValueError:
+        normalized = None
+    if normalized:
+        alternatives.append(normalized)
+        if normalized.startswith(prefix):
+            alternatives.append(normalized[len(prefix):])
+        else:
+            alternatives.append(f"{prefix}{normalized}")
+        if "/" in normalized:
+            alternatives.append(normalized.rsplit("/", 1)[-1])
+    return list(dict.fromkeys(alternatives))
 
 
 def _normalize_content_type(content_type: Optional[str]) -> Optional[str]:
@@ -100,11 +159,24 @@ class StorageServiceBase:
     async def download_file(self, bucket_name: str, object_key: str) -> bytes:
         raise NotImplementedError()
 
+    async def download_file_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> bytes:
+        return await self.download_file(bucket_name, object_key)
+
     async def get_file_url(self, bucket_name: str, object_key: str) -> str:
         raise NotImplementedError()
 
     async def get_file_metadata(self, bucket_name: str, object_key: str) -> dict[str, Any]:
         return {}
+
+    async def get_file_metadata_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> dict[str, Any]:
+        return await self.get_file_metadata(bucket_name, object_key)
+
+    async def upload_file_with_metadata(
+        self, bucket_name: str, object_key: str, file_bytes: bytes, content_type: Optional[str] = None
+    ) -> StorageUploadResult:
+        stored_key = await self.upload_file(bucket_name, object_key, file_bytes, content_type)
+        metadata = await self.get_file_metadata(bucket_name, stored_key)
+        return StorageUploadResult(stored_key, metadata.get("drive_file_id"), metadata.get("storage_provider"))
 
     async def create_upload_url(self, request: FileUpDownRequest) -> FileUpDownResponse:
         raise NotImplementedError()
@@ -422,6 +494,7 @@ class GoogleDriveStorageService(StorageServiceBase):
         self.credentials = self._load_credentials()
         self._service = self.build("drive", "v3", credentials=self.credentials, cache_discovery=False)
         self._download_metadata: dict[tuple[str, str], dict[str, Any]] = {}
+        self._bucket_folder_ids: dict[str, str] = {}
 
     def _import_google_module(self, module_name: str):
         try:
@@ -466,12 +539,14 @@ class GoogleDriveStorageService(StorageServiceBase):
                 q=query,
                 spaces="drive",
                 fields="files(id,name)",
-                pageSize=1,
+                pageSize=10,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
             )
         )
         files = response.get("files", [])
+        if len(files) > 1:
+            raise ValueError(f"Google Drive folder lookup is ambiguous for {folder_name}")
         return files[0]["id"] if files else None
 
     async def _ensure_folder(self, folder_name: str, parent_id: str) -> str:
@@ -489,40 +564,114 @@ class GoogleDriveStorageService(StorageServiceBase):
         )
         return response["id"]
 
+    async def _find_file_by_id(self, provider_file_id: str) -> Optional[dict[str, Any]]:
+        try:
+            return await self._execute(
+                self._service.files().get(
+                    fileId=provider_file_id,
+                    fields="id,name,mimeType,size,modifiedTime,parents,trashed",
+                    supportsAllDrives=True,
+                )
+            )
+        except ValueError:
+            return None
+
+    async def _file_is_in_bucket(self, bucket_name: str, file: dict[str, Any]) -> bool:
+        bucket_folder_id = await self._bucket_folder(bucket_name)
+        if not bucket_folder_id:
+            return False
+        pending = list(file.get("parents") or [])
+        visited: set[str] = set()
+        while pending:
+            parent_id = pending.pop()
+            if parent_id in visited:
+                continue
+            if parent_id == bucket_folder_id:
+                return True
+            visited.add(parent_id)
+            try:
+                parent = await self._execute(
+                    self._service.files().get(
+                        fileId=parent_id,
+                        fields="id,parents,mimeType,trashed",
+                        supportsAllDrives=True,
+                    )
+                )
+            except ValueError:
+                continue
+            if not parent.get("trashed"):
+                pending.extend(parent.get("parents") or [])
+        return False
+
+    async def _bucket_folder(self, bucket_name: str) -> str:
+        root_bucket = provider_bucket_root(bucket_name)
+        cached = self._bucket_folder_ids.get(root_bucket)
+        if cached:
+            return cached
+        folder_id = await self._find_folder(root_bucket, self.root_folder_id)
+        if not folder_id:
+            return ""
+        self._bucket_folder_ids[root_bucket] = folder_id
+        return folder_id
+
+    def _provider_path_candidates(self, bucket_name: str, object_key: str) -> list[str]:
+        key = object_key.replace("\\", "/").strip("/")
+        prefix = f"{provider_bucket_root(bucket_name)}/"
+        relative = key[len(prefix):] if key.startswith(prefix) else key
+        candidates = [relative]
+        if key != relative:
+            candidates.append(key)
+        return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+    def _provider_name_candidates(self, object_key: str) -> list[str]:
+        names = [object_key.rsplit("/", 1)[-1]]
+        try:
+            normalized = normalize_storage_key(object_key).rsplit("/", 1)[-1]
+        except ValueError:
+            normalized = None
+        if normalized:
+            names.append(normalized)
+        return list(dict.fromkeys(names))
+
     async def _find_file(self, bucket_name: str, object_key: str) -> Optional[dict[str, Any]]:
-        bucket_folder_id = await self._find_folder(bucket_name, self.root_folder_id)
+        bucket_folder_id = await self._bucket_folder(bucket_name)
         if not bucket_folder_id:
             return None
 
-        segments = [segment for segment in object_key.split("/") if segment]
-        if not segments:
-            return None
-
-        parent_id = bucket_folder_id
-        for segment in segments[:-1]:
-            parent_id = await self._find_folder(segment, parent_id)
-            if not parent_id:
-                return None
-
-        file_name = segments[-1]
-        query = (
-            f"name = '{_escape_drive_query_value(file_name)}' "
-            "and mimeType != 'application/vnd.google-apps.folder' "
-            "and trashed = false "
-            f"and '{parent_id}' in parents"
-        )
-        response = await self._execute(
-            self._service.files().list(
-                q=query,
-                spaces="drive",
-                fields="files(id,name,mimeType,size,modifiedTime)",
-                pageSize=1,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
-            )
-        )
-        files = response.get("files", [])
-        return files[0] if files else None
+        for provider_path in self._provider_path_candidates(bucket_name, object_key):
+            segments = [segment for segment in provider_path.split("/") if segment]
+            parent_id = bucket_folder_id
+            missing_parent = False
+            for segment in segments[:-1]:
+                parent_id = await self._find_folder(segment, parent_id)
+                if not parent_id:
+                    missing_parent = True
+                    break
+            if missing_parent or not segments:
+                continue
+            for file_name in self._provider_name_candidates(segments[-1]):
+                query = (
+                    f"name = '{_escape_drive_query_value(file_name)}' "
+                    "and mimeType != 'application/vnd.google-apps.folder' "
+                    "and trashed = false "
+                    f"and '{parent_id}' in parents"
+                )
+                response = await self._execute(
+                    self._service.files().list(
+                        q=query,
+                        spaces="drive",
+                        fields="files(id,name,mimeType,size,modifiedTime,parents)",
+                        pageSize=10,
+                        supportsAllDrives=True,
+                        includeItemsFromAllDrives=True,
+                    )
+                )
+                files = response.get("files", [])
+                if len(files) > 1:
+                    raise ValueError(f"Google Drive object lookup is ambiguous for bucket {bucket_name}")
+                if files:
+                    return files[0]
+        return None
 
     async def _ensure_bucket_folder(self, bucket_name: str) -> str:
         return await self._ensure_folder(bucket_name, self.root_folder_id)
@@ -569,7 +718,7 @@ class GoogleDriveStorageService(StorageServiceBase):
             buckets=[BucketInfo(bucket_name=file.get("name", "")) for file in files]
         )
 
-    async def _list_files_recursive(self, parent_id: str, prefix: str = "") -> list[ObjectInfo]:
+    async def _list_files_recursive(self, parent_id: str, bucket_name: str, prefix: str = "") -> list[ObjectInfo]:
         query = f"trashed = false and '{parent_id}' in parents"
         response = await self._execute(
             self._service.files().list(
@@ -585,11 +734,11 @@ class GoogleDriveStorageService(StorageServiceBase):
         for item in response.get("files", []):
             if item.get("mimeType") == "application/vnd.google-apps.folder":
                 nested_prefix = f"{prefix}{item.get('name')}/"
-                objects.extend(await self._list_files_recursive(item["id"], nested_prefix))
+                objects.extend(await self._list_files_recursive(item["id"], bucket_name, nested_prefix))
             else:
                 objects.append(
                     ObjectInfo(
-                        bucket_name="",
+                        bucket_name=bucket_name,
                         object_key=f"{prefix}{item.get('name')}",
                         size=int(item.get("size") or 0),
                         last_modified=item.get("modifiedTime") or "",
@@ -603,9 +752,7 @@ class GoogleDriveStorageService(StorageServiceBase):
         if not bucket_folder_id:
             return ObjectListResponse(objects=[])
 
-        objects = await self._list_files_recursive(bucket_folder_id)
-        for obj in objects:
-            obj.bucket_name = request.bucket_name
+        objects = await self._list_files_recursive(bucket_folder_id, bucket_name=request.bucket_name)
         return ObjectListResponse(objects=objects)
 
     async def get_object_info(self, request: ObjectRequest) -> ObjectInfo:
@@ -632,6 +779,20 @@ class GoogleDriveStorageService(StorageServiceBase):
             "file_name": file.get("name"),
             "file_size": int(file.get("size") or 0),
             "mime_type": file.get("mimeType"),
+            "parent_folder_id": (file.get("parents") or [None])[0],
+        }
+
+    async def get_file_metadata_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> dict[str, Any]:
+        file = await self._find_file_by_id(provider_file_id)
+        if not file or file.get("trashed") or not await self._file_is_in_bucket(bucket_name, file):
+            raise ValueError("Google Drive file not found")
+        return {
+            "storage_provider": "google_drive",
+            "drive_file_id": file.get("id"),
+            "file_name": file.get("name") or Path(object_key).name,
+            "file_size": int(file.get("size") or 0),
+            "mime_type": file.get("mimeType"),
+            "parent_folder_id": (file.get("parents") or [None])[0],
         }
 
     async def rename_object(self, request: RenameRequest) -> RenameResponse:
@@ -694,7 +855,30 @@ class GoogleDriveStorageService(StorageServiceBase):
                 supportsAllDrives=True,
             )
         )
+        self._download_metadata[(bucket_name, object_key)] = response
         return object_key
+
+    async def upload_file_with_metadata(
+        self, bucket_name: str, object_key: str, file_bytes: bytes, content_type: Optional[str] = None
+    ) -> StorageUploadResult:
+        _validate_upload_type(object_key, content_type)
+        target_folder_id = await self._ensure_path_folder(bucket_name, object_key)
+        if await self._find_file(bucket_name, object_key):
+            raise ValueError("File already exists")
+        media = self.MediaIoBaseUpload(
+            io.BytesIO(file_bytes),
+            mimetype=_normalize_content_type(content_type) or "application/octet-stream",
+            resumable=False,
+        )
+        response = await self._execute(
+            self._service.files().create(
+                body={"name": Path(object_key).name, "parents": [target_folder_id]},
+                media_body=media,
+                fields="id,name,mimeType,size,modifiedTime",
+                supportsAllDrives=True,
+            )
+        )
+        return StorageUploadResult(object_key, response.get("id"), "google_drive")
 
     async def download_file(self, bucket_name: str, object_key: str) -> bytes:
         file = await self._find_file(bucket_name, object_key)
@@ -709,6 +893,19 @@ class GoogleDriveStorageService(StorageServiceBase):
         done = False
         while not done:
             status, done = await asyncio.to_thread(downloader.next_chunk)
+        fh.seek(0)
+        return fh.read()
+
+    async def download_file_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> bytes:
+        file = await self._find_file_by_id(provider_file_id)
+        if not file or file.get("trashed") or not await self._file_is_in_bucket(bucket_name, file):
+            raise ValueError("Google Drive file not found")
+        request = self._service.files().get_media(fileId=provider_file_id, supportsAllDrives=True)
+        fh = io.BytesIO()
+        downloader = self.MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = await asyncio.to_thread(downloader.next_chunk)
         fh.seek(0)
         return fh.read()
 
@@ -766,11 +963,22 @@ class StorageService(StorageServiceBase):
     async def download_file(self, bucket_name: str, object_key: str) -> bytes:
         return await self._impl.download_file(bucket_name, object_key)
 
+    async def download_file_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> bytes:
+        return await self._impl.download_file_by_id(bucket_name, object_key, provider_file_id)
+
     async def get_file_url(self, bucket_name: str, object_key: str) -> str:
         return await self._impl.get_file_url(bucket_name, object_key)
 
     async def get_file_metadata(self, bucket_name: str, object_key: str) -> dict[str, Any]:
         return await self._impl.get_file_metadata(bucket_name, object_key)
+
+    async def get_file_metadata_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> dict[str, Any]:
+        return await self._impl.get_file_metadata_by_id(bucket_name, object_key, provider_file_id)
+
+    async def upload_file_with_metadata(
+        self, bucket_name: str, object_key: str, file_bytes: bytes, content_type: Optional[str] = None
+    ) -> StorageUploadResult:
+        return await self._impl.upload_file_with_metadata(bucket_name, object_key, file_bytes, content_type)
 
     async def create_upload_url(self, request: FileUpDownRequest) -> FileUpDownResponse:
         return await self._impl.create_upload_url(request)

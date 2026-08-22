@@ -14,7 +14,8 @@ from models.comments import Comments
 from models.notifications import Notifications
 from models.paper_interactions import PaperInteractions
 from models.papers import Papers
-from models.books import Book
+from models.books import Author, Book, BookAuthor, BookCourse, BookModule, Module
+from models.courses import Course
 from models.reports import Reports
 from models.solutions import Solutions
 from models.user_profiles import User_profiles
@@ -143,6 +144,41 @@ class LeaderboardResponse(BaseModel):
     items: list[UserProfileResponse]
 
 
+async def _resource_summary(db: AsyncSession, resource, kind: str) -> dict:
+    """Stable, deliberately typed representation used by dashboards and profiles."""
+    if kind == "paper":
+        return {
+            "id": resource.id, "type": "paper", "title": resource.title,
+            "created_at": resource.created_at, "uploader_id": resource.user_id,
+            "downloads": resource.download_count or 0, "visibility": "public" if not resource.is_hidden else "hidden",
+            "verification_status": resource.verification_status,
+            "metadata": {"course_code": resource.course_code, "course_name": resource.course_name,
+                         "year": resource.year, "paper_type": resource.paper_type, "lecturer": resource.lecturer},
+        }
+    authors = (await db.execute(select(Author.name).join(BookAuthor, BookAuthor.author_id == Author.id).where(BookAuthor.book_id == resource.id))).scalars().all()
+    courses = (await db.execute(select(Course).join(BookCourse, BookCourse.course_id == Course.id).where(BookCourse.book_id == resource.id))).scalars().all()
+    modules = (await db.execute(select(Module).join(BookModule, BookModule.module_id == Module.id).where(BookModule.book_id == resource.id))).scalars().all()
+    return {
+        "id": resource.id, "type": "book", "title": resource.title,
+        "created_at": resource.created_at, "uploader_id": resource.uploaded_by,
+        "downloads": resource.download_count or 0, "visibility": resource.visibility,
+        # Books do not have the Paper verification model; expose their actual publication state.
+        "verification_status": None,
+        "metadata": {"authors": authors, "language": resource.language, "edition": resource.edition,
+                     "status": resource.status, "file_name": resource.file_name,
+                     "courses": [{"id": c.id, "code": c.code, "name": c.name} for c in courses],
+                     "modules": [{"id": m.id, "code": m.code, "name": m.name} for m in modules]},
+    }
+
+
+async def _owned_resources(db: AsyncSession, user_id: str) -> list[dict]:
+    papers = (await db.execute(select(Papers).where(Papers.user_id == user_id))).scalars().all()
+    books = (await db.execute(select(Book).where(Book.uploaded_by == user_id, Book.deleted_at.is_(None)))).scalars().all()
+    resources = [await _resource_summary(db, paper, "paper") for paper in papers]
+    resources.extend([await _resource_summary(db, book, "book") for book in books])
+    return sorted(resources, key=lambda item: item["created_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+
 class UserProfileUpdateRequest(BaseModel):
     display_name: Optional[str] = None
     institution_type: Optional[str] = None
@@ -205,6 +241,11 @@ class PersonalizedRecommendationsResponse(BaseModel):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _serialize_profile(profile: User_profiles) -> dict:
+    """Keep dashboard/profile aggregates independent from ORM serialization details."""
+    return {column.name: getattr(profile, column.name) for column in User_profiles.__table__.columns}
 
 
 async def _get_profile(db: AsyncSession, user_id: str) -> Optional[User_profiles]:
@@ -462,6 +503,33 @@ async def get_my_profile(
     return await _ensure_profile(db, current_user)
 
 
+@router.get("/dashboard")
+async def get_dashboard(
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Authoritative dashboard aggregate.  Never infer a resource type in clients."""
+    profile = await _ensure_profile(db, current_user)
+    resources = await _owned_resources(db, str(current_user.id))
+    paper_count = sum(item["type"] == "paper" for item in resources)
+    book_count = sum(item["type"] == "book" for item in resources)
+    verified_papers = sum(item["type"] == "paper" and item["verification_status"] == "verified" for item in resources)
+    total_downloads = sum(item["downloads"] for item in resources)
+    leaderboard = (await db.execute(select(User_profiles).order_by(
+        desc(func.coalesce(User_profiles.trust_score, 0)),
+        desc(func.coalesce(User_profiles.upload_count, 0)),
+    ).limit(10))).scalars().all()
+    return {
+        "stats": {"total_uploads": len(resources), "paper_count": paper_count, "book_count": book_count,
+                  "total_downloads": total_downloads, "verified_paper_count": verified_papers,
+                  "average_downloads": round(total_downloads / len(resources)) if resources else 0},
+        "uploaded_resources": resources,
+        "contribution": {"upload_count": profile.upload_count or 0, "trust_score": profile.trust_score or 0,
+                           "role": profile.role},
+        "leaderboard": [_serialize_profile(row) for row in leaderboard],
+    }
+
+
 @router.get("/profiles/{user_id}", response_model=PublicUserProfileResponse)
 async def get_public_profile(user_id: str, db: AsyncSession = Depends(get_db)):
     profile = await _get_profile(db, user_id)
@@ -485,6 +553,19 @@ async def get_public_profile(user_id: str, db: AsyncSession = Depends(get_db)):
         bio=profile.bio,
         created_at=profile.created_at,
     )
+
+
+@router.get("/profiles/{user_id}/resources")
+async def get_public_profile_resources(user_id: str, db: AsyncSession = Depends(get_db)):
+    """Only resources visible to the public; private/draft owner resources remain private."""
+    profile = await _get_profile(db, user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    papers = (await db.execute(select(Papers).where(Papers.user_id == user_id, Papers.is_hidden.is_not(True)))).scalars().all()
+    books = (await db.execute(select(Book).where(Book.uploaded_by == user_id, Book.deleted_at.is_(None), Book.status == "active", Book.visibility == "public"))).scalars().all()
+    items = [await _resource_summary(db, paper, "paper") for paper in papers]
+    items.extend([await _resource_summary(db, book, "book") for book in books])
+    return {"items": sorted(items, key=lambda item: item["created_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)}
 
 
 @router.patch("/profile", response_model=UserProfileResponse)

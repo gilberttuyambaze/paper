@@ -16,6 +16,7 @@ import {
   saveDocumentOffline,
   getOfflineDocumentUrl,
   getStorageDownloadUrl,
+  downloadStorageObject,
   fetchUserProfile,
   fetchAcademicTaxonomy,
   resolvePublicUserProfile,
@@ -66,7 +67,7 @@ import { toast } from '@/lib/messages';
 import { normalizeApiError } from '@/lib/api-errors';
 import AvatarFallback from '../components/AvatarFallback';
 import DocumentPreview from '../components/DocumentPreview';
-import ResourceLoadingAnimation from '../components/ResourceLoadingAnimation';
+import DocumentLoadingProgress from '../components/DocumentLoadingProgress';
 import AcademicAiMark from '../components/AcademicAiMark';
 
 function VerificationBadge({ status }: { status: string }) {
@@ -99,6 +100,7 @@ export default function PaperDetails() {
   const { user } = useAuth();
   const [paper, setPaper] = useState<Paper | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsError, setCommentsError] = useState(false);
   const [solutions, setSolutions] = useState<Solution[]>([]);
   const [loading, setLoading] = useState(true);
   const [newComment, setNewComment] = useState('');
@@ -111,6 +113,8 @@ export default function PaperDetails() {
   const [paperUrl, setPaperUrl] = useState<string | null>(null);
   const [solutionUrl, setSolutionUrl] = useState<string | null>(null);
   const [paperPreviewLoading, setPaperPreviewLoading] = useState(false);
+  const [paperProgress, setPaperProgress] = useState<{ loaded: number; total?: number; percent?: number } | null>(null);
+  const [paperPreviewError, setPaperPreviewError] = useState<string | null>(null);
   const [pdfZoom, setPdfZoom] = useState(1);
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -241,6 +245,7 @@ export default function PaperDetails() {
 
       const paperData = paperResult.value;
       const commentsData = commentsResult.status === 'fulfilled' ? commentsResult.value : { items: [] };
+      setCommentsError(commentsResult.status !== 'fulfilled');
       const solutionsData = solutionsResult.status === 'fulfilled' ? solutionsResult.value : { items: [] };
 
       setPaper(paperData);
@@ -260,15 +265,16 @@ export default function PaperDetails() {
     setter: React.Dispatch<React.SetStateAction<string | null>>
   ) => {
     try {
-      const downloadUrl = await getStorageDownloadUrl('papers', objectKey);
+      const downloadUrl = await downloadStorageObject('papers', objectKey, (progress) => setPaperProgress(progress));
       setter(downloadUrl);
     } catch (err) {
-      setter(null);
+      setter(null); setPaperPreviewError('The document could not be retrieved from storage.');
     }
   };
 
   const hydratePaperAssets = async (paperData: Paper) => {
     setPaperPreviewLoading(Boolean(paperData.file_key));
+    setPaperPreviewError(null); setPaperProgress(paperData.file_key ? { loaded: 0 } : null);
     const tasks: Promise<void>[] = [];
 
     tasks.push(
@@ -619,7 +625,7 @@ export default function PaperDetails() {
               <DocumentPreview src={paperUrl || offlinePaperUrl} title={`${paper.title} paper preview`} minHeightClassName="min-h-[700px]" zoom={pdfZoom} />
             </div>
           ) : (paperPreviewLoading || paper.file_key) ? (
-            <div className="document-preview-fetching mt-6 flex min-h-[280px] items-center justify-center rounded-xl border p-6"><ResourceLoadingAnimation resource="Paper" stage="Looking for the Paper…" /></div>
+            <div className="mt-6"><DocumentLoadingProgress resourceType="Paper" stage="Downloading document…" {...(paperProgress || {})} error={paperPreviewError} onRetry={() => void hydratePaperAssets(paper)} /></div>
           ) : (
             <div className="mt-6"><DocumentPreview title={`${paper.title} paper preview`} unavailableMessage="Paper preview is not available. Use the download button to view the full document." /></div>
           )}
@@ -809,7 +815,7 @@ export default function PaperDetails() {
           )}
 
           {/* Comments List */}
-          {comments.length === 0 ? (
+          {commentsError ? <div className="theme-muted py-8 text-center">Comments couldn’t be loaded. <button type="button" className="theme-link-accent underline" onClick={() => id && void loadPaper(Number(id))}>Retry</button></div> : comments.length === 0 ? (
             <Card className="theme-panel">
               <CardContent className="theme-muted p-8 text-center">
                 <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-30" />

@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+import inspect
 from services.authorization import CP_WINDOW, can_create_book, can_manage_book, can_manage_paper, can_read_book, can_upload
 from pydantic import ValidationError
 from routers.books import BookCreate, BookUpdate
@@ -73,3 +74,13 @@ def test_papers_follow_the_same_admin_cp_ownership_window():
     assert not can_manage_paper(user("cp-b", "cp"), paper, now)
     paper.created_at = now - CP_WINDOW
     assert not can_manage_paper(user("cp-a", "cp"), paper, now)
+
+
+def test_book_upload_updates_profile_upload_count_and_trust_score():
+    from routers.books import create_book
+    source = inspect.getsource(create_book)
+    # Book creation uses the same persisted contribution semantics as Paper creation;
+    # it must happen at mutation time, never while a dashboard is read.
+    assert "profile.upload_count = (profile.upload_count or 0) + 1" in source
+    assert "profile.trust_score = (profile.trust_score or 0) + 2" in source
+    assert "await create_notification" in source

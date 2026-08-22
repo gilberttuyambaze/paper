@@ -16,6 +16,8 @@ from models.courses import Course
 from schemas.auth import UserResponse
 from services.authorization import CP_WINDOW, _utc, can_create_book, can_manage_book, can_read_book, database_now, require_book_management
 from core.input_normalization import normalize_isbn, normalize_text, normalize_unique
+from routers.notifications import create_notification
+from services.storage import StorageService
 
 router = APIRouter(prefix="/api/v1/books", tags=["books"])
 MANAGEMENT_ROLES = {"admin", "cp"}
@@ -32,8 +34,10 @@ class FileReference(BaseModel):
     @field_validator("key", mode="before")
     @classmethod
     def normalize_key(cls, value):
-        from core.input_normalization import normalize_storage_key
-        return normalize_storage_key(str(value))
+        value = str(value).replace("\\", "/").strip("/")
+        if any(part in {".", ".."} for part in value.split("/")) or any(ord(char) < 32 for char in value):
+            raise ValueError("Storage path contains an invalid segment")
+        return value
 
     @field_validator("original_filename", mode="before")
     @classmethod
@@ -188,6 +192,30 @@ async def _serialize(book: Book, db: AsyncSession, actor: UserResponse | None = 
     return payload
 
 
+async def _attach_storage_metadata(book: Book) -> None:
+    for key_name, id_name, provider_name in (
+        ("file_key", "file_drive_file_id", "file_storage_provider"),
+        ("cover_key", "cover_drive_file_id", "cover_storage_provider"),
+    ):
+        object_key = getattr(book, key_name)
+        if not object_key:
+            continue
+        try:
+            storage = StorageService()
+            metadata = await storage.get_file_metadata("books", object_key)
+            setattr(book, id_name, metadata.get("drive_file_id"))
+            setattr(book, provider_name, metadata.get("storage_provider"))
+            if key_name == "file_key":
+                book.file_name = book.file_name or metadata.get("file_name")
+                book.file_size = book.file_size or metadata.get("file_size")
+                book.file_mime_type = book.file_mime_type or metadata.get("mime_type")
+            else:
+                book.cover_file_name = book.cover_file_name or metadata.get("file_name")
+                book.cover_mime_type = book.cover_mime_type or metadata.get("mime_type")
+        except Exception as exc:
+            logger.warning("Could not attach storage metadata for book_id=%s field=%s: %s", book.id, key_name, exc)
+
+
 def _ensure_creator(actor: UserResponse) -> None:
     if not can_create_book(actor):
         raise HTTPException(status_code=403, detail="Only an administrator or CP can create books")
@@ -197,7 +225,12 @@ def _ensure_creator(actor: UserResponse) -> None:
 async def create_book(payload: BookCreate, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _ensure_creator(actor)
     data = payload.model_dump(exclude={"authors", "course_ids", "module_ids", "cover", "file"})
-    # Ownership, creation time, and management deadline never come from the request.
+    profile = (await db.execute(select(User_profiles).where(User_profiles.user_id == str(actor.id)))).scalar_one_or_none()
+    if profile is None:
+        profile = User_profiles(user_id=str(actor.id), display_name=actor.name or actor.email or "Student", role=actor.role if actor.role in {"admin", "cp", "normal", "verified_contributor"} else "normal", trust_score=0, upload_count=0, download_count=0, account_status="active", created_at=await database_now(db))
+        db.add(profile)
+        await db.flush()
+
     book = Book(uploaded_by=str(actor.id), **data)
     if payload.cover:
         book.cover_key, book.cover_file_name, book.cover_mime_type = payload.cover.key, payload.cover.original_filename, payload.cover.mime_type
@@ -206,7 +239,15 @@ async def create_book(payload: BookCreate, actor: UserResponse = Depends(get_cur
         book.file_uploaded_at = await database_now(db)
     db.add(book); await db.flush()
     await _replace_authors(db, book.id, payload.authors); await _replace_courses(db, book.id, payload.course_ids); await _replace_modules(db, book.id, payload.module_ids)
+    profile.upload_count = (profile.upload_count or 0) + 1
+    profile.trust_score = (profile.trust_score or 0) + 2
+    if profile.role == "normal" and profile.trust_score >= 50:
+        profile.role = "verified_contributor"
+    elif profile.role == "verified_contributor" and profile.trust_score < 50:
+        profile.role = "normal"
     await _activity(db, book, actor, "created", f'Created book "{book.title}"')
+    await create_notification(db, str(actor.id), "Upload submitted", f'"{book.title}" was submitted successfully and is awaiting review.', "upload", "book", book.id)
+    await _attach_storage_metadata(book)
     await db.commit(); await db.refresh(book)
     return await _serialize(book, db, actor)
 
@@ -330,6 +371,7 @@ async def create_module(payload: ModuleCreate, actor: UserResponse = Depends(get
 async def replace_file(book_id: int, payload: FileReference, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     book = await _get_book(book_id, db); await _require_manager(book, actor, db)
     book.file_key, book.file_name, book.file_mime_type, book.file_size, book.file_uploaded_at = payload.key, payload.original_filename, payload.mime_type, payload.size, await database_now(db)
+    await _attach_storage_metadata(book)
     await _activity(db, book, actor, "file_replaced", "Replaced book file"); await db.commit(); await db.refresh(book); return await _serialize(book, db, actor)
 
 
@@ -337,6 +379,7 @@ async def replace_file(book_id: int, payload: FileReference, actor: UserResponse
 async def replace_cover(book_id: int, payload: FileReference, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     book = await _get_book(book_id, db); await _require_manager(book, actor, db)
     book.cover_key, book.cover_file_name, book.cover_mime_type = payload.key, payload.original_filename, payload.mime_type
+    await _attach_storage_metadata(book)
     await _activity(db, book, actor, "cover_replaced", "Replaced book cover"); await db.commit(); await db.refresh(book); return await _serialize(book, db, actor)
 
 

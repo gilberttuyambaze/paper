@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '../contexts/AuthContext';
 import AvatarFallback from '../components/AvatarFallback';
 import DocumentPreview from '../components/DocumentPreview';
-import { fetchBookComments, createComment, getStorageDownloadUrl, resolvePublicUserProfiles, upvoteComment, type Comment } from '../lib/client';
+import DocumentLoadingProgress from '../components/DocumentLoadingProgress';
+import { downloadStorageObject, fetchBookComments, createComment, getStorageDownloadUrl, resolvePublicUserProfiles, upvoteComment, type Comment } from '../lib/client';
 import { fetchBookById, recordBookDownload, type Book } from '../lib/books';
 
 export default function BookDetails() {
@@ -18,10 +19,13 @@ export default function BookDetails() {
   const { user } = useAuth();
   const [book, setBook] = useState<Book | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsError, setCommentsError] = useState(false);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [bookLoading, setBookLoading] = useState(true);
   const [fileLoading, setFileLoading] = useState(false);
+  const [fileProgress, setFileProgress] = useState<{ loaded: number; total?: number; percent?: number } | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [coverFailed, setCoverFailed] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [replyTarget, setReplyTarget] = useState<number | null>(null);
@@ -38,14 +42,18 @@ export default function BookDetails() {
       if (cancelled) return;
       setBook(bookData); setBookLoading(false);
       if (bookData.cover_key) void getStorageDownloadUrl('books', bookData.cover_key).then((url) => !cancelled && setCoverUrl(url)).catch(() => !cancelled && setCoverFailed(true));
-      if (bookData.file_key) {
-        setFileLoading(true);
-        void getStorageDownloadUrl('books', bookData.file_key).then((url) => !cancelled && setFileUrl(url)).catch(() => !cancelled && toast.error('Unable to prepare the book reader')).finally(() => !cancelled && setFileLoading(false));
-      }
+      if (bookData.file_key) void loadBookDocument(bookData.file_key, cancelled);
     }).catch(() => { if (!cancelled) { setBook(null); setBookLoading(false); toast.error('Failed to load book details'); } });
-    void fetchBookComments(Number(id)).then((data) => !cancelled && setComments(data.items)).catch(() => !cancelled && setComments([]));
+    void fetchBookComments(Number(id)).then((data) => { if (!cancelled) { setComments(data.items); setCommentsError(false); } }).catch(() => { if (!cancelled) { setComments([]); setCommentsError(true); } });
     return () => { cancelled = true; };
   }, [id]);
+
+  const loadBookDocument = async (key: string, cancelled = false) => {
+    setFileLoading(true); setFileError(null); setFileProgress({ loaded: 0 });
+    try { const url = await downloadStorageObject('books', key, (progress) => !cancelled && setFileProgress(progress)); if (!cancelled) setFileUrl(url); }
+    catch { if (!cancelled) setFileError('The book file could not be retrieved from storage.'); }
+    finally { if (!cancelled) setFileLoading(false); }
+  };
 
   useEffect(() => {
     const ids = Array.from(new Set(comments.map((comment) => comment.user_id).concat(book?.uploaded_by || [])));
@@ -94,16 +102,16 @@ export default function BookDetails() {
         </div>
       </div>
       {viewBook?.description && <p className="theme-soft-panel theme-muted mt-6 rounded-lg p-4">{viewBook.description}</p>}
-      <div className="theme-surface-card mt-6 overflow-hidden rounded-xl"><div className="theme-soft-panel flex flex-wrap items-center justify-between gap-3 border-b p-3"><div className="flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.max(.6, value - .1))}><ZoomOut className="h-4 w-4" /></Button><span className="theme-muted min-w-16 text-center text-sm">{Math.round(zoom * 100)}%</span><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.min(2, value + .1))}><ZoomIn className="h-4 w-4" /></Button></div>{fileUrl && <Button size="sm" variant="outline" onClick={() => window.open(fileUrl, '_blank')}><FileText className="mr-2 h-4 w-4" />Open full book</Button>}</div><DocumentPreview src={fileUrl} title={`${viewBook?.title || 'Opening'} book preview`} minHeightClassName="min-h-[700px]" zoom={zoom} loadingTitle="Opening Book..." loadingDescription={fileLoading ? 'Preparing your reading experience...' : 'Loading the first readable view...'} unavailableMessage={viewBook ? 'Book preview is not available. Use Retry or download the book.' : 'Preparing your reading experience...'} onRetry={() => viewBook?.file_key && getStorageDownloadUrl('books', viewBook.file_key).then(setFileUrl).catch(() => toast.error('Unable to load the book file'))} /></div>
+      <div className="theme-surface-card mt-6 overflow-hidden rounded-xl"><div className="theme-soft-panel flex flex-wrap items-center justify-between gap-3 border-b p-3"><div className="flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.max(.6, value - .1))}><ZoomOut className="h-4 w-4" /></Button><span className="theme-muted min-w-16 text-center text-sm">{Math.round(zoom * 100)}%</span><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.min(2, value + .1))}><ZoomIn className="h-4 w-4" /></Button></div>{fileUrl && <Button size="sm" variant="outline" onClick={() => window.open(fileUrl, '_blank')}><FileText className="mr-2 h-4 w-4" />Open full book</Button>}</div>{fileLoading || fileError ? <DocumentLoadingProgress resourceType="Book" stage={fileLoading ? 'Downloading document…' : 'Document unavailable'} {...(fileProgress || {})} error={fileError} onRetry={() => viewBook?.file_key && void loadBookDocument(viewBook.file_key)} /> : <DocumentPreview src={fileUrl} title={`${viewBook?.title || 'Opening'} book preview`} minHeightClassName="min-h-[700px]" zoom={zoom} onRetry={() => viewBook?.file_key && void loadBookDocument(viewBook.file_key)} />}</div>
       <Button onClick={handleDownload} disabled={!fileUrl || !viewBook} className="theme-accent-bg mt-6"><Download className="mr-2 h-4 w-4" />Download Book</Button>
     </CardContent></Card>
-    {viewBook && <TabsSection comments={comments} roots={roots} replies={replies} user={user} profiles={profiles} newComment={newComment} replyTarget={replyTarget} replyDraft={replyDraft} submitting={submitting} setNewComment={setNewComment} setReplyTarget={setReplyTarget} setReplyDraft={setReplyDraft} submitComment={submitComment} setComments={setComments} />}
+    {viewBook && <TabsSection comments={comments} commentsError={commentsError} retryComments={() => id && void fetchBookComments(Number(id)).then((data) => { setComments(data.items); setCommentsError(false); }).catch(() => setCommentsError(true))} roots={roots} replies={replies} user={user} profiles={profiles} newComment={newComment} replyTarget={replyTarget} replyDraft={replyDraft} submitting={submitting} setNewComment={setNewComment} setReplyTarget={setReplyTarget} setReplyDraft={setReplyDraft} submitComment={submitComment} setComments={setComments} />}
   </div>;
 }
 
-function TabsSection({ comments, roots, replies, user, profiles, newComment, replyTarget, replyDraft, submitting, setNewComment, setReplyTarget, setReplyDraft, submitComment, setComments }: any) {
+function TabsSection({ comments, commentsError, retryComments, roots, replies, user, profiles, newComment, replyTarget, replyDraft, submitting, setNewComment, setReplyTarget, setReplyDraft, submitComment, setComments }: any) {
   return <section><Card className="theme-panel"><CardHeader><CardTitle className="theme-title flex items-center gap-2"><MessageSquare className="h-5 w-5" />Discussion ({comments.length})</CardTitle></CardHeader><CardContent>
     {user ? <div className="mb-5"><Textarea value={newComment} onChange={(event) => setNewComment(event.target.value)} placeholder="Share your thoughts, ask a question, or help others..." rows={3} className="theme-form-input mb-3" /><Button size="sm" onClick={() => void submitComment(newComment)} disabled={!newComment.trim() || submitting} className="theme-accent-bg"><Send className="mr-2 h-4 w-4" />Post Comment</Button></div> : <p className="theme-muted mb-5 text-center">Sign in to join the discussion</p>}
-    {!comments.length ? <div className="theme-muted py-8 text-center"><MessageSquare className="mx-auto mb-3 h-12 w-12 opacity-30" />No comments yet. Be the first to start a discussion!</div> : <div className="space-y-3">{roots.map((comment: Comment) => <Card key={comment.id} className="theme-soft-panel"><CardContent className="p-4"><div className="mb-2 flex items-center gap-2"><div className="h-8 w-8 overflow-hidden rounded-full"><AvatarFallback name={profiles[comment.user_id]?.display_name || `Student ${comment.user_id}`} imageUrl={profiles[comment.user_id]?.imageUrl || undefined} imageAlt="Comment author avatar" /></div><span className="theme-title text-sm font-medium">{profiles[comment.user_id]?.display_name || `Student ${comment.user_id}`}</span><span className="theme-muted text-xs">{comment.created_at ? new Date(comment.created_at).toLocaleDateString() : ''}</span></div><p className="pl-10 text-sm">{comment.content}</p><div className="mt-3 flex gap-2 pl-10"><Button size="sm" variant="ghost" className="theme-muted h-8 px-2" onClick={async () => { try { const updated = await upvoteComment(comment.id); setComments((items: Comment[]) => items.map((item) => item.id === comment.id ? updated : item)); } catch { toast.error('Failed to upvote comment'); } }}><ChevronUp className="mr-1 h-4 w-4" />{comment.upvotes || 0}</Button>{user && <Button size="sm" variant="ghost" className="theme-muted h-8 px-2" onClick={() => setReplyTarget(replyTarget === comment.id ? null : comment.id)}><Reply className="mr-1 h-4 w-4" />Reply</Button>}</div>{replyTarget === comment.id && <div className="mt-3 pl-10"><Textarea value={replyDraft} onChange={(event) => setReplyDraft(event.target.value)} placeholder="Write a reply..." rows={2} className="theme-form-input mb-2" /><Button size="sm" onClick={() => void submitComment(replyDraft, comment.id)} disabled={!replyDraft.trim() || submitting}>Reply</Button></div>}{replies(comment.id).map((reply: Comment) => <div key={reply.id} className="theme-soft-panel mt-3 rounded-lg p-3"><span className="theme-muted text-xs">Reply · {reply.created_at ? new Date(reply.created_at).toLocaleDateString() : ''}</span><p className="mt-1 text-sm">{reply.content}</p></div>)}</CardContent></Card>)}</div>}
+    {commentsError ? <div className="theme-muted py-8 text-center">Comments couldn’t be loaded. <button type="button" className="theme-link-accent underline" onClick={retryComments}>Retry</button></div> : !comments.length ? <div className="theme-muted py-8 text-center"><MessageSquare className="mx-auto mb-3 h-12 w-12 opacity-30" />No comments yet. Be the first to start a discussion!</div> : <div className="space-y-3">{roots.map((comment: Comment) => <Card key={comment.id} className="theme-soft-panel"><CardContent className="p-4"><div className="mb-2 flex items-center gap-2"><div className="h-8 w-8 overflow-hidden rounded-full"><AvatarFallback name={profiles[comment.user_id]?.display_name || `Student ${comment.user_id}`} imageUrl={profiles[comment.user_id]?.imageUrl || undefined} imageAlt="Comment author avatar" /></div><span className="theme-title text-sm font-medium">{profiles[comment.user_id]?.display_name || `Student ${comment.user_id}`}</span><span className="theme-muted text-xs">{comment.created_at ? new Date(comment.created_at).toLocaleDateString() : ''}</span></div><p className="pl-10 text-sm">{comment.content}</p><div className="mt-3 flex gap-2 pl-10"><Button size="sm" variant="ghost" className="theme-muted h-8 px-2" onClick={async () => { try { const updated = await upvoteComment(comment.id); setComments((items: Comment[]) => items.map((item) => item.id === comment.id ? updated : item)); } catch { toast.error('Failed to upvote comment'); } }}><ChevronUp className="mr-1 h-4 w-4" />{comment.upvotes || 0}</Button>{user && <Button size="sm" variant="ghost" className="theme-muted h-8 px-2" onClick={() => setReplyTarget(replyTarget === comment.id ? null : comment.id)}><Reply className="mr-1 h-4 w-4" />Reply</Button>}</div>{replyTarget === comment.id && <div className="mt-3 pl-10"><Textarea value={replyDraft} onChange={(event) => setReplyDraft(event.target.value)} placeholder="Write a reply..." rows={2} className="theme-form-input mb-2" /><Button size="sm" onClick={() => void submitComment(replyDraft, comment.id)} disabled={!replyDraft.trim() || submitting}>Reply</Button></div>}{replies(comment.id).map((reply: Comment) => <div key={reply.id} className="theme-soft-panel mt-3 rounded-lg p-3"><span className="theme-muted text-xs">Reply · {reply.created_at ? new Date(reply.created_at).toLocaleDateString() : ''}</span><p className="mt-1 text-sm">{reply.content}</p></div>)}</CardContent></Card>)}</div>}
   </CardContent></Card></section>;
 }

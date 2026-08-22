@@ -1,5 +1,5 @@
 import { getAPIBaseURL } from './config';
-import { apiClient } from './client';
+import { apiClient, invalidateResourceCaches } from './client';
 
 export type BookStatus = 'draft' | 'active' | 'inactive' | 'archived';
 export type BookFile = { key: string; original_filename?: string | null; mime_type?: string | null; size?: number | null };
@@ -30,9 +30,13 @@ export async function fetchBooks(params?: Record<string, string | boolean | unde
 export async function fetchBookById(id: number) { return (await apiClient.get(url(`/api/v1/books/${id}`))).data as Book; }
 export async function recordBookDownload(id: number) { return (await apiClient.post(url(`/api/v1/books/${id}/record-download`))).data as { download_count: number }; }
 export async function fetchBookStats() { return (await apiClient.get(url('/api/v1/books/stats'))).data as Record<string, number>; }
-export async function createBook(data: BookDraft) { return (await apiClient.post(url('/api/v1/books'), data)).data as Book; }
+export async function createBook(data: BookDraft) {
+  const book = (await apiClient.post(url('/api/v1/books'), data)).data as Book;
+  invalidateResourceCaches();
+  return book;
+}
 export async function updateBook(id: number, data: Partial<BookDraft>) { return (await apiClient.put(url(`/api/v1/books/${id}`), data)).data as Book; }
-export async function deleteBook(id: number) { await apiClient.delete(url(`/api/v1/books/${id}`)); }
+export async function deleteBook(id: number) { await apiClient.delete(url(`/api/v1/books/${id}`)); invalidateResourceCaches(); }
 export async function restoreBook(id: number) { return (await apiClient.post(url(`/api/v1/books/${id}/restore`))).data as Book; }
 export async function setBookStatus(id: number, status: BookStatus) { return (await apiClient.patch(url(`/api/v1/books/${id}/status`), { status })).data as Book; }
 export async function updateBookAuthors(id: number, authors: string[]) { return (await apiClient.patch(url(`/api/v1/books/${id}/authors`), { authors })).data as Book; }

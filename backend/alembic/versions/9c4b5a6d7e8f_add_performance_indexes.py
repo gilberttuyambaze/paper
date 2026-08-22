@@ -14,6 +14,23 @@ depends_on = None
 
 def upgrade():
     """Create performance indexes using CONCURRENTLY outside transaction."""
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        inspector = sa.inspect(bind)
+        existing = {index["name"] for index in inspector.get_indexes("user_profiles")}
+        existing |= {index["name"] for index in inspector.get_indexes("papers")}
+        indexes = (
+            ("ix_user_profiles_user_id", "user_profiles", ["user_id"], None),
+            ("ix_papers_public_download_count", "papers", ["download_count"], "is_hidden IS NOT TRUE AND verification_status = 'verified'"),
+            ("ix_papers_institution_campus_created", "papers", ["institution_id", "campus_id", "created_at"], "is_hidden IS NOT TRUE AND verification_status = 'verified'"),
+            ("ix_papers_programme_download", "papers", ["programme_id", "download_count"], "is_hidden IS NOT TRUE AND verification_status = 'verified' AND programme_id IS NOT NULL"),
+        )
+        for name, table, columns, predicate in indexes:
+            if name not in existing:
+                kwargs = {"sqlite_where": sa.text(predicate)} if predicate else {}
+                op.create_index(name, table, columns, **kwargs)
+        return
+
     ctx = op.get_context()
     # Run CONCURRENTLY operations outside Alembic's transactional context
     with ctx.autocommit_block():
@@ -40,6 +57,18 @@ def upgrade():
 
 def downgrade():
     """Drop the created indexes using CONCURRENTLY."""
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        for name, table in (
+            ("ix_user_profiles_user_id", "user_profiles"),
+            ("ix_papers_public_download_count", "papers"),
+            ("ix_papers_institution_campus_created", "papers"),
+            ("ix_papers_programme_download", "papers"),
+        ):
+            if name in {index["name"] for index in sa.inspect(bind).get_indexes(table)}:
+                op.drop_index(name, table_name=table)
+        return
+
     ctx = op.get_context()
     with ctx.autocommit_block():
         op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_user_profiles_user_id")

@@ -1,4 +1,6 @@
 import logging
+from dataclasses import dataclass
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 
 from dependencies.auth import get_admin_user, get_current_user, get_optional_current_user
@@ -8,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
 from models.books import Book
 from models.papers import Papers
+from models.solutions import Solutions
 from models.user_profiles import User_profiles
 from services.authorization import can_read_book
 from schemas.auth import UserResponse
@@ -26,7 +29,7 @@ from schemas.storage import (
     RenameRequest,
     RenameResponse,
 )
-from services.storage import StorageService
+from services.storage import StorageService, storage_key_candidates
 from services.pdf_text import extract_pdf_text
 
 logger = logging.getLogger(__name__)
@@ -34,42 +37,109 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/storage", tags=["storage"])
 
 
+@dataclass(frozen=True)
+class AuthorizedStorageObject:
+    bucket_name: str
+    logical_object_key: str
+    provider_file_id: str | None
+    storage_provider: str | None
+    entity_type: str
+    entity_id: int | str
+    record: object | None = None
+
+
+async def _cache_provider_metadata(resolved: AuthorizedStorageObject, metadata: dict, db: AsyncSession) -> None:
+    if not resolved.record or not metadata.get("drive_file_id"):
+        return
+    record = resolved.record
+    if resolved.entity_type == "book":
+        is_cover = resolved.logical_object_key == getattr(record, "cover_key", None)
+        setattr(record, "cover_drive_file_id" if is_cover else "file_drive_file_id", metadata["drive_file_id"])
+        setattr(record, "cover_storage_provider" if is_cover else "file_storage_provider", metadata.get("storage_provider"))
+    elif resolved.entity_type == "paper":
+        is_solution = resolved.logical_object_key == getattr(record, "solution_key", None)
+        setattr(record, "solution_drive_file_id" if is_solution else "file_drive_file_id", metadata["drive_file_id"])
+        setattr(record, "solution_storage_provider" if is_solution else "file_storage_provider", metadata.get("storage_provider"))
+    elif resolved.entity_type == "solution":
+        record.drive_file_id = metadata["drive_file_id"]
+        record.storage_provider = metadata.get("storage_provider")
+    await db.commit()
+
+
 async def _require_read_access(
     bucket_name: str,
     object_key: str,
     current_user: UserResponse | None,
     db: AsyncSession,
-) -> None:
-    """Authorize stored resource files by their database ownership and visibility."""
-    if bucket_name == "books":
-        book = (await db.execute(
-            select(Book).where(
-                or_(Book.file_key == object_key, Book.cover_key == object_key),
-            )
-        )).scalar_one_or_none()
-        if not book:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored book file not found")
-        if not can_read_book(current_user, book):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book file not found")
-        return
+) -> "AuthorizedStorageObject":
+    """Authorize a database-owned object and return its canonical key."""
+    return await _resolve_authorized_object(bucket_name, object_key, current_user, db)
 
-    if bucket_name == "papers":
-        paper = (await db.execute(
-            select(Papers).where(
-                or_(Papers.file_key == object_key, Papers.solution_key == object_key),
-            )
-        )).scalar_one_or_none()
-        if not paper or (current_user and current_user.role != "admin" and paper.is_hidden) or (current_user is None and paper.is_hidden):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper file not found")
-        return
 
+def _is_external_url(value: str) -> bool:
+    return urlparse(value).scheme in {"http", "https"}
+
+
+async def _resolve_authorized_object(bucket_name: str, requested_key: str, current_user, db: AsyncSession) -> AuthorizedStorageObject:
+    """Resolve legacy key shapes through a resource record before touching storage.
+
+    The request never becomes a general object-store read: every accepted variant
+    must identify a Paper, Book, or profile row and is then replaced with its
+    database-owned canonical key.
+    """
+    if _is_external_url(requested_key):
+        raise HTTPException(status_code=400, detail="External URLs are not storage object keys")
+    candidates = storage_key_candidates(bucket_name, requested_key)
+    if bucket_name in {"books", "book-covers"}:
+        book = (await db.execute(select(Book).where(or_(*[
+            Book.file_key.in_(candidates), Book.cover_key.in_(candidates)
+        ])))).scalar_one_or_none()
+        if not book or not can_read_book(current_user, book):
+            raise HTTPException(status_code=404, detail="Book file not found")
+        key = next(key for key in (book.file_key, book.cover_key) if key in candidates)
+        is_cover = key == book.cover_key
+        return AuthorizedStorageObject(
+            bucket_name, key,
+            getattr(book, "cover_drive_file_id" if is_cover else "file_drive_file_id"),
+            getattr(book, "cover_storage_provider" if is_cover else "file_storage_provider"),
+            "book", book.id, book,
+        )
+    if bucket_name in {"papers", "solutions"}:
+        paper = (await db.execute(select(Papers).where(or_(
+            Papers.file_key.in_(candidates), Papers.solution_key.in_(candidates)
+        )))).scalar_one_or_none()
+        solution = (await db.execute(select(Solutions).where(Solutions.file_key.in_(candidates)))).scalar_one_or_none()
+        if paper and (paper.is_hidden and (not current_user or current_user.role != "admin")):
+            raise HTTPException(status_code=404, detail="Paper file not found")
+        if paper:
+            key = next(key for key in (paper.file_key, paper.solution_key) if key in candidates)
+            is_solution = key == paper.solution_key
+            return AuthorizedStorageObject(
+                bucket_name, key,
+                getattr(paper, "solution_drive_file_id" if is_solution else "file_drive_file_id"),
+                getattr(paper, "solution_storage_provider" if is_solution else "file_storage_provider"),
+                "paper", paper.id, paper,
+            )
+        if solution:
+            paper_visibility = await db.execute(select(Papers.is_hidden).where(Papers.id == solution.paper_id))
+            is_hidden = paper_visibility.scalar_one_or_none()
+            if is_hidden and (not current_user or current_user.role != "admin"):
+                raise HTTPException(status_code=404, detail="Solution file not found")
+            return AuthorizedStorageObject(bucket_name, solution.file_key, solution.drive_file_id, solution.storage_provider, "solution", solution.id, solution)
+        logger.warning(
+            "Storage object authorization failed: entity_type=%s entity_id=%s db_key=%r bucket=%s candidates=%s",
+            "paper_or_solution", "unknown", requested_key, bucket_name, candidates,
+        )
+        raise HTTPException(status_code=404, detail="Paper file not found")
     if bucket_name == "profiles":
-        profile = (await db.execute(select(User_profiles).where(User_profiles.profile_picture_key == object_key))).scalar_one_or_none()
-        if not profile and (current_user is None or current_user.role != "admin"):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile image not found")
-        return
-
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Storage object access is not permitted")
+        profile = (await db.execute(select(User_profiles).where(User_profiles.profile_picture_key.in_(candidates)))).scalar_one_or_none()
+        if not profile and (not current_user or current_user.role != "admin"):
+            raise HTTPException(status_code=404, detail="Profile image not found")
+        return AuthorizedStorageObject(
+            bucket_name, profile.profile_picture_key if profile else requested_key,
+            None, None, "profile", profile.id if profile else "unknown",
+        )
+    raise HTTPException(status_code=403, detail="Storage object access is not permitted")
 
 
 @router.post("/analyze-pdf")
@@ -230,13 +300,17 @@ async def upload_file_direct(
             raise ValueError("Uploaded file is empty")
 
         service = StorageService()
-        stored_object_key = await service.upload_file(
+        upload_result = await service.upload_file_with_metadata(
             request.bucket_name,
             request.object_key,
             file_bytes,
             file.content_type,
         )
-        return FileUploadResponse(object_key=stored_object_key)
+        return FileUploadResponse(
+            object_key=upload_result.object_key,
+            provider_file_id=upload_result.provider_file_id,
+            storage_provider=upload_result.storage_provider,
+        )
     except ValueError as e:
         logger.error(f"Invalid upload request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -256,11 +330,45 @@ async def download_file_direct(
     Download a file from the configured storage backend through the backend.
     """
     try:
-        await _require_read_access(bucket_name, object_key, current_user, db)
-        request = FileUpDownRequest(bucket_name=bucket_name, object_key=object_key)
+        resolved = await _resolve_authorized_object(bucket_name, object_key, current_user, db)
+        request = FileUpDownRequest(bucket_name=bucket_name, object_key=resolved.logical_object_key)
         service = StorageService()
-        file_bytes = await service.download_file(request.bucket_name, request.object_key)
-        metadata = await service.get_file_metadata(request.bucket_name, request.object_key)
+        last_error = None
+        file_bytes = None
+        if resolved.provider_file_id:
+            try:
+                file_bytes = await service.download_file_by_id(request.bucket_name, request.object_key, resolved.provider_file_id)
+                metadata = await service.get_file_metadata_by_id(request.bucket_name, request.object_key, resolved.provider_file_id)
+                logger.info(
+                    "Storage resolved bucket=%s logical_object_key=%s provider=%s provider_file_id=%s parent_folder_id=%s resolution_method=file_id entity_type=%s entity_id=%s",
+                    request.bucket_name, resolved.logical_object_key, resolved.storage_provider,
+                    resolved.provider_file_id, metadata.get("parent_folder_id"), resolved.entity_type, resolved.entity_id,
+                )
+            except ValueError as exc:
+                last_error = exc
+        else:
+            for provider_key in storage_key_candidates(request.bucket_name, request.object_key):
+                try:
+                    file_bytes = await service.download_file(request.bucket_name, provider_key)
+                    metadata = await service.get_file_metadata(request.bucket_name, provider_key)
+                    await _cache_provider_metadata(resolved, metadata, db)
+                    logger.info(
+                        "Storage resolved bucket=%s logical_object_key=%s canonical_object_key=%s provider=%s provider_file_id=%s parent_folder_id=%s resolution_method=%s entity_type=%s entity_id=%s",
+                        request.bucket_name, resolved.logical_object_key, provider_key,
+                        metadata.get("storage_provider"), metadata.get("drive_file_id"), metadata.get("parent_folder_id"),
+                        "exact_name" if provider_key == request.object_key else "legacy_fallback",
+                        resolved.entity_type, resolved.entity_id,
+                    )
+                    break
+                except ValueError as exc:
+                    last_error = exc
+        if file_bytes is None:
+            logger.warning(
+                "Storage object resolution failed: entity_type=%s entity_id=%s db_key=%r bucket=%s candidates=%s error=%s",
+                resolved.entity_type, resolved.entity_id, request.object_key, request.bucket_name,
+                storage_key_candidates(request.bucket_name, request.object_key), last_error,
+            )
+            raise HTTPException(status_code=404, detail="Stored object not found") from last_error
         return Response(
             content=file_bytes,
             media_type=metadata.get("mime_type") or "application/octet-stream",
@@ -317,9 +425,17 @@ async def download_file(
     Get a presigned URL for downloading a file to StorageService.
     """
     try:
-        await _require_read_access(request.bucket_name, request.object_key, _current_user, db)
+        resolved = await _require_read_access(request.bucket_name, request.object_key, _current_user, db)
         service = StorageService()
-        return await service.create_download_url(request)
+        if resolved.provider_file_id:
+            metadata = await service.get_file_metadata_by_id(request.bucket_name, resolved.logical_object_key, resolved.provider_file_id)
+            logger.info(
+                "Storage resolved bucket=%s logical_object_key=%s provider=%s provider_file_id=%s parent_folder_id=%s resolution_method=file_id entity_type=%s entity_id=%s",
+                request.bucket_name, resolved.logical_object_key, resolved.storage_provider,
+                resolved.provider_file_id, metadata.get("parent_folder_id"), resolved.entity_type, resolved.entity_id,
+            )
+            return await service.create_download_url(FileUpDownRequest(bucket_name=request.bucket_name, object_key=resolved.logical_object_key))
+        return await service.create_download_url(FileUpDownRequest(bucket_name=request.bucket_name, object_key=resolved.logical_object_key))
     except ValueError as e:
         logger.error(f"Invalid download request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
