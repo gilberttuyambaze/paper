@@ -1,12 +1,18 @@
 import logging
 from typing import Optional, Dict, Any, List
 
-from sqlalchemy import select, func
+from fastapi import HTTPException
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.papers import Papers
+from models.comments import Comments
+from models.paper_interactions import PaperInteractions
+from models.papers import PaperPassage, PaperQuestion, QuestionAttempt, QuestionClassification, QuestionTopic, Papers
+from models.reports import Reports
+from models.solutions import Solutions
 from services.storage import StorageService
 from services.passage_indexing import PassageIndexService
+from schemas.storage import ObjectRequest
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,17 @@ class PapersService:
                 data["file_mime_type"] = metadata.get("mime_type")
             except Exception as exc:
                 logger.warning("Could not attach file metadata for paper file_key=%s: %s", data.get("file_key"), exc)
+
+        if data.get("cover_key"):
+            try:
+                metadata = await storage.get_file_metadata(self.DEFAULT_STORAGE_BUCKET, data["cover_key"])
+                data["cover_drive_file_id"] = metadata.get("drive_file_id")
+                data["cover_storage_provider"] = metadata.get("storage_provider")
+                data["cover_file_name"] = metadata.get("file_name")
+                data["cover_file_size"] = metadata.get("file_size")
+                data["cover_mime_type"] = metadata.get("mime_type")
+            except Exception as exc:
+                logger.warning("Could not attach cover metadata for paper file_key=%s: %s", data.get("cover_key"), exc)
 
         if data.get("solution_key"):
             try:
@@ -93,9 +110,9 @@ class PapersService:
             raise
 
     async def get_list(
-        self, 
-        skip: int = 0, 
-        limit: int = 20, 
+        self,
+        skip: int = 0,
+        limit: int = 20,
         user_id: Optional[str] = None,
         query_dict: Optional[Dict[str, Any]] = None,
         sort: Optional[str] = None,
@@ -104,17 +121,17 @@ class PapersService:
         try:
             query = select(Papers)
             count_query = select(func.count(Papers.id))
-            
+
             if user_id:
                 query = query.where(Papers.user_id == user_id)
                 count_query = count_query.where(Papers.user_id == user_id)
-            
+
             if query_dict:
                 for field, value in query_dict.items():
                     if hasattr(Papers, field):
                         query = query.where(getattr(Papers, field) == value)
                         count_query = count_query.where(getattr(Papers, field) == value)
-            
+
             count_result = await self.db.execute(count_query)
             total = count_result.scalar()
 
@@ -162,17 +179,87 @@ class PapersService:
             logger.error(f"Error updating papers {obj_id}: {str(e)}")
             raise
 
+    async def _cleanup_drive_files(self, paper: Papers, solutions: list[Solutions]) -> None:
+        """Permanently delete associated Google Drive files.
+
+        Treats already-missing files as success (no error if file already gone).
+        Raises HTTPException if deletion genuinely fails.
+        """
+        storage = StorageService()
+        files_to_delete = [
+            (paper.file_key, paper.file_drive_file_id, "PDF"),
+            (paper.cover_key, paper.cover_drive_file_id, "Cover"),
+            (paper.solution_key, paper.solution_drive_file_id, "Solution"),
+        ]
+        files_to_delete.extend((solution.file_key, solution.drive_file_id, "Solution attachment") for solution in solutions)
+
+        for object_key, drive_file_id, file_type in files_to_delete:
+            if not object_key and not drive_file_id:
+                continue
+
+            try:
+                if drive_file_id:
+                    try:
+                        await storage.delete_object_by_id(self.DEFAULT_STORAGE_BUCKET, object_key or "", drive_file_id)
+                        logger.info("Deleted Paper %s %s from Drive: provider_id=%s", paper.id, file_type, drive_file_id)
+                    except ValueError as e:
+                        if "not found" in str(e).lower():
+                            logger.info(f"Paper {paper.id} {file_type} already absent from Drive")
+                        else:
+                            raise
+                elif object_key:
+                    request = ObjectRequest(
+                        bucket_name=self.DEFAULT_STORAGE_BUCKET,
+                        object_key=object_key
+                    )
+                    try:
+                        await storage.delete_object(request)
+                        logger.info(f"Deleted Paper {paper.id} {file_type} from Drive: key={object_key}")
+                    except ValueError as e:
+                        if "not found" in str(e).lower():
+                            logger.info(f"Paper {paper.id} {file_type} already absent from Drive")
+                        else:
+                            raise
+            except Exception as e:
+                logger.error(f"Error deleting Paper {paper.id} {file_type} from Drive: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to delete Paper files from storage: {str(e)}"
+                )
+
     async def delete(self, obj_id: int, user_id: Optional[str] = None) -> bool:
-        """Delete papers (requires ownership)"""
+        """Hard delete papers and associated Google Drive files.
+
+        Authorization must be checked by caller. This method does not re-check user_id.
+        """
         try:
-            obj = await self.get_by_id(obj_id, user_id=user_id)
+            obj = await self.db.get(Papers, obj_id)
             if not obj:
                 logger.warning(f"Papers {obj_id} not found for deletion")
                 return False
+
+            solutions = (await self.db.execute(select(Solutions).where(Solutions.paper_id == obj_id))).scalars().all()
+            await self._cleanup_drive_files(obj, solutions)
+
+            question_ids = select(PaperQuestion.id).where(PaperQuestion.paper_id == obj_id)
+            await self.db.execute(delete(QuestionTopic).where(QuestionTopic.question_id.in_(question_ids)))
+            await self.db.execute(delete(QuestionClassification).where(QuestionClassification.question_id.in_(question_ids)))
+            await self.db.execute(delete(QuestionAttempt).where(QuestionAttempt.question_id.in_(question_ids)))
+            await self.db.execute(delete(PaperQuestion).where(PaperQuestion.paper_id == obj_id))
+            await self.db.execute(delete(PaperPassage).where(PaperPassage.paper_id == obj_id))
+            await self.db.execute(delete(Solutions).where(Solutions.paper_id == obj_id))
+            await self.db.execute(delete(Comments).where(Comments.paper_id == obj_id))
+            await self.db.execute(delete(PaperInteractions).where(PaperInteractions.paper_id == obj_id))
+            await self.db.execute(delete(Reports).where(Reports.paper_id == obj_id))
+
+            # Now delete the database record
             await self.db.delete(obj)
             await self.db.commit()
-            logger.info(f"Deleted papers {obj_id}")
+            logger.info(f"Hard deleted papers {obj_id}")
             return True
+        except HTTPException:
+            # Re-raise HTTP exceptions (storage failures should surface to caller)
+            raise
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Error deleting papers {obj_id}: {str(e)}")

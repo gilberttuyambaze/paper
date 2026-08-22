@@ -8,7 +8,7 @@ export type Book = {
   publication_year?: number | null; language?: string | null; publisher?: string | null; category?: string | null; subject?: string | null;
   status: BookStatus; visibility: 'public' | 'private'; uploaded_by: string; uploader_name?: string | null; uploader_role?: string | null;
   download_count?: number | null;
-  created_at: string; updated_at: string; management_deadline: string; can_manage: boolean; deleted_at?: string | null;
+  created_at: string; updated_at: string; management_deadline: string; can_manage: boolean;
   authors: string[]; course_ids: number[]; courses?: Course[]; modules?: Module[]; cover_key?: string | null; file_key?: string | null; file_name?: string | null;
 };
 export type BookDraft = Omit<Partial<Book>, 'authors' | 'course_ids' | 'status'> & { title: string; authors: string[]; course_ids: number[]; module_ids?: number[]; status: BookStatus; file?: BookFile; cover?: BookFile };
@@ -37,7 +37,6 @@ export async function createBook(data: BookDraft) {
 }
 export async function updateBook(id: number, data: Partial<BookDraft>) { return (await apiClient.put(url(`/api/v1/books/${id}`), data)).data as Book; }
 export async function deleteBook(id: number) { await apiClient.delete(url(`/api/v1/books/${id}`)); invalidateResourceCaches(); }
-export async function restoreBook(id: number) { return (await apiClient.post(url(`/api/v1/books/${id}/restore`))).data as Book; }
 export async function setBookStatus(id: number, status: BookStatus) { return (await apiClient.patch(url(`/api/v1/books/${id}/status`), { status })).data as Book; }
 export async function updateBookAuthors(id: number, authors: string[]) { return (await apiClient.patch(url(`/api/v1/books/${id}/authors`), { authors })).data as Book; }
 export async function updateBookCourses(id: number, course_ids: number[]) { return (await apiClient.patch(url(`/api/v1/books/${id}/courses`), { course_ids })).data as Book; }

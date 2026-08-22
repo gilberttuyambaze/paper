@@ -271,7 +271,7 @@ async def get_overview(
     db: AsyncSession = Depends(get_db),
 ):
     total_papers = await db.scalar(select(func.count(Papers.id)))
-    total_books = await db.scalar(select(func.count(Book.id)).where(Book.deleted_at.is_(None)))
+    total_books = await db.scalar(select(func.count(Book.id)))
     hidden_papers = await db.scalar(select(func.count(Papers.id)).where(Papers.is_hidden.is_(True)))
     verified_papers = await db.scalar(select(func.count(Papers.id)).where(Papers.verification_status == "verified"))
     total_reports = await db.scalar(select(func.count(Reports.id)))
@@ -390,7 +390,7 @@ async def get_user_resources(
     activity.sort(key=lambda item: item["created_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     return {
         "papers": [{"id": paper.id, "title": paper.title, "course_code": paper.course_code, "course_name": paper.course_name, "year": paper.year, "paper_type": paper.paper_type, "verification_status": paper.verification_status, "is_hidden": paper.is_hidden, "created_at": paper.created_at} for paper in papers],
-        "books": [{"id": book.id, "title": book.title, "language": book.language, "status": book.status, "visibility": book.visibility, "created_at": book.created_at, "deleted_at": book.deleted_at, "file_name": book.file_name, "file_size": book.file_size} for book in books],
+        "books": [{"id": book.id, "title": book.title, "language": book.language, "status": book.status, "visibility": book.visibility, "created_at": book.created_at, "file_name": book.file_name, "file_size": book.file_size} for book in books],
         "stats": {"papers": len(papers), "books": len(books), "total_resources": len(papers) + len(books)},
         "activity": activity[:20],
     }
@@ -632,18 +632,8 @@ async def delete_user(
         raise HTTPException(status_code=403, detail="Only admins can delete administrator accounts")
 
     user = await db.get(User, profile.user_id)
-    owned_paper_ids_result = await db.execute(select(Papers.id).where(Papers.user_id == profile.user_id))
-    owned_paper_ids = [row[0] for row in owned_paper_ids_result.all()]
-
-    if owned_paper_ids:
-        await db.execute(delete(Reports).where(Reports.paper_id.in_(owned_paper_ids)))
-        await db.execute(delete(Comments).where(Comments.paper_id.in_(owned_paper_ids)))
-        await db.execute(delete(Solutions).where(Solutions.paper_id.in_(owned_paper_ids)))
-        await db.execute(delete(Papers).where(Papers.id.in_(owned_paper_ids)))
-
     await db.execute(delete(Reports).where(Reports.user_id == profile.user_id))
     await db.execute(delete(Comments).where(Comments.user_id == profile.user_id))
-    await db.execute(delete(Solutions).where(Solutions.user_id == profile.user_id))
     await db.execute(delete(Notifications).where(Notifications.user_id == profile.user_id))
     await db.delete(profile)
     if user:

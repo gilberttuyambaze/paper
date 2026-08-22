@@ -5,6 +5,7 @@ import re
 import time
 from pathlib import Path
 
+from fastapi import HTTPException
 from asyncpg.exceptions import (
     DuplicateTableError,
     UniqueViolationError,
@@ -643,6 +644,8 @@ async def get_db() -> AsyncSession:
             finally:
                 logger.debug(f"[DB_OP] Database session cleanup after {time.time() - start_time:.4f}s")
                 # Session is automatically closed by the async context manager when exiting 'async with'
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create database session: {e}", exc_info=True)
         raise

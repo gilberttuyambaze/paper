@@ -40,8 +40,6 @@ class Book(Base):
     download_count = Column(Integer, nullable=False, default=0, server_default="0", index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
-    deleted_by = Column(String(255), nullable=True)
 
 
 class BookAuthor(Base):

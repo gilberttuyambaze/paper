@@ -29,7 +29,7 @@ async def list_resources(type: Literal["all", "paper", "book"] = "all", q: Optio
         for paper in papers:
             items.append({"id": str(paper.id), "type": "paper", "title": paper.title, "description": paper.description, "year": paper.year, "created_at": paper.created_at, "thumbnail_url": None, "uploader": await _profile(db, paper.user_id), "courses": [{"id": None, "code": paper.course_code, "name": paper.course_name}], "modules": [], "authors": [], "paper": {"paper_type": paper.paper_type, "verification_status": paper.verification_status, "lecturer": paper.lecturer, "department": paper.department, "download_count": paper.download_count or 0}})
     if type in {"all", "book"}:
-        query = select(Book).where(Book.deleted_at.is_(None), Book.status == "active", Book.visibility == "public")
+        query = select(Book).where(Book.status == "active", Book.visibility == "public")
         if q:
             like = f"%{q}%"; query = query.where(or_(Book.title.ilike(like), Book.description.ilike(like), Book.isbn.ilike(like), Book.publisher.ilike(like), Book.subject.ilike(like)))
         if year: query = query.where(Book.publication_year == year)

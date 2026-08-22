@@ -13,7 +13,7 @@ def user(user_id: str, role: str):
 
 
 def book(owner: str, created_at: datetime):
-    return SimpleNamespace(uploaded_by=owner, created_at=created_at, deleted_at=None, status="active", visibility="public")
+    return SimpleNamespace(uploaded_by=owner, created_at=created_at, status="active", visibility="public")
 
 
 def test_active_public_books_are_readable_across_users_but_private_books_are_not():
@@ -32,10 +32,6 @@ def test_active_public_books_are_readable_across_users_but_private_books_are_not
     assert can_read_book(admin, book_a)
     assert not any(can_read_book(actor, book_a) for actor in (cp_a, cp_b, student))
 
-    book_a.visibility = "public"
-    book_a.deleted_at = now
-    assert can_read_book(admin, book_a)
-    assert not any(can_read_book(actor, book_a) for actor in (cp_a, cp_b, student))
 
 
 def test_upload_permission_is_shared_by_papers_and_books():

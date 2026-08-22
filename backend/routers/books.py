@@ -1,23 +1,28 @@
 """Book management with server-enforced admin/CP ownership rules."""
 
+import logging
 from datetime import timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from dependencies.auth import get_current_user, get_optional_current_user
+from models.comments import Comments
 from models.books import Author, Book, BookActivity, BookAuthor, BookCourse, BookModule, Module
 from models.user_profiles import User_profiles
 from models.courses import Course
 from schemas.auth import UserResponse
+from schemas.storage import ObjectRequest
 from services.authorization import CP_WINDOW, _utc, can_create_book, can_manage_book, can_read_book, database_now, require_book_management
 from core.input_normalization import normalize_isbn, normalize_text, normalize_unique
 from routers.notifications import create_notification
 from services.storage import StorageService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/books", tags=["books"])
 MANAGEMENT_ROLES = {"admin", "cp"}
@@ -137,11 +142,9 @@ async def _require_manager(book: Book, actor: UserResponse, db: AsyncSession) ->
     await require_book_management(db, actor, book)
 
 
-async def _get_book(book_id: int, db: AsyncSession, include_deleted: bool = False) -> Book:
-    query = select(Book).where(Book.id == book_id)
-    if not include_deleted:
-        query = query.where(Book.deleted_at.is_(None))
-    book = (await db.execute(query)).scalar_one_or_none()
+async def _get_book(book_id: int, db: AsyncSession) -> Book:
+    """Get book by ID. Returns 404 if not found."""
+    book = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
     return book
@@ -149,6 +152,69 @@ async def _get_book(book_id: int, db: AsyncSession, include_deleted: bool = Fals
 
 async def _activity(db: AsyncSession, book: Book, actor: UserResponse | None, action: str, detail: str | None = None) -> None:
     db.add(BookActivity(book_id=book.id, actor_id=str(actor.id) if actor else None, actor_role=actor.role if actor else None, action=action, detail=detail))
+
+
+async def _cleanup_book_drive_files(book: Book) -> None:
+    """Permanently delete Book's Google Drive files (PDF and cover).
+
+    Treats already-missing files as success.
+    Raises HTTPException if deletion genuinely fails.
+    """
+    storage = StorageService()
+    files_to_delete = [
+        (book.file_key, book.file_drive_file_id, "PDF"),
+        (book.cover_key, book.cover_drive_file_id, "Cover"),
+    ]
+
+    for object_key, drive_file_id, file_type in files_to_delete:
+        if not object_key and not drive_file_id:
+            continue
+
+        try:
+            if drive_file_id:
+                try:
+                    await storage.delete_object_by_id("books", object_key or "", drive_file_id)
+                    logger.info("Deleted Book %s %s from Drive: provider_id=%s", book.id, file_type, drive_file_id)
+                except ValueError as e:
+                    if "not found" in str(e).lower():
+                        logger.info("Book %s %s already absent from Drive", book.id, file_type)
+                    else:
+                        raise
+            elif object_key:
+                request = ObjectRequest(
+                    bucket_name="books",
+                    object_key=object_key
+                )
+                try:
+                    await storage.delete_object(request)
+                    logger.info(f"Deleted Book {book.id} {file_type} from Drive: key={object_key}")
+                except ValueError as e:
+                    if "not found" in str(e).lower():
+                        logger.info(f"Book {book.id} {file_type} already absent from Drive")
+                    else:
+                        raise
+        except Exception as e:
+            logger.error(f"Error deleting Book {book.id} {file_type} from Drive: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete Book files from storage: {str(e)}"
+            )
+
+
+async def _delete_replaced_book_file(object_key: Optional[str], provider_id: Optional[str]) -> None:
+    if not object_key and not provider_id:
+        return
+    storage = StorageService()
+    try:
+        if provider_id:
+            await storage.delete_object_by_id("books", object_key or "", provider_id)
+        else:
+            await storage.delete_object(ObjectRequest(bucket_name="books", object_key=object_key or ""))
+    except ValueError as exc:
+        if "not found" not in str(exc).lower():
+            raise HTTPException(status_code=500, detail=f"Failed to delete replaced storage file: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete replaced storage file: {exc}") from exc
 
 
 async def _replace_authors(db: AsyncSession, book_id: int, authors: list[str]) -> None:
@@ -253,11 +319,8 @@ async def create_book(payload: BookCreate, actor: UserResponse = Depends(get_cur
 
 
 @router.get("")
-async def list_books(include_deleted: bool = False, status_filter: Optional[str] = Query(None, alias="status"), uploaded_by: Optional[str] = None, uploader_role: Optional[str] = None, course_id: Optional[str] = None, author: Optional[str] = None, management_state: Optional[Literal["within_48h", "expired"]] = None, actor: Optional[UserResponse] = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
+async def list_books(status_filter: Optional[str] = Query(None, alias="status"), uploaded_by: Optional[str] = None, uploader_role: Optional[str] = None, course_id: Optional[str] = None, author: Optional[str] = None, management_state: Optional[Literal["within_48h", "expired"]] = None, actor: Optional[UserResponse] = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
     query = select(Book)
-    if include_deleted:
-        if not actor or actor.role != "admin": raise HTTPException(403, "Only administrators can view deleted books")
-    else: query = query.where(Book.deleted_at.is_(None))
     # Readers only receive published books. Management users can inspect the
     # catalogue (including drafts) as part of their review responsibilities.
     # CP management views may inspect their own Books (including drafts and
@@ -286,7 +349,8 @@ async def list_books(include_deleted: bool = False, status_filter: Optional[str]
 @router.get("/stats")
 async def book_stats(actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if actor.role != "admin": raise HTTPException(403, "Admin access required")
-    books = (await db.execute(select(Book).where(Book.deleted_at.is_(None)))).scalars().all(); now = await database_now(db)
+    books = (await db.execute(select(Book))).scalars().all()
+    now = await database_now(db)
     today, week = now - timedelta(days=1), now - timedelta(days=7)
     cp_ids = set((await db.execute(select(User_profiles.user_id).where(User_profiles.role == "cp"))).scalars().all())
     return {"total_books": len(books), "active_books": sum(b.status == "active" for b in books), "draft_books": sum(b.status == "draft" for b in books), "archived_books": sum(b.status == "archived" for b in books), "books_added_today": sum(_utc(b.created_at) >= today for b in books), "books_added_this_week": sum(_utc(b.created_at) >= week for b in books), "books_added_by_cp": sum(b.uploaded_by in cp_ids for b in books), "books_added_by_admin": sum(b.uploaded_by not in cp_ids for b in books), "cp_books_within_48_hours": sum(b.uploaded_by in cp_ids and now <= _utc(b.created_at) + CP_WINDOW for b in books), "cp_books_past_48_hours": sum(b.uploaded_by in cp_ids and now > _utc(b.created_at) + CP_WINDOW for b in books)}
@@ -304,7 +368,7 @@ async def record_book_download(book_id: int, actor: Optional[UserResponse] = Dep
 
 @router.get("/{book_id}")
 async def get_book(book_id: int, actor: Optional[UserResponse] = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
-    book = await _get_book(book_id, db, include_deleted=bool(actor and actor.role == "admin"))
+    book = await _get_book(book_id, db)
     if not can_read_book(actor, book):
         raise HTTPException(404, "Book not found")
     return await _serialize(book, db, actor)
@@ -370,37 +434,49 @@ async def create_module(payload: ModuleCreate, actor: UserResponse = Depends(get
 @router.post("/{book_id}/file")
 async def replace_file(book_id: int, payload: FileReference, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     book = await _get_book(book_id, db); await _require_manager(book, actor, db)
+    old_key, old_provider_id = book.file_key, book.file_drive_file_id
     book.file_key, book.file_name, book.file_mime_type, book.file_size, book.file_uploaded_at = payload.key, payload.original_filename, payload.mime_type, payload.size, await database_now(db)
     await _attach_storage_metadata(book)
-    await _activity(db, book, actor, "file_replaced", "Replaced book file"); await db.commit(); await db.refresh(book); return await _serialize(book, db, actor)
+    await _activity(db, book, actor, "file_replaced", "Replaced book file"); await db.commit(); await db.refresh(book)
+    if old_key != book.file_key or old_provider_id != book.file_drive_file_id:
+        await _delete_replaced_book_file(old_key, old_provider_id)
+    return await _serialize(book, db, actor)
 
 
 @router.post("/{book_id}/cover")
 async def replace_cover(book_id: int, payload: FileReference, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     book = await _get_book(book_id, db); await _require_manager(book, actor, db)
+    old_key, old_provider_id = book.cover_key, book.cover_drive_file_id
     book.cover_key, book.cover_file_name, book.cover_mime_type = payload.key, payload.original_filename, payload.mime_type
     await _attach_storage_metadata(book)
-    await _activity(db, book, actor, "cover_replaced", "Replaced book cover"); await db.commit(); await db.refresh(book); return await _serialize(book, db, actor)
+    await _activity(db, book, actor, "cover_replaced", "Replaced book cover"); await db.commit(); await db.refresh(book)
+    if old_key != book.cover_key or old_provider_id != book.cover_drive_file_id:
+        await _delete_replaced_book_file(old_key, old_provider_id)
+    return await _serialize(book, db, actor)
 
 
 @router.delete("/{book_id}")
 async def delete_book(book_id: int, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    book = await _get_book(book_id, db); await _require_manager(book, actor, db)
-    book.deleted_at, book.deleted_by = await database_now(db), str(actor.id); await _activity(db, book, actor, "deleted", "Soft deleted book")
-    await db.commit(); return {"id": book_id, "message": "Book deleted"}
+    """Permanently hard delete a Book and all associated Google Drive files."""
+    book = await _get_book(book_id, db)
+    await _require_manager(book, actor, db)
 
+    # Clean up Google Drive files first
+    await _cleanup_book_drive_files(book)
 
-@router.post("/{book_id}/restore")
-async def restore_book(book_id: int, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if actor.role != "admin": raise HTTPException(403, "Only administrators can restore books")
-    book = await _get_book(book_id, db, include_deleted=True)
-    if book.deleted_at is None: raise HTTPException(400, "Book is not deleted")
-    book.deleted_at = book.deleted_by = None; await _activity(db, book, actor, "restored", "Restored book"); await db.commit(); await db.refresh(book); return await _serialize(book, db, actor)
+    await db.execute(delete(BookAuthor).where(BookAuthor.book_id == book_id))
+    await db.execute(delete(BookCourse).where(BookCourse.book_id == book_id))
+    await db.execute(delete(BookModule).where(BookModule.book_id == book_id))
+    await db.execute(delete(BookActivity).where(BookActivity.book_id == book_id))
+    await db.execute(delete(Comments).where(Comments.book_id == book_id))
+    await db.delete(book)
+    await db.commit()
+    return {"id": book_id, "message": "Book permanently deleted"}
 
 
 @router.get("/{book_id}/activity")
 async def book_activity(book_id: int, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    book = await _get_book(book_id, db, include_deleted=actor.role == "admin")
+    book = await _get_book(book_id, db)
     if actor.role != "admin" and book.uploaded_by != str(actor.id): raise HTTPException(403, "You can only view activity for your own books")
     rows = (await db.execute(select(BookActivity).where(BookActivity.book_id == book_id).order_by(BookActivity.created_at.desc()))).scalars().all()
     return {"items": [{c.name: getattr(row, c.name) for c in BookActivity.__table__.columns} for row in rows]}

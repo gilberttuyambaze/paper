@@ -173,7 +173,7 @@ async def _resource_summary(db: AsyncSession, resource, kind: str) -> dict:
 
 async def _owned_resources(db: AsyncSession, user_id: str) -> list[dict]:
     papers = (await db.execute(select(Papers).where(Papers.user_id == user_id))).scalars().all()
-    books = (await db.execute(select(Book).where(Book.uploaded_by == user_id, Book.deleted_at.is_(None)))).scalars().all()
+    books = (await db.execute(select(Book).where(Book.uploaded_by == user_id))).scalars().all()
     resources = [await _resource_summary(db, paper, "paper") for paper in papers]
     resources.extend([await _resource_summary(db, book, "book") for book in books])
     return sorted(resources, key=lambda item: item["created_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
@@ -562,7 +562,7 @@ async def get_public_profile_resources(user_id: str, db: AsyncSession = Depends(
     if not profile:
         raise HTTPException(status_code=404, detail="User profile not found")
     papers = (await db.execute(select(Papers).where(Papers.user_id == user_id, Papers.is_hidden.is_not(True)))).scalars().all()
-    books = (await db.execute(select(Book).where(Book.uploaded_by == user_id, Book.deleted_at.is_(None), Book.status == "active", Book.visibility == "public"))).scalars().all()
+    books = (await db.execute(select(Book).where(Book.uploaded_by == user_id, Book.status == "active", Book.visibility == "public"))).scalars().all()
     items = [await _resource_summary(db, paper, "paper") for paper in papers]
     items.extend([await _resource_summary(db, book, "book") for book in books])
     return {"items": sorted(items, key=lambda item: item["created_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)}
@@ -737,7 +737,7 @@ async def add_book_comment(
     db: AsyncSession = Depends(get_db),
 ):
     book = await db.get(Book, book_id)
-    if not book or book.deleted_at is not None or book.status != "active" or book.visibility != "public":
+    if not book or book.status != "active" or book.visibility != "public":
         raise HTTPException(status_code=404, detail="Book not found")
 
     await _ensure_profile(db, current_user)

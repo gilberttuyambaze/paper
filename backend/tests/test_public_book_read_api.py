@@ -64,7 +64,6 @@ async def public_book_app(tmp_path, monkeypatch):
             Book(id=1, title="Introduction to Algorithms", language="en", status="active", visibility="public", uploaded_by="cp-a", file_key="books/book-a.pdf", file_name="book-a.pdf", file_mime_type="application/pdf", cover_key="books/book-a-cover.png", created_at=now, updated_at=now),
             Book(id=2, title="Private Book", language="en", status="active", visibility="private", uploaded_by="cp-a", file_key="books/private.pdf", created_at=now, updated_at=now),
             Book(id=3, title="Inactive Book", language="en", status="inactive", visibility="public", uploaded_by="cp-a", file_key="books/inactive.pdf", created_at=now, updated_at=now),
-            Book(id=4, title="Deleted Book", language="en", status="active", visibility="public", uploaded_by="cp-a", file_key="books/deleted.pdf", deleted_at=now, created_at=now, updated_at=now),
             BookAuthor(book_id=1, author_id=1), BookCourse(book_id=1, course_id=1), BookModule(book_id=1, module_id=1),
             User_profiles(user_id="cp-a", display_name="CP A", role="cp"),
         ])
@@ -118,7 +117,7 @@ async def test_nonpublic_books_are_hidden_from_anonymous_detail_and_storage(tmp_
             assert {item["title"] for item in (await client.get("/api/v1/books")).json()["items"]} == {"Introduction to Algorithms"}
             for book_id in (2, 3, 4):
                 assert (await client.get(f"/api/v1/books/{book_id}")).status_code == 404
-            for key in ("books/private.pdf", "books/inactive.pdf", "books/deleted.pdf"):
+            for key in ("books/private.pdf", "books/inactive.pdf"):
                 assert (await client.get("/api/v1/storage/download", params={"bucket_name": "books", "object_key": key})).status_code == 404
                 assert (await client.post("/api/v1/storage/download-url", json={"bucket_name": "books", "object_key": key})).status_code == 404
 

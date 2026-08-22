@@ -147,6 +147,9 @@ class StorageServiceBase:
     async def delete_object(self, request: ObjectRequest) -> DeleteResponse:
         raise NotImplementedError()
 
+    async def delete_object_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> DeleteResponse:
+        return await self.delete_object(ObjectRequest(bucket_name=bucket_name, object_key=object_key))
+
     async def upload_file(
         self,
         bucket_name: str,
@@ -525,7 +528,9 @@ class GoogleDriveStorageService(StorageServiceBase):
             return await asyncio.to_thread(request.execute)
         except self.HttpError as exc:
             detail = exc.args[0] if exc.args else str(exc)
-            raise ValueError(f"Google Drive API error: {detail}") from exc
+            status_code = getattr(getattr(exc, "resp", None), "status", None)
+            prefix = f"{status_code}: " if status_code else ""
+            raise ValueError(f"Google Drive API error: {prefix}{detail}") from exc
 
     async def _find_folder(self, folder_name: str, parent_id: str) -> Optional[str]:
         query = (
@@ -573,8 +578,10 @@ class GoogleDriveStorageService(StorageServiceBase):
                     supportsAllDrives=True,
                 )
             )
-        except ValueError:
-            return None
+        except ValueError as exc:
+            if str(exc).startswith("Google Drive API error: 404"):
+                return None
+            raise
 
     async def _file_is_in_bucket(self, bucket_name: str, file: dict[str, Any]) -> bool:
         bucket_folder_id = await self._bucket_folder(bucket_name)
@@ -826,6 +833,13 @@ class GoogleDriveStorageService(StorageServiceBase):
         await self._execute(self._service.files().delete(fileId=file["id"], supportsAllDrives=True))
         return DeleteResponse(success=True)
 
+    async def delete_object_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> DeleteResponse:
+        file = await self._find_file_by_id(provider_file_id)
+        if not file or file.get("trashed") or not await self._file_is_in_bucket(bucket_name, file):
+            raise ValueError("Google Drive file not found")
+        await self._execute(self._service.files().delete(fileId=provider_file_id, supportsAllDrives=True))
+        return DeleteResponse(success=True)
+
     async def upload_file(
         self,
         bucket_name: str,
@@ -950,6 +964,9 @@ class StorageService(StorageServiceBase):
 
     async def delete_object(self, request: ObjectRequest) -> DeleteResponse:
         return await self._impl.delete_object(request)
+
+    async def delete_object_by_id(self, bucket_name: str, object_key: str, provider_file_id: str) -> DeleteResponse:
+        return await self._impl.delete_object_by_id(bucket_name, object_key, provider_file_id)
 
     async def upload_file(
         self,

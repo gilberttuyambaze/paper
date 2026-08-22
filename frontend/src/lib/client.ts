@@ -25,14 +25,7 @@ apiClient.interceptors.request.use((config) => {
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    const normalized = normalizeApiError(error);
-    // Preserve the user-facing app messaging contract while leaving the original downstream handlers intact.
-    if (normalized.title || normalized.message) {
-      return Promise.reject(new Error(normalized.message));
-    }
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 function apiUrl(path: string) {
@@ -62,7 +55,23 @@ export interface Paper {
   lecturer: string | null;
   description: string | null;
   file_key: string | null;
+  file_drive_file_id?: string | null;
+  file_storage_provider?: string | null;
+  file_name?: string | null;
+  file_size?: number | null;
+  file_mime_type?: string | null;
+  cover_key?: string | null;
+  cover_drive_file_id?: string | null;
+  cover_storage_provider?: string | null;
+  cover_file_name?: string | null;
+  cover_file_size?: number | null;
+  cover_mime_type?: string | null;
   solution_key: string | null;
+  solution_drive_file_id?: string | null;
+  solution_storage_provider?: string | null;
+  solution_file_name?: string | null;
+  solution_file_size?: number | null;
+  solution_mime_type?: string | null;
   verification_status: string;
   download_count: number | null;
   report_count: number | null;
@@ -630,6 +639,19 @@ export async function updatePaper(paperId: number, data: Partial<Pick<Paper, 'ti
   return response.data as Paper;
 }
 
+export async function replacePaperFile(paperId: number, file: { file_key: string; file_name?: string; mime_type?: string; file_size?: number }): Promise<Paper> {
+  return (await apiClient.post(apiUrl(`/api/v1/entities/papers/${paperId}/file`), file)).data as Paper;
+}
+export async function replacePaperCover(paperId: number, file: { file_key: string; file_name?: string; mime_type?: string; file_size?: number }): Promise<Paper> {
+  return (await apiClient.post(apiUrl(`/api/v1/entities/papers/${paperId}/cover`), file)).data as Paper;
+}
+export async function replacePaperSolution(paperId: number, file: { file_key: string; file_name?: string; mime_type?: string; file_size?: number }): Promise<Paper> {
+  return (await apiClient.post(apiUrl(`/api/v1/entities/papers/${paperId}/solution`), file)).data as Paper;
+}
+export async function removePaperSolution(paperId: number): Promise<void> {
+  await apiClient.delete(apiUrl(`/api/v1/entities/papers/${paperId}/solution`));
+}
+
 export async function createComment(data: {
   paper_id?: number;
   book_id?: number;
@@ -929,7 +951,7 @@ export async function fetchAdminUsers(params?: { search?: string; role?: string;
   return response.data;
 }
 
-export async function fetchAdminUserResources(profileId: number): Promise<{ papers: Array<Pick<Paper, 'id' | 'title' | 'course_code' | 'course_name' | 'year' | 'paper_type' | 'verification_status' | 'is_hidden' | 'created_at'>>; books: Array<{ id: number; title: string; language?: string | null; status: string; visibility: string; created_at?: string | null; deleted_at?: string | null; file_name?: string | null; file_size?: number | null }>; activity: Array<{ kind: string; title: string; action: string; created_at?: string | null }> }> {
+export async function fetchAdminUserResources(profileId: number): Promise<{ papers: Array<Pick<Paper, 'id' | 'title' | 'course_code' | 'course_name' | 'year' | 'paper_type' | 'verification_status' | 'is_hidden' | 'created_at'>>; books: Array<{ id: number; title: string; language?: string | null; status: string; visibility: string; created_at?: string | null; file_name?: string | null; file_size?: number | null }>; activity: Array<{ kind: string; title: string; action: string; created_at?: string | null }> }> {
   const response = await apiClient.get(apiUrl(`/api/v1/admin/hub/users/${profileId}/resources`));
   return response.data;
 }

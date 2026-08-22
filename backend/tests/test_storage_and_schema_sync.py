@@ -47,6 +47,26 @@ def test_storage_key_candidates_prefixed_variants():
     assert "solutions/IEEE754_CAT_2026_sol_1786829728393.pdf" in candidates
 
 
+@pytest.mark.anyio
+async def test_google_drive_provider_id_delete_verifies_bucket_and_deletes_id():
+    service = object.__new__(GoogleDriveStorageService)
+    deleted = []
+    service._find_file_by_id = lambda provider_id: _async_value({"id": provider_id, "trashed": False, "parents": ["bucket"]})
+    service._file_is_in_bucket = lambda bucket_name, file: _async_value(bucket_name == "papers")
+    service._execute = lambda request: _async_value(deleted.append(request))
+    service._service = type("Drive", (), {"files": lambda self: type("Files", (), {"delete": lambda self, **kwargs: FakeDriveRequest(**kwargs)})()})()
+
+    result = await service.delete_object_by_id("papers", "papers/original.pdf", "drive-123")
+
+    assert result.success is True
+    assert len(deleted) == 1
+    assert deleted[0].kwargs == {"fileId": "drive-123", "supportsAllDrives": True}
+
+
+async def _async_value(value):
+    return value
+
+
 class FakeStorageService:
     async def download_file(self, bucket_name: str, object_key: str) -> bytes:
         return b"%PDF-1.4 test document content"

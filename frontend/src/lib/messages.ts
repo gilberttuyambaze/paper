@@ -2,8 +2,9 @@ export type MessageType = 'success' | 'error' | 'warning' | 'info' | 'confirmati
 
 export type MessageAction = {
   label: string;
+  loadingLabel?: string;
   variant?: 'default' | 'destructive' | 'outline';
-  onClick: () => void | Promise<void>;
+  onClick: () => void | boolean | Promise<void | boolean>;
 };
 
 export type GlobalMessage = {

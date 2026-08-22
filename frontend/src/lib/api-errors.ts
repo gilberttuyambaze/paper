@@ -26,6 +26,7 @@ function responseDetail(payload: unknown): { message?: string; fields?: Record<s
     }
     return { fields };
   }
+  if (typeof detail === 'string') return { message: detail };
   if (typeof detail === 'object' && detail !== null) {
     const value = detail as { message?: unknown; fields?: unknown };
     return {
@@ -45,33 +46,37 @@ export function normalizeApiError(error: unknown): NormalizedApiError {
     const detail = responseDetail(payload);
 
     if (status === 401) {
-      return { title: 'Session expired', message: 'Your session has expired. Please sign in again.', type: 'warning' };
+      return { title: 'Session expired', message: detail.message || 'Your session has expired. Please sign in again.', type: 'warning', status };
     }
     if (status === 403) {
-      return { title: 'Access denied', message: 'You do not have permission to perform this action.', type: 'error' };
+      return { title: 'Access denied', message: detail.message || 'You do not have permission to perform this action.', type: 'error', status };
     }
     if (status === 404) {
-      return { title: 'Not found', message: 'This record is no longer available.', type: 'warning' };
+      return { title: 'Not found', message: detail.message || 'This record is no longer available.', type: 'warning', status };
     }
     if (status === 409) {
-      return { title: 'Conflict', message: 'This change conflicts with the current record state. Please refresh and try again.', type: 'warning' };
+      return { title: 'Conflict', message: detail.message || 'This change conflicts with the current record state. Please refresh and try again.', type: 'warning', status };
     }
     if (status === 413) {
-      return { title: 'File too large', message: 'This file is larger than the supported upload limit.', type: 'error' };
+      return { title: 'File too large', message: detail.message || 'This file is larger than the supported upload limit.', type: 'error', status };
     }
     if (status === 429) {
-      return { title: 'Too many attempts', message: 'Too many requests have been made. Please wait a moment and try again.', type: 'warning' };
+      return { title: 'Too many attempts', message: detail.message || 'Too many requests have been made. Please wait a moment and try again.', type: 'warning', status };
     }
     if (status === 422) {
       return { title: 'Check your input', message: detail.message || 'Please review the highlighted fields and try again.', type: 'warning', fields: detail.fields };
     }
     if (status === 500 || status === 502 || status === 503) {
-      return { title: 'Service unavailable', message: 'We could not complete the request. Please try again in a moment.', type: 'error', retry: true };
+      return { title: 'Service unavailable', message: detail.message || 'We could not complete the request. Please try again in a moment.', type: 'error', retry: true, status };
     }
     if (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK') {
       return { title: 'Connection issue', message: 'We could not reach the server. Please check your connection and try again.', type: 'error', retry: true };
     }
-    return { title: 'Something went wrong', message: 'The request could not be completed. Please try again.', type: 'error', retry: true };
+    return { title: 'Request failed', message: detail.message || 'The request could not be completed. Please try again.', type: 'error', retry: true, status };
+  }
+
+  if (error instanceof Error && error.message) {
+    return { title: 'Something went wrong', message: error.message, type: 'error', retry: true };
   }
 
   return { title: 'Something went wrong', message: 'The request could not be completed. Please try again.', type: 'error', retry: true };

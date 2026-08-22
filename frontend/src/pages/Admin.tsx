@@ -57,6 +57,7 @@ import {
   FileText,
   Flag,
   Mail,
+  LoaderCircle,
   RefreshCcw,
   Search,
   Shield,
@@ -202,6 +203,7 @@ export default function AdminPage() {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
   const [paperEditing, setPaperEditing] = useState(false);
+  const [paperSaving, setPaperSaving] = useState(false);
   const [paperDraft, setPaperDraft] = useState<{ title: string; description: string }>({ title: '', description: '' });
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -246,7 +248,7 @@ export default function AdminPage() {
         fetchAdminOverview(),
         fetchAdminUsers({ page: userPage, limit: USERS_PER_PAGE, search: debouncedUserSearch || undefined, role: userRoleFilter === 'all' ? undefined : userRoleFilter, status: userStatusFilter === 'all' ? undefined : userStatusFilter }),
         fetchAdminRoleRequests(),
-        fetchBooks({ include_deleted: true }),
+        fetchBooks(),
       ]);
       setPapers(paperData.items);
       setPaperTotal(paperData.total);
@@ -257,8 +259,7 @@ export default function AdminPage() {
       const books = bookData.items || [];
       const stats = { total: bookData.total || 0, active: 0, draft: 0, inactive: 0, deleted: 0 };
       books.forEach((book: any) => {
-        if (book.deleted_at) stats.deleted++;
-        else if (book.status === 'active') stats.active++;
+        if (book.status === 'active') stats.active++;
         else if (book.status === 'draft') stats.draft++;
         else if (book.status === 'inactive') stats.inactive++;
       });
@@ -465,13 +466,16 @@ export default function AdminPage() {
   const openPaper = (paper: Paper) => { setSelectedPaper(paper); setPaperDraft({ title: paper.title, description: paper.description || '' }); setPaperEditing(false); };
   const savePaperMetadata = async () => {
     if (!selectedPaper) return;
+    if (paperSaving) return;
+    setPaperSaving(true);
     try {
       const updated = await updatePaper(selectedPaper.id, paperDraft);
       setPapers((items) => items.map((paper) => paper.id === updated.id ? updated : paper));
       setSelectedPaper(updated); setPaperEditing(false); toast.success('Paper metadata updated');
     } catch (error) { toast.error(normalizeApiError(error).message || 'Unable to update paper metadata'); }
+    finally { setPaperSaving(false); }
   };
-  const confirmDeletePaper = (paper: Paper) => showMessage({ type: 'confirmation', title: 'Delete Paper?', message: 'This removes the Paper according to the existing backend deletion policy.', actions: [{ label: 'Cancel', variant: 'outline', onClick: () => undefined }, { label: 'Delete', variant: 'destructive', onClick: async () => { try { await deleteMyPaper(paper.id); setPapers((items) => items.filter((item) => item.id !== paper.id)); setSelectedPaper(null); toast.success('Paper deleted'); } catch (error) { toast.error(normalizeApiError(error).message || 'Unable to delete paper'); } } }] });
+  const confirmDeletePaper = (paper: Paper) => showMessage({ type: 'confirmation', title: 'Delete Paper?', message: 'This permanently deletes the Paper and its stored files.', actions: [{ label: 'Cancel', variant: 'outline', onClick: () => undefined }, { label: 'Delete', loadingLabel: 'Deleting...', variant: 'destructive', onClick: async () => { try { await deleteMyPaper(paper.id); setPapers((items) => items.filter((item) => item.id !== paper.id)); setSelectedPaper(null); toast.success('Paper permanently deleted'); } catch (error) { toast.error(normalizeApiError(error).message || 'Unable to delete paper'); return false; } } }] });
 
   const handleRoleRequestReview = async (profileId: number, action: 'approve' | 'reject') => {
     try {
@@ -981,7 +985,7 @@ export default function AdminPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => navigate(`/paper/${selectedPaper.id}`)}><Eye className="mr-1 h-4 w-4" />Open public page</Button>
-            {paperEditing ? <><Button onClick={() => void savePaperMetadata()}>Save metadata</Button><Button variant="outline" onClick={() => setPaperEditing(false)}>Cancel</Button></> : <Button variant="outline" onClick={() => setPaperEditing(true)}>Edit metadata</Button>}
+            {paperEditing ? <><Button onClick={() => void savePaperMetadata()} disabled={paperSaving}>{paperSaving && <LoaderCircle className="mr-1 h-4 w-4 animate-spin" />}{paperSaving ? 'Saving...' : 'Save metadata'}</Button><Button variant="outline" onClick={() => setPaperEditing(false)} disabled={paperSaving}>Cancel</Button></> : <Button variant="outline" onClick={() => setPaperEditing(true)}>Edit metadata</Button>}
             {selectedPaper.verification_status !== 'verified' && <Button onClick={() => void handleVerifyPaper(selectedPaper.id)} className="bg-success text-success-foreground hover:bg-success/90"><CheckCircle className="mr-1 h-4 w-4" />Verify</Button>}
             <Button variant="outline" onClick={() => void handleTogglePaperVisibility(selectedPaper.id, !!selectedPaper.is_hidden)}>{selectedPaper.is_hidden ? <><Eye className="mr-1 h-4 w-4" />Show</> : <><EyeOff className="mr-1 h-4 w-4" />Hide</>}</Button>
             <Button variant="destructive" onClick={() => confirmDeletePaper(selectedPaper)}><Trash2 className="mr-1 h-4 w-4" />Delete</Button>
@@ -1005,7 +1009,7 @@ export default function AdminPage() {
             <TabsContent value="overview" className="theme-muted px-1 pt-3 text-sm"><div className="mb-4 grid grid-cols-3 gap-3"><div className="theme-soft-panel rounded-lg p-3"><p>Papers</p><p className="theme-title text-lg font-semibold">{userResources?.stats?.papers ?? 0}</p></div><div className="theme-soft-panel rounded-lg p-3"><p>Books</p><p className="theme-title text-lg font-semibold">{userResources?.stats?.books ?? 0}</p></div><div className="theme-soft-panel rounded-lg p-3"><p>Total resources</p><p className="theme-title text-lg font-semibold">{userResources?.stats?.total_resources ?? 0}</p></div></div>Edit the user’s non-sensitive identity, account, and academic information below.</TabsContent>
             <TabsContent value="activity" className="space-y-2 pt-3">{userResourcesLoading ? <div className="h-24 animate-pulse rounded bg-muted" /> : !userResources?.activity.length ? <p className="theme-muted text-sm">No recorded resource activity is available.</p> : userResources.activity.map((item, index) => <div key={`${item.kind}-${item.title}-${index}`} className="theme-soft-panel rounded-lg p-3 text-sm"><p className="theme-title">{item.action}: {item.title}</p><p className="theme-muted mt-1 text-xs">{formatDate(item.created_at)}</p></div>)}</TabsContent>
             <TabsContent value="papers" className="space-y-2 pt-3">{userResourcesLoading ? <div className="h-24 animate-pulse rounded bg-muted" /> : !userResources?.papers.length ? <p className="theme-muted text-sm">This user has no Papers.</p> : userResources.papers.map((paper) => <div key={paper.id} className="theme-soft-panel flex items-center justify-between gap-3 rounded-lg p-3 text-sm"><div><p className="theme-title">{paper.title}</p><p className="theme-muted text-xs">{paper.course_code} · {paper.year} · {paper.paper_type}</p></div><Button size="sm" variant="outline" onClick={() => navigate(`/paper/${paper.id}`)}>View</Button></div>)}</TabsContent>
-            <TabsContent value="books" className="space-y-2 pt-3">{userResourcesLoading ? <div className="h-24 animate-pulse rounded bg-muted" /> : !userResources?.books.length ? <p className="theme-muted text-sm">This user has no Books.</p> : userResources.books.map((book) => <div key={book.id} className="theme-soft-panel flex items-center justify-between gap-3 rounded-lg p-3 text-sm"><div><p className="theme-title">{book.title}</p><p className="theme-muted text-xs">{book.language || 'Language unavailable'} · {book.deleted_at ? 'deleted' : book.status} · {book.visibility}</p></div><Button size="sm" variant="outline" onClick={() => navigate(`/book/${book.id}`)}>View</Button></div>)}</TabsContent>
+            <TabsContent value="books" className="space-y-2 pt-3">{userResourcesLoading ? <div className="h-24 animate-pulse rounded bg-muted" /> : !userResources?.books.length ? <p className="theme-muted text-sm">This user has no Books.</p> : userResources.books.map((book) => <div key={book.id} className="theme-soft-panel flex items-center justify-between gap-3 rounded-lg p-3 text-sm"><div><p className="theme-title">{book.title}</p><p className="theme-muted text-xs">{book.language || 'Language unavailable'} · {book.status} · {book.visibility}</p></div><Button size="sm" variant="outline" onClick={() => navigate(`/book/${book.id}`)}>View</Button></div>)}</TabsContent>
           </Tabs>
 
           {draft && selectedUser && (

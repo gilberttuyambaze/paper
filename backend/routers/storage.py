@@ -57,9 +57,11 @@ async def _cache_provider_metadata(resolved: AuthorizedStorageObject, metadata: 
         setattr(record, "cover_drive_file_id" if is_cover else "file_drive_file_id", metadata["drive_file_id"])
         setattr(record, "cover_storage_provider" if is_cover else "file_storage_provider", metadata.get("storage_provider"))
     elif resolved.entity_type == "paper":
-        is_solution = resolved.logical_object_key == getattr(record, "solution_key", None)
-        setattr(record, "solution_drive_file_id" if is_solution else "file_drive_file_id", metadata["drive_file_id"])
-        setattr(record, "solution_storage_provider" if is_solution else "file_storage_provider", metadata.get("storage_provider"))
+            is_solution = resolved.logical_object_key == getattr(record, "solution_key", None)
+            is_cover = resolved.logical_object_key == getattr(record, "cover_key", None)
+            prefix = "solution" if is_solution else "cover" if is_cover else "file"
+            setattr(record, f"{prefix}_drive_file_id", metadata["drive_file_id"])
+            setattr(record, f"{prefix}_storage_provider", metadata.get("storage_provider"))
     elif resolved.entity_type == "solution":
         record.drive_file_id = metadata["drive_file_id"]
         record.storage_provider = metadata.get("storage_provider")
@@ -106,7 +108,7 @@ async def _resolve_authorized_object(bucket_name: str, requested_key: str, curre
         )
     if bucket_name in {"papers", "solutions"}:
         paper = (await db.execute(select(Papers).where(or_(
-            Papers.file_key.in_(candidates), Papers.solution_key.in_(candidates)
+            Papers.file_key.in_(candidates), Papers.cover_key.in_(candidates), Papers.solution_key.in_(candidates)
         )))).scalar_one_or_none()
         solution = (await db.execute(select(Solutions).where(Solutions.file_key.in_(candidates)))).scalar_one_or_none()
         if paper and (paper.is_hidden and (not current_user or current_user.role != "admin")):
