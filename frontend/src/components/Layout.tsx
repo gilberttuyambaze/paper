@@ -118,9 +118,9 @@ export default function Layout({ children }: LayoutProps) {
   const seoConfig = (() => {
     if (location.pathname === '/' || location.pathname === '/study-resources') {
       return {
-        title: 'University of Rwanda past papers and study materials Rwanda',
+        title: 'University of Rwanda academic resources',
         description:
-          'Find University of Rwanda past papers, UR exam papers, and study materials Rwanda students can search, compare, and use for focused revision.',
+          'Find University of Rwanda past papers, academic books, and study materials that students can search, compare, and use for focused revision.',
         canonicalPath: location.pathname === '/study-resources' ? '/study-resources' : '/',
       };
     }
@@ -129,7 +129,7 @@ export default function Layout({ children }: LayoutProps) {
       return {
         title: 'University of Rwanda academic resources',
         description:
-          'Browse UR exam papers, University of Rwanda past papers, and study materials Rwanda learners can filter by course, department, year, and paper type.',
+          'Browse University of Rwanda past papers, academic books, and study resources. Filter by resource type, course, module, year, uploader, language, and more.',
         canonicalPath: '/resources',
       };
     }
@@ -166,6 +166,14 @@ export default function Layout({ children }: LayoutProps) {
         title: 'UR exam paper details and study discussion',
         description:
           'View a University of Rwanda past paper, read comments, study discussion, and related study materials Rwanda learners use for revision.',
+        canonicalPath: location.pathname,
+      };
+    }
+
+    if (location.pathname.startsWith('/book/')) {
+      return {
+        title: 'Academic book details and study discussion',
+        description: 'Open a public academic book, read its details, view the document, and join the discussion.',
         canonicalPath: location.pathname,
       };
     }

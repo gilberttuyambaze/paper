@@ -86,6 +86,34 @@ async def get_current_user(
     return user
 
 
+async def get_optional_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[UserResponse]:
+    """Return the authenticated user when present, otherwise allow public reads."""
+    if not credentials or credentials.scheme.lower() != "bearer":
+        return None
+    try:
+        payload = decode_access_token(credentials.credentials)
+    except AccessTokenError:
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    user = UserResponse(
+        id=user_id,
+        email=payload.get("email", ""),
+        name=payload.get("name"),
+        role=payload.get("role", "user"),
+    )
+    profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
+    profile = profile_result.scalar_one_or_none()
+    if profile and profile.role:
+        user.role = profile.role
+    return user
+
+
 async def get_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
     """Dependency to ensure current user has admin role."""
     if current_user.role != "admin":

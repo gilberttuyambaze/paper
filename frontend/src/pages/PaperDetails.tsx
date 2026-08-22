@@ -62,9 +62,11 @@ import {
   Save,
   LoaderCircle,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/messages';
+import { normalizeApiError } from '@/lib/api-errors';
 import AvatarFallback from '../components/AvatarFallback';
 import DocumentPreview from '../components/DocumentPreview';
+import ResourceLoadingAnimation from '../components/ResourceLoadingAnimation';
 import AcademicAiMark from '../components/AcademicAiMark';
 
 function VerificationBadge({ status }: { status: string }) {
@@ -438,8 +440,8 @@ export default function PaperDetails() {
       setAiResult(response.content);
       setAiSource(response.model);
       setAiFallbackReason(response.fallback_reason || null);
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'AI assistant is unavailable right now');
+    } catch (error) {
+      toast.error(normalizeApiError(error).message || 'AI assistant is unavailable right now');
     } finally {
       setAiLoading(false);
     }
@@ -470,7 +472,7 @@ export default function PaperDetails() {
       <div className="max-w-4xl mx-auto px-4 py-16 text-center">
         <h2 className="theme-title mb-4 text-2xl font-bold">Paper Not Found</h2>
         <Button onClick={() => navigate('/search')} className="theme-accent-bg">
-          Browse Papers
+          Browse Resources
         </Button>
       </div>
     );
@@ -617,13 +619,7 @@ export default function PaperDetails() {
               <DocumentPreview src={paperUrl || offlinePaperUrl} title={`${paper.title} paper preview`} minHeightClassName="min-h-[700px]" zoom={pdfZoom} />
             </div>
           ) : (paperPreviewLoading || paper.file_key) ? (
-            <div className="document-preview-fetching mt-6 flex min-h-[280px] items-center justify-center rounded-xl border p-6" role="status" aria-live="polite">
-              <div className="max-w-sm text-center">
-                <LoaderCircle className="mx-auto h-10 w-10 animate-spin text-primary" aria-hidden="true" />
-                <p className="theme-title mt-4 font-semibold">Preparing your paper preview</p>
-                <p className="theme-muted mt-2 text-sm">We are working on the document preview. Larger files can take a little longer.</p>
-              </div>
-            </div>
+            <div className="document-preview-fetching mt-6 flex min-h-[280px] items-center justify-center rounded-xl border p-6"><ResourceLoadingAnimation resource="Paper" stage="Looking for the Paper…" /></div>
           ) : (
             <div className="mt-6"><DocumentPreview title={`${paper.title} paper preview`} unavailableMessage="Paper preview is not available. Use the download button to view the full document." /></div>
           )}

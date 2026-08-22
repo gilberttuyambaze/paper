@@ -119,17 +119,25 @@ function PaperCard({ paper, uploaderProfiles }: { paper: Paper; uploaderProfiles
 function HighlightResourceTile({ item, delay }: { item: { type: 'paper'; value: Paper } | { type: 'book'; value: Book }; delay: number }) {
   const paper = item.type === 'paper' ? item.value : null;
   const book = item.type === 'book' ? item.value : null;
-  return <div className="theme-highlight-card resource-highlight-tile rounded-xl p-3" style={{ animationDelay: `${delay}ms` }}>
-    <div className="mb-2 flex items-center justify-between gap-1"><Badge className="theme-highlight-badge text-[9px]">{paper ? '📄 PAPER' : '📚 BOOK'}</Badge>{paper && <VerificationBadge status={paper.verification_status} />}</div>
-    <h3 className="line-clamp-2 text-xs font-semibold">{item.value.title}</h3>
-    <p className="theme-highlight-muted mt-2 line-clamp-2 text-[10px]">{paper ? `${paper.course_code} • ${paper.course_name}` : book?.authors.join(', ') || 'Academic book'}</p>
-    <p className="theme-highlight-muted mt-1 text-[10px]">{paper ? `${paper.year} • ${paper.paper_type}` : `${book?.language || '—'}${book?.edition ? ` • ${book.edition}` : ''}`}</p>
-  </div>;
+  const to = paper ? `/paper/${paper.id}` : `/book/${book?.id}`;
+  return (
+    <Link to={to} className="block">
+      <div className="theme-highlight-card resource-highlight-tile rounded-xl p-3 cursor-pointer" style={{ animationDelay: `${delay}ms` }}>
+        <div className="mb-2 flex items-center justify-between gap-1">
+          <Badge className="theme-highlight-badge text-[9px]">{paper ? '📄 PAPER' : '📚 BOOK'}</Badge>
+          {paper && <VerificationBadge status={paper.verification_status} />}
+        </div>
+        <h3 className="line-clamp-2 text-xs font-semibold">{item.value.title}</h3>
+        <p className="theme-highlight-muted mt-2 line-clamp-2 text-[10px]">{paper ? `${paper.course_code} • ${paper.course_name}` : book?.authors.join(', ') || 'Academic book'}</p>
+        <p className="theme-highlight-muted mt-1 text-[10px]">{paper ? `${paper.year} • ${paper.paper_type}` : `${book?.language || '—'}${book?.edition ? ` • ${book.edition}` : ''}`}</p>
+      </div>
+    </Link>
+  );
 }
 
 function BookPickCard({ book }: { book: Book }) {
   return (
-    <Link to={`/resources?resource=book&q=${encodeURIComponent(book.title)}`} className="block">
+    <Link to={`/book/${book.id}`} className="block">
       <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
         <CardContent className="p-5">
           <div className="mb-3 flex items-start justify-between">
@@ -365,7 +373,7 @@ export default function HomePage() {
                   className="theme-hero-filter text-xs"
                 >
                   <BookOpen className="mr-1 h-3.5 w-3.5" />
-                  Browse Books
+                  Browse Resources
                 </Button>
               </div>
 
@@ -472,7 +480,7 @@ export default function HomePage() {
                 <div>
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="theme-title text-xl font-semibold">Recommended for you</h3>
-                    <Button variant="ghost" onClick={() => navigate('/past-papers')}>Browse all</Button>
+                    <Button variant="ghost" onClick={() => navigate('/resources')}>Browse all resources</Button>
                   </div>
                   <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                     {personalized.recommended.slice(0, 6).map((paper) => (
@@ -648,14 +656,7 @@ export default function HomePage() {
           <p className="theme-cta-copy mx-auto mb-8 max-w-xl">
             Share past papers, academic books, and solutions to help fellow students. Every contribution makes a difference.
           </p>
-          <Button
-            onClick={() => navigate('/upload')}
-            className="theme-accent-bg px-8 py-3 text-lg"
-            size="lg"
-          >
-            <Upload className="mr-2 h-5 w-5" />
-            Upload a Resource
-          </Button>
+          <div className="theme-muted text-base">Authenticated CP and admin users can continue their secure upload workflow from the protected area.</div>
         </div>
       </section>
 

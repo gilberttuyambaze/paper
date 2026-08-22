@@ -4,13 +4,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from dependencies.auth import get_management_user
 from models.auth import User
 from models.comments import Comments
+from models.books import Book
 from models.notifications import Notifications
 from models.papers import Papers
 from models.reports import Reports
@@ -35,6 +36,17 @@ INSTITUTION_TYPES = {"ur_student", "other_university"}
 class AdminPaperModerationRequest(BaseModel):
     verification_status: Optional[str] = None
     is_hidden: Optional[bool] = None
+
+
+def _serialize_admin_paper(paper: Papers, uploader: Optional[User_profiles]) -> dict:
+    fields = {
+        column.name: getattr(paper, column.name)
+        for column in Papers.__table__.columns
+        if column.name not in {"file_drive_file_id", "solution_drive_file_id"}
+    }
+    fields["uploader_display_name"] = uploader.display_name if uploader else None
+    fields["uploader_profile_picture_key"] = uploader.profile_picture_key if uploader else None
+    return fields
 
 
 class AdminUserUpdateRequest(BaseModel):
@@ -246,6 +258,11 @@ def _ensure_role_assignment_allowed(actor: UserResponse, target_profile: User_pr
         raise HTTPException(status_code=400, detail="Invalid role selection")
     if actor.role != "admin" and (requested_role == "admin" or target_profile.role == "admin"):
         raise HTTPException(status_code=403, detail="Only admins can modify administrator accounts")
+    # An administrator should not be able to lock themselves out of the
+    # management hub through a role edit. Other administrator changes remain
+    # subject to the existing server-side authorization above.
+    if actor.role == "admin" and str(actor.id) == str(target_profile.user_id) and requested_role != "admin":
+        raise HTTPException(status_code=400, detail="You cannot remove your own administrator role")
 
 
 @router.get("/overview")
@@ -295,6 +312,11 @@ async def get_overview(
 @router.get("/users")
 async def list_users(
     search: Optional[str] = Query(default=None),
+    role: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=24, ge=1, le=100),
+    sort: str = Query(default="most_active"),
     _current_user: UserResponse = Depends(get_management_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -306,9 +328,14 @@ async def list_users(
         desc(func.coalesce(User_profiles.upload_count, 0)),
         )
     )
+    filters = []
+    if role:
+        filters.append(User_profiles.role == role)
+    if status:
+        filters.append(func.coalesce(User_profiles.account_status, "active") == status)
     if search:
         like_value = f"%{search.lower()}%"
-        query = query.where(
+        filters.append(
             func.lower(User_profiles.display_name).like(like_value)
             | func.lower(User_profiles.user_id).like(like_value)
             | func.lower(User_profiles.role).like(like_value)
@@ -318,9 +345,100 @@ async def list_users(
             | func.lower(func.coalesce(User_profiles.ur_student_code, "")).like(like_value)
             | func.lower(func.coalesce(User.email, "")).like(like_value)
         )
+    if filters:
+        query = query.where(*filters)
+    if sort == "newest": query = query.order_by(None).order_by(desc(User_profiles.created_at))
+    elif sort == "oldest": query = query.order_by(None).order_by(User_profiles.created_at.asc())
+    elif sort == "name_asc": query = query.order_by(None).order_by(func.lower(User_profiles.display_name).asc())
+    elif sort == "name_desc": query = query.order_by(None).order_by(func.lower(User_profiles.display_name).desc())
+    # Keep the count query on the exact same joined data set as the page query.
+    # In particular, the search predicate may include User.email; counting only
+    # User_profiles would otherwise introduce an implicit cross join.
+    count_query = (
+        select(func.count(User_profiles.id))
+        .select_from(User_profiles)
+        .join(User, User.id == User_profiles.user_id, isouter=True)
+    )
+    if filters: count_query = count_query.where(*filters)
+    total = (await db.execute(count_query)).scalar_one()
+    result = await db.execute(query.offset((page - 1) * limit).limit(limit))
+    return {"items": [_serialize_user(profile, user) for profile, user in result.all()], "total": total, "page": page, "limit": limit, "total_pages": max(1, (total + limit - 1) // limit)}
 
-    result = await db.execute(query.limit(100))
-    return {"items": [_serialize_user(profile, user) for profile, user in result.all()]}
+
+@router.get("/users/{profile_id}/resources")
+async def get_user_resources(
+    profile_id: int,
+    _current_user: UserResponse = Depends(get_management_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin detail data, scoped to the selected profile without N+1 UI calls."""
+    profile = await db.get(User_profiles, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    papers = (await db.execute(select(Papers).where(Papers.user_id == profile.user_id).order_by(desc(Papers.created_at)).limit(30))).scalars().all()
+    books = (await db.execute(select(Book).where(Book.uploaded_by == profile.user_id).order_by(desc(Book.created_at)).limit(30))).scalars().all()
+    activity = [
+        {"kind": "paper", "title": paper.title, "action": "Uploaded paper", "created_at": paper.created_at}
+        for paper in papers[:10]
+    ] + [
+        {"kind": "book", "title": book.title, "action": "Uploaded book", "created_at": book.created_at}
+        for book in books[:10]
+    ]
+    activity.sort(key=lambda item: item["created_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return {
+        "papers": [{"id": paper.id, "title": paper.title, "course_code": paper.course_code, "course_name": paper.course_name, "year": paper.year, "paper_type": paper.paper_type, "verification_status": paper.verification_status, "is_hidden": paper.is_hidden, "created_at": paper.created_at} for paper in papers],
+        "books": [{"id": book.id, "title": book.title, "language": book.language, "status": book.status, "visibility": book.visibility, "created_at": book.created_at, "deleted_at": book.deleted_at, "file_name": book.file_name, "file_size": book.file_size} for book in books],
+        "activity": activity[:20],
+    }
+
+
+@router.get("/papers")
+async def list_admin_papers(
+    search: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=100),
+    sort: str = Query(default="newest"),
+    _current_user: UserResponse = Depends(get_management_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return only the requested authorized Admin Paper page."""
+    filters = []
+    if search and search.strip():
+        value = f"%{search.strip().lower()}%"
+        filters.append(or_(
+            func.lower(Papers.title).like(value),
+            func.lower(Papers.course_code).like(value),
+            func.lower(Papers.course_name).like(value),
+            func.lower(func.coalesce(Papers.lecturer, "")).like(value),
+            func.lower(func.coalesce(Papers.programme_name_other, "")).like(value),
+        ))
+
+    query = select(Papers)
+    count_query = select(func.count(Papers.id))
+    if filters:
+        query = query.where(*filters)
+        count_query = count_query.where(*filters)
+    if sort == "oldest":
+        query = query.order_by(Papers.created_at.asc())
+    elif sort == "name":
+        query = query.order_by(func.lower(Papers.title).asc())
+    else:
+        query = query.order_by(desc(Papers.created_at))
+
+    total = (await db.execute(count_query)).scalar_one()
+    papers = (await db.execute(query.offset((page - 1) * limit).limit(limit))).scalars().all()
+    uploader_ids = {str(paper.user_id) for paper in papers if paper.user_id}
+    uploader_map = {}
+    if uploader_ids:
+        profiles = (await db.execute(select(User_profiles).where(User_profiles.user_id.in_(uploader_ids)))).scalars().all()
+        uploader_map = {str(profile.user_id): profile for profile in profiles}
+    return {
+        "items": [_serialize_admin_paper(paper, uploader_map.get(str(paper.user_id))) for paper in papers],
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, (total + limit - 1) // limit),
+    }
 
 
 @router.get("/role-requests")

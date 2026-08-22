@@ -2,6 +2,7 @@ import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+from core.input_normalization import normalize_storage_key
 
 
 class OSSBaseModel(BaseModel):
@@ -64,29 +65,10 @@ class FileUpDownRequest(OSSBaseModel):
         if not v or len(v.strip()) == 0:
             raise ValueError("object_key cannot be empty")
 
-        normalized = v.strip().replace("\\", "/").strip("/")
-        if not normalized:
-            raise ValueError("object_key cannot be empty")
-
-        parts = [segment for segment in normalized.split("/") if segment]
-        if not parts:
-            raise ValueError("object_key cannot be empty")
-
-        safe_parts: list[str] = []
-        for part in parts:
-            if part in {".", ".."}:
-                raise ValueError("object_key contains an invalid path segment")
-            safe_part = re.sub(r"[^A-Za-z0-9._-]", "-", part)
-            if not safe_part:
-                raise ValueError("object_key contains an empty path segment")
-            safe_parts.append(safe_part)
-
-        safe_object_key = "/".join(safe_parts)
-
-        if len(safe_object_key) > 255:
-            raise ValueError("object_key too long")
-
-        return safe_object_key
+        try:
+            return normalize_storage_key(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class FileUpDownResponse(BaseModel):

@@ -121,7 +121,7 @@ export default function StoryPage() {
             That combination is valuable for Google too, because it turns this page into meaningful, indexable content instead of decorative marketing copy. When learners search for <strong>UR exam papers</strong>, study strategies, or trusted <strong>study materials Rwanda</strong> students recommend, they should find pages that answer real questions. This section helps connect the library of papers with the study behaviors that make those resources useful.
           </p>
           <p className="theme-muted mt-4 text-base leading-8">
-            If you are preparing for an upcoming assessment, start by exploring the <Link to="/past-papers" className="theme-link-accent font-semibold hover:underline">past papers library</Link>, then compare what you find with the practical revision ideas below. The goal is not only to store files, but to help University of Rwanda learners study with better judgment, better context, and better access to the right material at the right time.
+            If you are preparing for an upcoming assessment, start by exploring the <Link to="/resources" className="theme-link-accent font-semibold hover:underline">academic resource library</Link>, then compare what you find with the practical revision ideas below. The goal is not only to store files, but to help University of Rwanda learners study with better judgment, better context, and better access to the right material at the right time.
           </p>
         </div>
       </section>
@@ -150,7 +150,7 @@ export default function StoryPage() {
               Clean navigation, readable headings, and meaningful paragraphs make this page easier for both students and search engines to understand. That matters because a good academic resource site should not hide its value behind animation or empty sections.
             </p>
             <p>
-              Clear internal links also help users move naturally between the <Link to="/past-papers" className="theme-link-accent font-semibold hover:underline">papers archive</Link>, the homepage, and the platform story. This builds a stronger information structure around the most useful content on the site.
+              Clear internal links also help users move naturally between the <Link to="/resources" className="theme-link-accent font-semibold hover:underline">resource library</Link>, the homepage, and the platform story. This builds a stronger information structure around the most useful content on the site.
             </p>
             <p>
               The long-term aim is simple: keep the platform discoverable, trustworthy, and genuinely helpful for University of Rwanda learners who need fast access to high-quality revision resources.

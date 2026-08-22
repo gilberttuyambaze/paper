@@ -1,8 +1,15 @@
 import logging
 from datetime import datetime, timezone
 
-from dependencies.auth import get_admin_user, get_current_user
+from dependencies.auth import get_admin_user, get_current_user, get_optional_current_user
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Response, status
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from core.database import get_db
+from models.books import Book
+from models.papers import Papers
+from models.user_profiles import User_profiles
+from services.authorization import can_read_book
 from schemas.auth import UserResponse
 from schemas.storage import (
     BucketListResponse,
@@ -25,6 +32,44 @@ from services.pdf_text import extract_pdf_text
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/storage", tags=["storage"])
+
+
+async def _require_read_access(
+    bucket_name: str,
+    object_key: str,
+    current_user: UserResponse | None,
+    db: AsyncSession,
+) -> None:
+    """Authorize stored resource files by their database ownership and visibility."""
+    if bucket_name == "books":
+        book = (await db.execute(
+            select(Book).where(
+                or_(Book.file_key == object_key, Book.cover_key == object_key),
+            )
+        )).scalar_one_or_none()
+        if not book:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored book file not found")
+        if not can_read_book(current_user, book):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book file not found")
+        return
+
+    if bucket_name == "papers":
+        paper = (await db.execute(
+            select(Papers).where(
+                or_(Papers.file_key == object_key, Papers.solution_key == object_key),
+            )
+        )).scalar_one_or_none()
+        if not paper or (current_user and current_user.role != "admin" and paper.is_hidden) or (current_user is None and paper.is_hidden):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper file not found")
+        return
+
+    if bucket_name == "profiles":
+        profile = (await db.execute(select(User_profiles).where(User_profiles.profile_picture_key == object_key))).scalar_one_or_none()
+        if not profile and (current_user is None or current_user.role != "admin"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile image not found")
+        return
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Storage object access is not permitted")
 
 
 @router.post("/analyze-pdf")
@@ -62,7 +107,7 @@ async def create_bucket(request: BucketRequest, _current_user: UserResponse = De
 
 
 @router.get("/list-buckets", response_model=BucketListResponse)
-async def list_buckets(_current_user: UserResponse = Depends(get_current_user)):
+async def list_buckets(_current_user: UserResponse = Depends(get_admin_user)):
     """
     List buckets of the user
     """
@@ -78,7 +123,7 @@ async def list_buckets(_current_user: UserResponse = Depends(get_current_user)):
 
 
 @router.get("/list-objects", response_model=ObjectListResponse)
-async def list_objects(request: OSSBaseModel = Depends(), _current_user: UserResponse = Depends(get_current_user)):
+async def list_objects(request: OSSBaseModel = Depends(), _current_user: UserResponse = Depends(get_admin_user)):
     """
     List objects under the bucket
     """
@@ -94,7 +139,7 @@ async def list_objects(request: OSSBaseModel = Depends(), _current_user: UserRes
 
 
 @router.get("/get-object-info", response_model=ObjectInfo)
-async def get_object_info(request: ObjectRequest = Depends(), _current_user: UserResponse = Depends(get_current_user)):
+async def get_object_info(request: ObjectRequest = Depends(), _current_user: UserResponse = Depends(get_admin_user)):
     """
     Get object metadata from the bucket
     """
@@ -110,7 +155,7 @@ async def get_object_info(request: ObjectRequest = Depends(), _current_user: Use
 
 
 @router.post("/rename-object", response_model=RenameResponse)
-async def rename_object(request: RenameRequest, _current_user: UserResponse = Depends(get_current_user)):
+async def rename_object(request: RenameRequest, _current_user: UserResponse = Depends(get_admin_user)):
     """
     Rename object inside the bucket
     """
@@ -126,7 +171,7 @@ async def rename_object(request: RenameRequest, _current_user: UserResponse = De
 
 
 @router.delete("/delete-object", response_model=DeleteResponse)
-async def delete_object(request: ObjectRequest, _current_user: UserResponse = Depends(get_current_user)):
+async def delete_object(request: ObjectRequest, _current_user: UserResponse = Depends(get_admin_user)):
     """
     Delete object inside the bucket
     """
@@ -154,6 +199,8 @@ async def upload_file(request: FileUpDownRequest, _current_user: UserResponse = 
     5. File is accessible at the returned access_url
     """
     try:
+        if request.bucket_name in {"books", "book-covers", "papers"} and _current_user.role not in {"admin", "cp"}:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators and CPs can upload academic resources")
         service = StorageService()
         return await service.create_upload_url(request)
     except ValueError as e:
@@ -175,6 +222,8 @@ async def upload_file_direct(
     Upload a file to the configured storage backend through the backend.
     """
     try:
+        if bucket_name in {"books", "book-covers", "papers"} and _current_user.role not in {"admin", "cp"}:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators and CPs can upload academic resources")
         request = FileUpDownRequest(bucket_name=bucket_name, object_key=object_key)
         file_bytes = await file.read()
         if not file_bytes:
@@ -200,11 +249,14 @@ async def upload_file_direct(
 async def download_file_direct(
     bucket_name: str,
     object_key: str,
+    current_user: UserResponse | None = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Download a file from the configured storage backend through the backend.
     """
     try:
+        await _require_read_access(bucket_name, object_key, current_user, db)
         request = FileUpDownRequest(bucket_name=bucket_name, object_key=object_key)
         service = StorageService()
         file_bytes = await service.download_file(request.bucket_name, request.object_key)
@@ -219,6 +271,8 @@ async def download_file_direct(
     except ValueError as e:
         logger.error(f"Invalid download request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to download file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
@@ -254,16 +308,23 @@ async def google_drive_test(_current_user: UserResponse = Depends(get_admin_user
 
 
 @router.post("/download-url", response_model=FileUpDownResponse)
-async def download_file(request: FileUpDownRequest, _current_user: UserResponse = Depends(get_current_user)):
+async def download_file(
+    request: FileUpDownRequest,
+    _current_user: UserResponse | None = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Get a presigned URL for downloading a file to StorageService.
     """
     try:
+        await _require_read_access(request.bucket_name, request.object_key, _current_user, db)
         service = StorageService()
         return await service.create_download_url(request)
     except ValueError as e:
         logger.error(f"Invalid download request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to generate download URL: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")

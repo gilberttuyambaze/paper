@@ -1,3 +1,4 @@
+import { buildStorageKey, normalizeIsbn, normalizeText as normalizeUserText, normalizeUnique } from '../lib/normalization';
 import { useState, useEffect, useRef, type DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPaper, extractUploadPdfText, fetchAllPapers, fetchUserProfile, uploadFileObject, type Paper, type UserProfile } from '../lib/client';
@@ -16,8 +17,10 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Upload as UploadIcon, FileText, ArrowLeft, CheckCircle, Sparkles, LoaderCircle } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/messages';
+import { normalizeApiError } from '@/lib/api-errors';
 import AcademicContextFields, { type AcademicContextValue } from '@/components/AcademicContextFields';
+import InlineFieldMessage from '@/components/InlineFieldMessage';
 import { createBook, createCourse, createModule, fetchModules, searchCourses, type Book, type Course, type Module } from '@/lib/books';
 
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
@@ -49,7 +52,7 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function normalizeText(value: string) {
+function normalizeExtractedText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -135,7 +138,7 @@ function detectCourseName(corpus: string) {
 function buildDetectedHints(file: File, previewText: string, courseOptions: Paper[]): DetectedUploadHints | null {
   const filenameText = humanizeFileStem(file.name);
   const combinedText = `${filenameText} ${previewText}`;
-  const normalizedCombined = normalizeText(combinedText);
+  const normalizedCombined = normalizeExtractedText(combinedText);
   const evidence: string[] = [];
   const hints: DetectedUploadHints = { evidence };
 
@@ -146,7 +149,7 @@ function buildDetectedHints(file: File, previewText: string, courseOptions: Pape
   const courseByName =
     courseByCode ||
     courseOptions.find((paper) => {
-      const normalizedCourseName = normalizeText(paper.course_name || '');
+      const normalizedCourseName = normalizeExtractedText(paper.course_name || '');
       return normalizedCourseName.length >= 6 && normalizedCombined.includes(normalizedCourseName);
     });
 
@@ -542,7 +545,7 @@ export default function UploadPage() {
     setSuccess(false);
     setUploadedPaper(null);
     setUploadedBook(null);
-    setUploadKind('choose');
+    setUploadKind('paper');
     setSelectedCourseOption(CUSTOM_COURSE_OPTION);
     setDetectedHints(null);
     setSuggestionFeedback(null);
@@ -597,10 +600,9 @@ export default function UploadPage() {
       const paperUploadEnd = solutionFile ? 78 : 95;
 
       // Upload paper file
-      const objectKey = `${courseCode}_${paperType}_${year}_${Date.now()}.pdf`;
+      const objectKey = buildStorageKey('papers', 'papers', paperFile.name, `${courseCode}-${paperType}-${year}-${Date.now()}`);
       try {
-        await uploadFileObject('papers', objectKey, paperFile, (percentage) => setUploadProgress(Math.round(percentage * paperUploadEnd / 100)));
-        fileKey = objectKey;
+        fileKey = await uploadFileObject('papers', objectKey, paperFile, (percentage) => setUploadProgress(Math.round(percentage * paperUploadEnd / 100)));
       } catch (err) {
         console.error('File upload failed:', err);
         toast.error('Paper upload failed');
@@ -609,12 +611,11 @@ export default function UploadPage() {
 
       // Upload solution file
       if (solutionFile) {
-        const solKey = `solutions/${courseCode}_${paperType}_${year}_sol_${Date.now()}.pdf`;
+        const solKey = buildStorageKey('papers', 'solutions', solutionFile.name, `${courseCode}-${paperType}-${year}-sol-${Date.now()}`);
         try {
           setUploadStage('solution');
           setUploadProgress(78);
-          await uploadFileObject('papers', solKey, solutionFile, (percentage) => setUploadProgress(78 + Math.round(percentage * 0.17)));
-          solutionKey = solKey;
+          solutionKey = await uploadFileObject('papers', solKey, solutionFile, (percentage) => setUploadProgress(78 + Math.round(percentage * 0.17)));
         } catch (err) {
           console.error('Solution upload failed:', err);
         }
@@ -624,15 +625,15 @@ export default function UploadPage() {
       setUploadStage('publishing');
       setUploadProgress(96);
       const createdPaper = await createPaper({
-        title,
-        course_code: courseCode.toUpperCase(),
-        course_name: courseName,
-        college,
-        department,
+        title: normalizeUserText(title) || title,
+        course_code: normalizeUserText(courseCode)?.toUpperCase() || courseCode.toUpperCase(),
+        course_name: normalizeUserText(courseName) || courseName,
+        college: normalizeUserText(college) || college,
+        department: normalizeUserText(department) || department,
         year: parseInt(year),
         paper_type: paperType,
-        lecturer: lecturer || undefined,
-        description: description || undefined,
+        lecturer: normalizeUserText(lecturer) || lecturer || undefined,
+        description: normalizeUserText(description),
         file_key: fileKey || undefined,
         solution_key: solutionKey || undefined,
         ...academic,
@@ -668,22 +669,24 @@ export default function UploadPage() {
     try {
       setSubmitting(true); setUploadProgress(0); setUploadStage('paper');
       const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const bookKey = `books/${stamp}-${bookFile.name}`;
+      const bookKey = buildStorageKey('books', 'books', bookFile.name, stamp);
       await uploadFileObject('books', bookKey, bookFile, (percent) => setUploadProgress(Math.round(percent * 0.7)));
       setUploadStage('solution'); setUploadProgress(70);
-      const coverKey = `book-covers/${stamp}-${bookCover.name}`;
+      const coverKey = buildStorageKey('books', 'book-covers', bookCover.name, stamp);
       await uploadFileObject('books', coverKey, bookCover, (percent) => setUploadProgress(70 + Math.round(percent * 0.25)));
       setUploadStage('publishing'); setUploadProgress(96);
       const created = await createBook({
-        title: bookTitle.trim(), description: bookDescription || undefined, isbn: bookIsbn || undefined, edition: bookEdition || undefined,
+        title: normalizeUserText(bookTitle) || bookTitle, description: normalizeUserText(bookDescription), isbn: normalizeIsbn(bookIsbn), edition: normalizeUserText(bookEdition),
         publication_year: bookYear ? Number(bookYear) : undefined, language: bookLanguage || undefined, publisher: bookPublisher || undefined,
-        category: bookCategory || undefined, subject: bookSubject || undefined, status: 'draft', authors, course_ids: courseIds, module_ids: bookModules.map((module) => module.id),
+        // CP/Admin uploads are published as public academic resources. The
+        // public catalogue deliberately returns only active + public Books.
+        category: normalizeUserText(bookCategory), subject: normalizeUserText(bookSubject), status: 'active', visibility: 'public', authors: normalizeUnique(authors), course_ids: normalizeUnique(courseIds), module_ids: normalizeUnique(bookModules.map((module) => module.id)),
         file: { key: bookKey, original_filename: bookFile.name, mime_type: bookFile.type, size: bookFile.size },
         cover: { key: coverKey, original_filename: bookCover.name, mime_type: bookCover.type, size: bookCover.size },
       });
       setUploadedBook(created); setUploadProgress(100); setSuccess(true); toast.success('Book uploaded successfully!');
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Failed to upload book');
+    } catch (error) {
+      toast.error(normalizeApiError(error).message || 'Failed to upload book');
     } finally { setSubmitting(false); setUploadStage(null); }
   };
 
@@ -749,15 +752,15 @@ export default function UploadPage() {
         <form onSubmit={handleBookUpload} className="space-y-6">
           <div className="theme-soft-panel rounded-lg p-4 text-sm"><p className="theme-title flex items-center gap-2 font-medium"><Sparkles className="h-4 w-4" />Book upload</p><p className="theme-muted mt-2">Add the book file, cover, and catalogue details. Your account is automatically recorded as the uploader.</p></div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2"><Label className="theme-form-label">Book title *</Label><Input className="theme-form-input mt-1" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="e.g., Database System Concepts" required /></div>
-            <div><Label className="theme-form-label">ISBN</Label><Input className="theme-form-input mt-1" value={bookIsbn} onChange={(e) => setBookIsbn(e.target.value)} /></div><div><Label className="theme-form-label">Edition</Label><Input className="theme-form-input mt-1" value={bookEdition} onChange={(e) => setBookEdition(e.target.value)} /></div>
+            <div className="sm:col-span-2"><Label className="theme-form-label">Book title *</Label><Input className="theme-form-input mt-1" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="e.g., Database System Concepts" required aria-invalid={!bookTitle.trim()} /> <InlineFieldMessage message={!bookTitle.trim() ? 'Title is required.' : undefined} /></div>
+            <div><Label className="theme-form-label">ISBN</Label><Input className="theme-form-input mt-1" value={bookIsbn} onChange={(e) => setBookIsbn(e.target.value)} /><InlineFieldMessage message={bookIsbn.trim() && !normalizeIsbn(bookIsbn) ? 'Enter a valid ISBN or leave this optional field blank.' : undefined} /></div><div><Label className="theme-form-label">Edition</Label><Input className="theme-form-input mt-1" value={bookEdition} onChange={(e) => setBookEdition(e.target.value)} /></div>
             <div><Label className="theme-form-label">Publication year</Label><Input className="theme-form-input mt-1" type="number" value={bookYear} onChange={(e) => setBookYear(e.target.value)} /></div><div><Label className="theme-form-label">Language *</Label><Select value={bookLanguage} onValueChange={setBookLanguage}><SelectTrigger className="theme-form-input mt-1"><SelectValue placeholder="Select language" /></SelectTrigger><SelectContent>{[['en','English'],['fr','French'],['rw','Kinyarwanda'],['sw','Swahili'],['ar','Arabic'],['zh','Chinese'],['es','Spanish'],['pt','Portuguese'],['de','German'],['it','Italian'],['ja','Japanese'],['ko','Korean'],['hi','Hindi'],['ru','Russian'],['other','Other']].map(([value,label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
             <div><Label className="theme-form-label">Publisher</Label><Input className="theme-form-input mt-1" value={bookPublisher} onChange={(e) => setBookPublisher(e.target.value)} /></div><div><Label className="theme-form-label">Category</Label><Input className="theme-form-input mt-1" value={bookCategory} onChange={(e) => setBookCategory(e.target.value)} /></div>
             <div className="sm:col-span-2"><Label className="theme-form-label">Subject</Label><Input className="theme-form-input mt-1" value={bookSubject} onChange={(e) => setBookSubject(e.target.value)} /></div>
           </div>
-          <div><Label className="theme-form-label">Authors *</Label><div className="mt-1 flex gap-2"><Input className="theme-form-input" value={authorInput} onChange={(e) => setAuthorInput(e.target.value)} placeholder="Author name" /><Button type="button" variant="outline" onClick={() => { const name = authorInput.trim(); if (name && !bookAuthors.some((author) => author.name === name)) { setBookAuthors([...bookAuthors, { name }]); setAuthorInput(''); } }}>+ Add Author</Button></div><div className="mt-2 flex flex-wrap gap-2">{bookAuthors.map((author) => <span key={author.name} className="rounded-full bg-muted px-3 py-1 text-sm">{author.name}<button type="button" className="ml-2" onClick={() => setBookAuthors(bookAuthors.filter((item) => item.name !== author.name))}>×</button></span>)}</div></div>
-          <div><Label className="theme-form-label">Related courses *</Label><Input className="theme-form-input mt-1" value={courseQuery} onChange={(e) => { const query = e.target.value; setCourseQuery(query); if (query.trim()) void searchCourses(query).then((data) => setCourseOptions(data.items)); else setCourseOptions([]); }} placeholder="Search course code or name..." />{courseOptions.length > 0 && <div className="mt-2 space-y-1 rounded border p-2">{courseOptions.filter((course) => !bookCourses.some((selected) => selected.id === course.id)).map((course) => <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted" key={course.id} type="button" onClick={() => { setBookCourses([...bookCourses, course]); setCourseQuery(''); setCourseOptions([]); }}>{course.code || 'No code'} — {course.name}</button>)}</div>}<div className="mt-2 grid gap-2 sm:grid-cols-3"><Input className="theme-form-input" value={newCourseCode} onChange={(e) => setNewCourseCode(e.target.value)} placeholder="Course code" /><Input className="theme-form-input" value={newCourseDescription} onChange={(e) => setNewCourseDescription(e.target.value)} placeholder="Description (optional)" /><Button type="button" variant="outline" disabled={!courseQuery.trim()} onClick={async () => { const course = await createCourse({ name: courseQuery.trim(), code: newCourseCode || undefined, description: newCourseDescription || undefined }); if (!bookCourses.some((selected) => selected.id === course.id)) setBookCourses([...bookCourses, course]); setCourseQuery(''); setNewCourseCode(''); setNewCourseDescription(''); }}>+ Add Course</Button></div><div className="mt-2 flex flex-wrap gap-2">{bookCourses.map((course) => <span key={course.id} className="rounded-full bg-muted px-3 py-1 text-sm">{course.code || '—'} — {course.name}<button type="button" className="ml-2" onClick={() => setBookCourses(bookCourses.filter((item) => item.id !== course.id))}>×</button></span>)}</div></div>
-          <div><Label className="theme-form-label">Related modules</Label><div className="mt-1 flex gap-2"><Input className="theme-form-input" value={moduleQuery} onChange={(e) => { setModuleQuery(e.target.value); void fetchModules(e.target.value).then((data) => setModuleOptions(data.items)); }} placeholder="Search module" /><Button type="button" variant="outline" onClick={async () => { const name = moduleQuery.trim(); if (!name) return; const module = await createModule({ name, code: newModuleCode || undefined, description: newModuleDescription || undefined, course_id: bookCourses[0]?.id }); if (!bookModules.some((item) => item.id === module.id)) setBookModules([...bookModules, module]); setModuleQuery(''); setNewModuleCode(''); setNewModuleDescription(''); }}>+ Add Module</Button></div>{moduleOptions.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{moduleOptions.map((module) => <Button key={module.id} type="button" size="sm" variant="outline" onClick={() => !bookModules.some((item) => item.id === module.id) && setBookModules([...bookModules, module])}>{module.name}</Button>)}</div>}<div className="mt-2 grid gap-2 sm:grid-cols-2"><Input className="theme-form-input" value={newModuleCode} onChange={(e) => setNewModuleCode(e.target.value)} placeholder="New module code (optional)" /><Input className="theme-form-input" value={newModuleDescription} onChange={(e) => setNewModuleDescription(e.target.value)} placeholder="New module description (optional)" /></div><div className="mt-2 flex flex-wrap gap-2">{bookModules.map((module) => <span key={module.id} className="rounded-full bg-muted px-3 py-1 text-sm">{module.name}<button type="button" className="ml-2" onClick={() => setBookModules(bookModules.filter((item) => item.id !== module.id))}>×</button></span>)}</div></div>
+            <div><Label className="theme-form-label">Authors *</Label><div className="mt-1 flex gap-2"><Input className="theme-form-input" value={authorInput} onChange={(e) => setAuthorInput(e.target.value)} placeholder="Author name" /><Button type="button" variant="outline" onClick={() => { const name = authorInput.trim(); if (name && !bookAuthors.some((author) => author.name === name)) { setBookAuthors((current) => [...current, { name }]); setAuthorInput(''); } }}>+ Add Author</Button></div><InlineFieldMessage message={!bookAuthors.length ? 'Add at least one author.' : undefined} /><div className="mt-2 flex flex-wrap gap-2">{bookAuthors.map((author) => <span key={author.name} className="rounded-full bg-muted px-3 py-1 text-sm">{author.name}<button type="button" className="ml-2" onClick={() => setBookAuthors((current) => current.filter((item) => item.name !== author.name))}>×</button></span>)}</div></div>
+          <div><Label className="theme-form-label">Related courses *</Label><Input className="theme-form-input mt-1" value={courseQuery} onChange={(e) => { const query = e.target.value; setCourseQuery(query); if (query.trim()) void searchCourses(query).then((data) => setCourseOptions(data.items)); else setCourseOptions([]); }} placeholder="Search course code or name..." />{courseOptions.length > 0 && <div className="mt-2 space-y-1 rounded border p-2">{courseOptions.filter((course) => !bookCourses.some((selected) => selected.id === course.id)).map((course) => <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted" key={course.id} type="button" onClick={() => { setBookCourses((selected) => selected.some((item) => item.id === course.id) ? selected : [...selected, course]); setCourseQuery(''); setCourseOptions([]); }}>{course.code || 'No code'} — {course.name}</button>)}</div>}<div className="mt-2 grid gap-2 sm:grid-cols-3"><Input className="theme-form-input" value={newCourseCode} onChange={(e) => setNewCourseCode(e.target.value)} placeholder="Course code" /><Input className="theme-form-input" value={newCourseDescription} onChange={(e) => setNewCourseDescription(e.target.value)} placeholder="Description (optional)" /><Button type="button" variant="outline" disabled={!courseQuery.trim()} onClick={async () => { const course = await createCourse({ name: courseQuery.trim(), code: newCourseCode || undefined, description: newCourseDescription || undefined }); setBookCourses((selected) => selected.some((item) => item.id === course.id) ? selected : [...selected, course]); setCourseQuery(''); setNewCourseCode(''); setNewCourseDescription(''); }}>+ Add Course</Button></div><div className="mt-2 flex flex-wrap gap-2">{bookCourses.map((course) => <span key={course.id} className="rounded-full bg-muted px-3 py-1 text-sm">{course.code || '—'} — {course.name}<button type="button" className="ml-2" onClick={() => setBookCourses((selected) => selected.filter((item) => item.id !== course.id))}>×</button></span>)}</div></div>
+          <div><Label className="theme-form-label">Related modules</Label><div className="mt-1 flex gap-2"><Input className="theme-form-input" value={moduleQuery} onChange={(e) => { setModuleQuery(e.target.value); void fetchModules(e.target.value).then((data) => setModuleOptions(data.items)); }} placeholder="Search module" /><Button type="button" variant="outline" onClick={async () => { const name = moduleQuery.trim(); if (!name) return; const module = await createModule({ name, code: newModuleCode || undefined, description: newModuleDescription || undefined, course_id: bookCourses[0]?.id }); setBookModules((selected) => selected.some((item) => item.id === module.id) ? selected : [...selected, module]); setModuleQuery(''); setNewModuleCode(''); setNewModuleDescription(''); }}>+ Add Module</Button></div>{moduleOptions.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{moduleOptions.map((module) => <Button key={module.id} type="button" size="sm" variant="outline" onClick={() => setBookModules((selected) => selected.some((item) => item.id === module.id) ? selected : [...selected, module])}>{module.name}</Button>)}</div>}<div className="mt-2 grid gap-2 sm:grid-cols-2"><Input className="theme-form-input" value={newModuleCode} onChange={(e) => setNewModuleCode(e.target.value)} placeholder="New module code (optional)" /><Input className="theme-form-input" value={newModuleDescription} onChange={(e) => setNewModuleDescription(e.target.value)} placeholder="New module description (optional)" /></div><div className="mt-2 flex flex-wrap gap-2">{bookModules.map((module) => <span key={module.id} className="rounded-full bg-muted px-3 py-1 text-sm">{module.name}<button type="button" className="ml-2" onClick={() => setBookModules((selected) => selected.filter((item) => item.id !== module.id))}>×</button></span>)}</div></div>
           <div><Label className="theme-form-label">Description</Label><Textarea className="theme-form-input mt-1" value={bookDescription} onChange={(e) => setBookDescription(e.target.value)} rows={3} placeholder="Brief description of the book..." /></div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div><Label className="theme-form-label">Book file (PDF or EPUB) *</Label><div className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${submitting && uploadStage === 'paper' ? 'file-upload-card--transferring' : ''} ${bookFileDragActive ? 'theme-dropzone--active' : ''}`} onClick={() => document.getElementById('bookFile')?.click()} onDragOver={(e) => handleDragOver(e, setBookFileDragActive)} onDragEnter={(e) => handleDragOver(e, setBookFileDragActive)} onDragLeave={(e) => handleDragLeave(e, setBookFileDragActive)} onDrop={(e) => { e.preventDefault(); setBookFileDragActive(false); setBookFile(e.dataTransfer.files?.[0] || null); }}><input id="bookFile" className="hidden" type="file" accept=".pdf,.epub,application/pdf,application/epub+zip" onChange={(e) => setBookFile(e.target.files?.[0] || null)} /><label htmlFor="bookFile" className="cursor-pointer"><FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground" /><p className="theme-muted text-sm">{bookFile ? `${bookFile.name} · ${(bookFile.size / 1024 / 1024).toFixed(2)} MB` : 'Click to choose book file'}</p><p className="theme-muted mt-1 text-xs">PDF or EPUB</p></label></div></div>
@@ -765,6 +768,7 @@ export default function UploadPage() {
           </div>
           {submitting && <div className="upload-progress-panel rounded-2xl border p-5"><div className="flex items-start gap-4"><div className="upload-progress-orb flex h-12 w-12 shrink-0 items-center justify-center rounded-full" style={{ '--upload-progress': `${uploadProgress}%` } as React.CSSProperties}><span className="rounded-full bg-background px-1 text-xs font-bold">{uploadProgress}%</span></div><div><p className="theme-title flex items-center gap-2 font-semibold"><LoaderCircle className="h-4 w-4 animate-spin text-primary" />{uploadStage === 'solution' ? 'Uploading book cover' : uploadStage === 'publishing' ? 'Saving book details' : 'Uploading book file'}</p><p className="theme-muted mt-1 text-sm">Please keep this page open while we securely transfer your book.</p></div></div></div>}
           <div className="theme-accent-soft-border rounded-lg border-dashed p-4 text-sm"><p className="theme-title font-medium">Review Book</p><div className="theme-muted mt-2 grid gap-1 sm:grid-cols-2"><p>Title: <span className="text-foreground">{bookTitle || '—'}</span></p><p>Language: <span className="text-foreground">{bookLanguage || '—'}</span></p><p>Authors: <span className="text-foreground">{bookAuthors.map((author) => author.name).join(', ') || '—'}</span></p><p>Courses: <span className="text-foreground">{bookCourses.map((course) => `${course.code || '—'} — ${course.name}`).join(', ') || '—'}</span></p><p>Modules: <span className="text-foreground">{bookModules.map((module) => module.name).join(', ') || '—'}</span></p><p>File: <span className="text-foreground">{bookFile?.name || '—'}</span></p><p>Cover: <span className="text-foreground">{bookCover ? 'Selected' : '—'}</span></p><p>Uploaded by: <span className="text-foreground">{user.name || user.email}</span></p></div><p className="theme-muted mt-2">The server assigns ownership and the 48-hour CP management deadline.</p></div>
+          <InlineFieldMessage message={!bookLanguage ? 'Select a language.' : !bookCourses.length ? 'Select at least one course.' : !bookFile ? 'Choose the book file.' : !bookCover ? 'Choose a cover image.' : undefined} />
           <Button type="submit" disabled={submitting} className="theme-accent-bg h-12 w-full text-lg">{submitting ? <><LoaderCircle className="mr-2 h-5 w-5 animate-spin" />Uploading...</> : <><UploadIcon className="mr-2 h-5 w-5" />Upload Book</>}</Button>
         </form>
       </CardContent></Card>

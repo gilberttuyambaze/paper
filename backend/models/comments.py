@@ -8,7 +8,8 @@ class Comments(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, nullable=False)
     user_id = Column(String, nullable=False)
-    paper_id = Column(Integer, nullable=False)
+    paper_id = Column(Integer, nullable=True)
+    book_id = Column(Integer, nullable=True)
     content = Column(String, nullable=False)
     parent_id = Column(Integer, nullable=True)
     upvotes = Column(Integer, nullable=True)

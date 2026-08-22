@@ -14,6 +14,7 @@ from models.comments import Comments
 from models.notifications import Notifications
 from models.paper_interactions import PaperInteractions
 from models.papers import Papers
+from models.books import Book
 from models.reports import Reports
 from models.solutions import Solutions
 from models.user_profiles import User_profiles
@@ -636,6 +637,32 @@ async def add_comment(
     comment = Comments(
         user_id=str(current_user.id),
         paper_id=paper_id,
+        content=payload.content.strip(),
+        parent_id=payload.parent_id,
+        upvotes=0,
+        created_at=_utcnow(),
+    )
+    db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+    return comment
+
+
+@router.post("/books/{book_id}/comments")
+async def add_book_comment(
+    book_id: int,
+    payload: CommunityCommentCreate,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.deleted_at is not None or book.status != "active" or book.visibility != "public":
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    await _ensure_profile(db, current_user)
+    comment = Comments(
+        user_id=str(current_user.id),
+        book_id=book_id,
         content=payload.content.strip(),
         parent_id=payload.parent_id,
         upvotes=0,

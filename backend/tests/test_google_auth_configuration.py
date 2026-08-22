@@ -1,5 +1,7 @@
+import importlib
 import unittest
 
+import core.config as config_module
 from core.auth import google_oidc_configuration_issue
 from core.config import settings
 from fastapi import HTTPException
@@ -27,6 +29,25 @@ class GoogleConfigurationTests(unittest.IsolatedAsyncioTestCase):
         settings.oidc_issuer_url = "https://accounts.google.com"
         settings.oidc_client_id = "example.apps.googleusercontent.com"
         self.assertIsNone(google_oidc_configuration_issue())
+
+    def test_test_environment_uses_safe_sqlite_default(self):
+        original_environment = config_module.os.environ.get("ENVIRONMENT")
+        original_pytest_marker = config_module.os.environ.get("PYTEST_CURRENT_TEST")
+        try:
+            config_module.os.environ["ENVIRONMENT"] = "test"
+            config_module.os.environ["PYTEST_CURRENT_TEST"] = "tests/test_google_auth_configuration.py::test_test_environment_uses_safe_sqlite_default"
+            reloaded = importlib.reload(config_module)
+            self.assertTrue(reloaded.settings.database_url.startswith("sqlite+aiosqlite:///"))
+        finally:
+            if original_environment is None:
+                config_module.os.environ.pop("ENVIRONMENT", None)
+            else:
+                config_module.os.environ["ENVIRONMENT"] = original_environment
+            if original_pytest_marker is None:
+                config_module.os.environ.pop("PYTEST_CURRENT_TEST", None)
+            else:
+                config_module.os.environ["PYTEST_CURRENT_TEST"] = original_pytest_marker
+            importlib.reload(config_module)
 
     async def test_google_endpoint_returns_safe_configuration_error_before_database_access(self):
         settings.oidc_issuer_url = None

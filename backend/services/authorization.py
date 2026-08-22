@@ -27,6 +27,15 @@ def can_create_book(user) -> bool:
     return can_upload(user)
 
 
+def can_read_book(user, book) -> bool:
+    """Reading follows publication visibility; ownership only affects management."""
+    if user is None:
+        return book.deleted_at is None and book.status == "active" and book.visibility == "public"
+    if user.role == "admin":
+        return True
+    return book.deleted_at is None and book.status == "active" and book.visibility == "public"
+
+
 def can_manage_book(user, book, now: datetime) -> bool:
     if user.role == "admin":
         return True

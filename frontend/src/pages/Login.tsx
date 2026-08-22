@@ -7,6 +7,9 @@ import { Label } from '@/components/ui/label';
 import SeoMeta from '@/components/SeoMeta';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { authApi } from '../lib/auth';
+import { showMessage } from '@/lib/messages';
+import InlineFieldMessage from '../components/InlineFieldMessage';
+import { normalizeEmail } from '../lib/normalization';
 
 export default function LoginPage() {
   const [searchParams] = useSearchParams();
@@ -17,6 +20,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const emailError = email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()) ? 'Enter a valid email address.' : undefined;
+  const passwordError = !password ? 'Password is required.' : undefined;
+
+  useEffect(() => { if (error) showMessage({ type: 'error', title: 'Sign in failed', message: error }); }, [error]);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,7 +31,7 @@ export default function LoginPage() {
       try {
         const current = await authApi.getCurrentUser();
         if (!cancelled && current) {
-          navigate('/past-papers?sort=-download_count', { replace: true });
+          navigate('/resources?sort=-download_count', { replace: true });
         }
       } catch (_) {
         // ignore
@@ -83,11 +90,13 @@ export default function LoginPage() {
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
+                  onBlur={() => setEmail(normalizeEmail(email))}
                   disabled={loading}
                   placeholder="you@example.com"
                   required
                   className="theme-form-input mt-2 h-12 rounded-xl"
                 />
+                <InlineFieldMessage message={emailError} />
               </div>
 
               <div>
@@ -121,6 +130,7 @@ export default function LoginPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <InlineFieldMessage message={passwordError} />
               </div>
 
               {error && <p className="theme-error-note rounded-xl px-4 py-3 text-sm">{error}</p>}

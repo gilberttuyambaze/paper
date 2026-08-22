@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
+const BOOK_LANGUAGES = ['en', 'fr', 'rw', 'sw', 'ar', 'zh', 'es', 'pt', 'de', 'it', 'ja', 'ko', 'hi', 'ru', 'other'];
 const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
 
 function VerificationBadge({ status }: { status: string }) {
@@ -66,9 +67,11 @@ export default function SearchResults() {
   const [college, setCollege] = useState(searchParams.get('college') || '');
   const [department, setDepartment] = useState(searchParams.get('department') || '');
   const [course, setCourse] = useState(searchParams.get('course') || '');
+  const [module, setModule] = useState(searchParams.get('module') || '');
   const [paperType, setPaperType] = useState(searchParams.get('type') || '');
   const [year, setYear] = useState(searchParams.get('year') || '');
   const [uploader, setUploader] = useState(searchParams.get('uploader') || '');
+  const [language, setLanguage] = useState(searchParams.get('language') || '');
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || '-download_count');
   const [showFilters, setShowFilters] = useState(false);
   const [showOfflineBanner, setShowOfflineBanner] = useState(false);
@@ -90,9 +93,11 @@ export default function SearchResults() {
     setCollege(searchParams.get('college') || '');
     setDepartment(searchParams.get('department') || '');
     setCourse(searchParams.get('course') || '');
+    setModule(searchParams.get('module') || '');
     setPaperType(searchParams.get('type') || '');
     setYear(searchParams.get('year') || '');
     setUploader(searchParams.get('uploader') || '');
+    setLanguage(searchParams.get('language') || '');
     setSortBy(searchParams.get('sort') || '-download_count');
     const resource = searchParams.get('resource');
     setResourceType(resource === 'paper' || resource === 'book' ? resource : 'all');
@@ -107,13 +112,15 @@ export default function SearchResults() {
     if (college) params.set('college', college);
     if (department) params.set('department', department);
     if (course) params.set('course', course);
+    if (module) params.set('module', module);
     if (paperType) params.set('type', paperType);
     if (year) params.set('year', year);
     if (uploader) params.set('uploader', uploader);
+    if (language) params.set('language', language);
     if (sortBy) params.set('sort', sortBy);
     if (resourceType !== 'all') params.set('resource', resourceType);
     setSearchParams(params);
-  }, [searchQuery, college, department, course, paperType, year, uploader, sortBy, resourceType, setSearchParams]);
+  }, [searchQuery, college, department, course, module, paperType, year, uploader, language, sortBy, resourceType, setSearchParams]);
 
   const loadPapers = async () => {
     try {
@@ -135,24 +142,24 @@ export default function SearchResults() {
   const colleges = useMemo(() => Array.from(new Set(papers.map((paper) => paper.college).filter(Boolean))).sort(), [papers]);
 
   const courses = useMemo(() => {
-    return Array.from(
-      new Map(
-        papers
-          .filter((paper) => (!college || paper.college === college) && (!department || paper.department === department))
-          .map((paper) => [paper.course_code, `${paper.course_code} - ${paper.course_name}`])
-      ).entries()
-    );
-  }, [papers, college, department]);
+    const paperCourses = papers
+      .filter((paper) => (!college || paper.college === college) && (!department || paper.department === department))
+      .map((paper) => [paper.course_code, `${paper.course_code} - ${paper.course_name}`] as const);
+    const bookCourses = books.map((book) => book.courses || []).flat().map((item) => [item.code || String(item.id), `${item.code || 'Course'} - ${item.name}`] as const);
+    return Array.from(new Map([...paperCourses, ...bookCourses]).entries());
+  }, [papers, books, college, department]);
 
   const uploaderDisplayMap = useMemo(() => {
     const map = new Map<string, string>();
     papers.forEach((paper) => {
       map.set(paper.user_id, paper.uploader_display_name || `Uploader ${paper.user_id}`);
     });
+    books.forEach((book) => map.set(book.uploaded_by, book.uploader_name || `Uploader ${book.uploaded_by}`));
     return map;
-  }, [papers]);
+  }, [papers, books]);
 
-  const uploaders = useMemo(() => Array.from(new Set(papers.map((paper) => paper.user_id))).sort(), [papers]);
+  const uploaders = useMemo(() => Array.from(new Set([...papers.map((paper) => paper.user_id), ...books.map((book) => book.uploaded_by)])).sort(), [papers, books]);
+  const modules = useMemo(() => Array.from(new Map(books.flatMap((book) => book.modules || []).map((item) => [String(item.id), item.name])).entries()), [books]);
 
   const filteredPapers = useMemo(() => {
     let result = [...papers];
@@ -193,11 +200,22 @@ export default function SearchResults() {
 
   const filteredBooks = useMemo(() => books.filter((book) => {
     const q = searchQuery.trim().toLowerCase();
-    if (q && ![book.title, book.description, book.isbn, book.publisher, book.authors.join(' '), book.uploader_name, book.course_ids.join(' ')].filter(Boolean).some((value) => String(value).toLowerCase().includes(q))) return false;
-    return (!year || book.publication_year === Number(year));
-  }), [books, searchQuery, year]);
+    if (q && ![book.title, book.description, book.isbn, book.publisher, book.authors.join(' '), book.uploader_name, book.course_ids.join(' '), ...(book.courses || []).flatMap((item) => [item.code, item.name]), ...(book.modules || []).map((item) => item.name)].filter(Boolean).some((value) => String(value).toLowerCase().includes(q))) return false;
+    if (year && book.publication_year !== Number(year)) return false;
+    if (language && book.language !== language) return false;
+    if (course && !(book.courses || []).some((item) => item.code === course || String(item.id) === course)) return false;
+    if (module && !(book.modules || []).some((item) => String(item.id) === module)) return false;
+    if (uploader && book.uploaded_by !== uploader) return false;
+    return true;
+  }), [books, searchQuery, year, language, course, module, uploader]);
+  const sortedBooks = useMemo(() => [...filteredBooks].sort((a, b) => {
+    if (sortBy === 'title') return a.title.localeCompare(b.title);
+    if (sortBy === '-year') return (b.publication_year || 0) - (a.publication_year || 0);
+    if (sortBy === '-download_count') return (b.download_count || 0) - (a.download_count || 0);
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  }), [filteredBooks, sortBy]);
   const visiblePaperResults = resourceType !== 'book' ? filteredPapers : [];
-  const visibleBookResults = resourceType !== 'paper' ? filteredBooks : [];
+  const visibleBookResults = resourceType !== 'paper' ? sortedBooks : [];
 
   // resolve uploader public profiles for visible results
   useEffect(() => {
@@ -226,9 +244,11 @@ export default function SearchResults() {
     setCollege('');
     setDepartment('');
     setCourse('');
+    setModule('');
     setPaperType('');
     setYear('');
     setUploader('');
+    setLanguage('');
     setSortBy('-download_count');
     setSearchParams({});
   };
@@ -237,9 +257,11 @@ export default function SearchResults() {
     college,
     department,
     course,
+    module ? modules.find(([id]) => id === module)?.[1] || module : '',
     year,
     paperType,
     uploader ? uploaderDisplayMap.get(uploader) || uploader : '',
+    language,
   ].filter(Boolean);
 
   return (
@@ -252,7 +274,7 @@ export default function SearchResults() {
         <p className="theme-muted mb-4 max-w-4xl text-sm leading-7">
           Search <strong>University of Rwanda academic resources</strong>, including past papers, books, courses, and revision materials.
         </p>
-        <div className="mb-4 flex flex-wrap gap-2"><Button size="sm" variant={resourceType === 'all' ? 'default' : 'outline'} onClick={() => setResourceType('all')}>All</Button><Button size="sm" variant={resourceType === 'paper' ? 'default' : 'outline'} onClick={() => setResourceType('paper')}>📄 Papers</Button><Button size="sm" variant={resourceType === 'book' ? 'default' : 'outline'} onClick={() => setResourceType('book')}>📚 Books</Button></div>
+        <div className="mb-4 flex flex-wrap gap-2"><Button size="sm" variant={resourceType === 'all' ? 'default' : 'outline'} onClick={() => setResourceType('all')}>All Resources</Button><Button size="sm" variant={resourceType === 'paper' ? 'default' : 'outline'} onClick={() => setResourceType('paper')}>📄 Papers</Button><Button size="sm" variant={resourceType === 'book' ? 'default' : 'outline'} onClick={() => setResourceType('book')}>📚 Books</Button></div>
         <form
           onSubmit={(event) => event.preventDefault()}
           className="flex flex-col gap-2 md:flex-row"
@@ -337,6 +359,13 @@ export default function SearchResults() {
                 </Select>
               </div>
               <div>
+                <label className="theme-muted mb-1 block text-sm font-medium">Module</label>
+                <Select value={module || 'all'} onValueChange={(value) => setModule(value === 'all' ? '' : value)}>
+                  <SelectTrigger><SelectValue placeholder="All Modules" /></SelectTrigger>
+                  <SelectContent><SelectItem value="all">All Modules</SelectItem>{modules.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
                 <label className="theme-muted mb-1 block text-sm font-medium">Paper Type</label>
                 <Select value={paperType || 'all'} onValueChange={(value) => setPaperType(value === 'all' ? '' : value)}>
                   <SelectTrigger>
@@ -378,6 +407,13 @@ export default function SearchResults() {
                       </SelectItem>
                     ))}
                   </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="theme-muted mb-1 block text-sm font-medium">Language</label>
+                <Select value={language || 'all'} onValueChange={(value) => setLanguage(value === 'all' ? '' : value)}>
+                  <SelectTrigger><SelectValue placeholder="All Languages" /></SelectTrigger>
+                  <SelectContent><SelectItem value="all">All Languages</SelectItem>{BOOK_LANGUAGES.map((item) => <SelectItem key={item} value={item}>{item.toUpperCase()}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
@@ -499,7 +535,7 @@ export default function SearchResults() {
               </Link>
             ))}
             {visibleBookResults.map((book) => (
-              <Card key={`book-${book.id}`} className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"><CardContent className="p-5"><div className="mb-3 flex items-start justify-between"><Badge variant="outline" className="border-primary text-xs font-medium text-primary">📚 BOOK</Badge>{book.cover_key && <BookOpen className="h-5 w-5 text-muted-foreground" />}</div><h3 className="theme-title mb-2 line-clamp-2 font-semibold">{book.title}</h3><div className="theme-muted space-y-1 text-sm"><p>{book.authors.join(', ') || 'Author not specified'}</p><p>{book.course_ids.join(' · ') || 'No related course'}</p><p>{book.modules?.map((module) => module.name).join(' · ')}</p><p>{book.language} {book.edition ? `· ${book.edition}` : ''}</p><p>Uploaded by {book.uploader_name || book.uploaded_by}</p></div><div className="mt-4 border-t pt-3 text-sm font-medium text-primary">View Book</div></CardContent></Card>
+              <Link key={`book-${book.id}`} to={`/book/${book.id}`} className="block"><Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"><CardContent className="p-5"><div className="mb-3 flex items-start justify-between"><Badge variant="outline" className="border-primary text-xs font-medium text-primary">📚 BOOK</Badge>{book.cover_key && <BookOpen className="h-5 w-5 text-muted-foreground" />}</div><h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">{book.title}</h3><div className="theme-muted space-y-1 text-sm"><p>{book.authors.join(', ') || 'Author not specified'}</p><p>{book.courses?.map((item) => item.code || item.name).join(' · ') || 'No related course'}</p><p>{book.modules?.map((module) => module.name).join(' · ')}</p><p>{book.language} {book.edition ? `· ${book.edition}` : ''}</p><p>Uploaded by {book.uploader_name || book.uploaded_by}</p></div><div className="mt-4 border-t pt-3 text-sm font-medium text-primary">Open Book</div></CardContent></Card></Link>
             ))}
           </div>
       )}

@@ -236,7 +236,7 @@ class RPApi {
         clearStoredAuthToken();
         return null;
       }
-      throw new Error(error.response?.data?.detail || 'Failed to get user info');
+      throw normalizeAuthError(error, 'Failed to get user info');
     }
   }
 
@@ -392,7 +392,7 @@ class RPApi {
       clearStoredAuthToken();
       clearReturnTo();
       if (isBrowser()) window.location.assign('/');
-      throw new Error(error?.response?.data?.detail || error?.message || 'Failed to logout');
+      throw normalizeAuthError(error, 'Failed to logout');
     }
   }
 }

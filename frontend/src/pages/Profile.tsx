@@ -19,9 +19,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { BadgeCheck, Camera, Eye, EyeOff, Pencil, School, ShieldCheck } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/messages';
 import AvatarFallback from '../components/AvatarFallback';
 import AcademicContextFields from '../components/AcademicContextFields';
+import InlineFieldMessage from '../components/InlineFieldMessage';
 import {
   buildProfilePictureObjectKey,
   createEmptyProfileForm,
@@ -89,6 +90,7 @@ export default function ProfilePage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [academicNames, setAcademicNames] = useState<Record<string, string>>({});
+  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!user) {
@@ -156,6 +158,7 @@ export default function ProfilePage() {
   };
 
   const updateField = <K extends keyof ProfileFormValues>(field: K, value: ProfileFormValues[K]) => {
+    setTouchedFields((current) => ({ ...current, [field]: true }));
     setProfileForm((prev) => {
       const next = { ...prev, [field]: value };
       if (field === 'institution_type') {
@@ -520,8 +523,12 @@ export default function ProfilePage() {
                   id="display_name"
                   value={profileForm.display_name}
                   onChange={(event) => updateField('display_name', event.target.value)}
+                  onBlur={() => setTouchedFields((current) => ({ ...current, display_name: true }))}
+                  aria-invalid={Boolean(touchedFields.display_name && !profileForm.display_name.trim())}
+                  aria-describedby="profile-display-name-error"
                   className="theme-form-input mt-2 h-11 rounded-xl"
                 />
+                <InlineFieldMessage id="profile-display-name-error" message={touchedFields.display_name && !profileForm.display_name.trim() ? 'Full name is required.' : undefined} />
               </div>
 
               <div>
@@ -551,8 +558,11 @@ export default function ProfilePage() {
                   value={profileForm.institution_type === 'ur_student' ? 'University of Rwanda' : profileForm.university_name}
                   onChange={(event) => updateField('university_name', event.target.value)}
                   disabled={profileForm.institution_type === 'ur_student' || urCodeLocked}
+                  aria-invalid={Boolean(touchedFields.university_name && !urCodeLocked && profileForm.institution_type !== 'ur_student' && !profileForm.university_name.trim())}
+                  aria-describedby="profile-university-error"
                   className="theme-form-input mt-2 h-11 rounded-xl disabled:opacity-80"
                 />
+                <InlineFieldMessage id="profile-university-error" message={touchedFields.university_name && !urCodeLocked && profileForm.institution_type !== 'ur_student' && !profileForm.university_name.trim() ? 'University name is required.' : undefined} />
               </div>
 
               <div>
@@ -563,8 +573,11 @@ export default function ProfilePage() {
                   onChange={(event) => updateField('ur_student_code', event.target.value)}
                   disabled={profileForm.institution_type !== 'ur_student' || urCodeLocked}
                   placeholder={urCodeLocked ? 'Verified code is locked' : 'Required for UR verification'}
+                  aria-invalid={Boolean(touchedFields.ur_student_code && !urCodeLocked && profileForm.institution_type === 'ur_student' && !profileForm.ur_student_code.trim())}
+                  aria-describedby="profile-student-code-error"
                   className="theme-form-input mt-2 h-11 rounded-xl disabled:opacity-80"
                 />
+                <InlineFieldMessage id="profile-student-code-error" message={touchedFields.ur_student_code && !urCodeLocked && profileForm.institution_type === 'ur_student' && !profileForm.ur_student_code.trim() ? 'UR student code is required for verification.' : undefined} />
               </div>
 
               <div>
@@ -628,6 +641,9 @@ export default function ProfilePage() {
                         type={showPassword ? 'text' : 'password'}
                         value={password}
                         onChange={(event) => setPassword(event.target.value)}
+                        onBlur={() => setTouchedFields((current) => ({ ...current, password: true }))}
+                        aria-invalid={Boolean(touchedFields.password && password && password.length < 6)}
+                        aria-describedby="profile-password-error"
                         placeholder="At least 6 characters"
                         className="theme-form-input h-11 rounded-xl pr-12"
                       />
@@ -640,6 +656,7 @@ export default function ProfilePage() {
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
+                    <InlineFieldMessage id="profile-password-error" message={touchedFields.password && password && password.length < 6 ? 'Password must contain at least 6 characters.' : undefined} />
                   </div>
                   <div>
                     <Label className="theme-form-label">Confirm password</Label>
@@ -648,6 +665,9 @@ export default function ProfilePage() {
                         type={showConfirmPassword ? 'text' : 'password'}
                         value={confirmPassword}
                         onChange={(event) => setConfirmPassword(event.target.value)}
+                        onBlur={() => setTouchedFields((current) => ({ ...current, confirmPassword: true }))}
+                        aria-invalid={Boolean(touchedFields.confirmPassword && confirmPassword && password !== confirmPassword)}
+                        aria-describedby="profile-confirm-password-error"
                         placeholder="Confirm new password"
                         className="theme-form-input h-11 rounded-xl pr-12"
                       />
@@ -660,6 +680,7 @@ export default function ProfilePage() {
                         {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
+                    <InlineFieldMessage id="profile-confirm-password-error" message={touchedFields.confirmPassword && confirmPassword && password !== confirmPassword ? 'Passwords do not match.' : undefined} />
                   </div>
                 </div>
                 <div className="mt-4 flex justify-end">

@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { getAPIBaseURL } from './config';
 import { getStoredAuthToken } from './auth';
-const apiClient = axios.create({
+import { normalizeApiError } from './api-errors';
+export const apiClient = axios.create({
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
@@ -21,6 +22,18 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const normalized = normalizeApiError(error);
+    // Preserve the user-facing app messaging contract while leaving the original downstream handlers intact.
+    if (normalized.title || normalized.message) {
+      return Promise.reject(new Error(normalized.message));
+    }
+    return Promise.reject(error);
+  }
+);
 
 function apiUrl(path: string) {
   return `${getAPIBaseURL()}${path}`;
@@ -70,7 +83,8 @@ export interface PaperListResponse {
 export interface Comment {
   id: number;
   user_id: string;
-  paper_id: number;
+  paper_id: number | null;
+  book_id?: number | null;
   content: string;
   parent_id: number | null;
   upvotes: number | null;
@@ -147,9 +161,20 @@ export interface AcademicNode { id: string; name: string; slug: string; parent_i
 export interface AcademicTaxonomy { institution: AcademicNode; nodes: AcademicNode[]; }
 export interface ProgrammeRecommendation { kind: 'official' | 'submission'; id: string; name: string; confidence: number; confidence_label: string; occurrences: number; campus_id: string; college_id: string; school_id: string; }
 
+let academicTaxonomyCache: { value: AcademicTaxonomy; expiresAt: number } | null = null;
+let academicTaxonomyRequest: Promise<AcademicTaxonomy> | null = null;
+
 export async function fetchAcademicTaxonomy(): Promise<AcademicTaxonomy> {
-  const response = await apiClient.get(apiUrl('/api/v1/academics/taxonomy'));
-  return response.data as AcademicTaxonomy;
+  if (academicTaxonomyCache && academicTaxonomyCache.expiresAt > Date.now()) return academicTaxonomyCache.value;
+  if (academicTaxonomyRequest) return academicTaxonomyRequest;
+  academicTaxonomyRequest = apiClient.get(apiUrl('/api/v1/academics/taxonomy'))
+    .then((response) => {
+      const value = response.data as AcademicTaxonomy;
+      academicTaxonomyCache = { value, expiresAt: Date.now() + 15 * 60 * 1000 };
+      return value;
+    })
+    .finally(() => { academicTaxonomyRequest = null; });
+  return academicTaxonomyRequest;
 }
 export async function fetchProgrammeRecommendations(data: { institution_id: string; campus_id: string; college_id: string; school_id: string; programme_name_other: string }): Promise<ProgrammeRecommendation[]> {
   const response = await apiClient.post(apiUrl('/api/v1/academics/programme-recommendations'), data);
@@ -495,6 +520,16 @@ export async function fetchAllPapers(params?: {
   }
 }
 
+export async function fetchAdminPapers(params?: {
+  search?: string;
+  page?: number;
+  limit?: number;
+  sort?: string;
+}): Promise<PaperListResponse & { page: number; total_pages: number }> {
+  const response = await apiClient.get(apiUrl('/api/v1/admin/hub/papers'), { params });
+  return response.data as PaperListResponse & { page: number; total_pages: number };
+}
+
 export async function fetchPaperById(id: number): Promise<Paper> {
   const data = await fetchAllPapers({
     query: { id },
@@ -540,12 +575,20 @@ export async function deleteMyPaper(paperId: number): Promise<void> {
   await apiClient.delete(apiUrl(`/api/v1/entities/papers/${paperId}`));
 }
 
+/** Uses the existing Paper endpoint; the server remains authoritative for Admin/CP access. */
+export async function updatePaper(paperId: number, data: Partial<Pick<Paper, 'title' | 'course_code' | 'course_name' | 'college' | 'department' | 'year' | 'paper_type' | 'lecturer' | 'description' | 'file_key' | 'solution_key' | 'verification_status' | 'is_hidden'>>): Promise<Paper> {
+  const response = await apiClient.put(apiUrl(`/api/v1/entities/papers/${paperId}`), data);
+  return response.data as Paper;
+}
+
 export async function createComment(data: {
-  paper_id: number;
+  paper_id?: number;
+  book_id?: number;
   content: string;
   parent_id?: number;
 }): Promise<Comment> {
-  const response = await apiClient.post(apiUrl(`/api/v1/community/papers/${data.paper_id}/comments`), {
+  const resource = data.book_id ? `books/${data.book_id}` : `papers/${data.paper_id}`;
+  const response = await apiClient.post(apiUrl(`/api/v1/community/${resource}/comments`), {
     content: data.content,
     parent_id: data.parent_id,
   });
@@ -561,6 +604,17 @@ export async function fetchComments(paperId: number): Promise<{ items: Comment[]
         limit: 100,
         skip: 0,
       },
+    });
+    return response.data as { items: Comment[]; total: number };
+  } catch {
+    return { items: [], total: 0 };
+  }
+}
+
+export async function fetchBookComments(bookId: number): Promise<{ items: Comment[]; total: number }> {
+  try {
+    const response = await apiClient.get(apiUrl('/api/v1/entities/comments/all'), {
+      params: { query: JSON.stringify({ book_id: bookId }), sort: '-created_at', limit: 100, skip: 0 },
     });
     return response.data as { items: Comment[]; total: number };
   } catch {
@@ -827,11 +881,16 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
   return response.data as AdminOverview;
 }
 
-export async function fetchAdminUsers(search?: string): Promise<UserProfile[]> {
+export async function fetchAdminUsers(params?: { search?: string; role?: string; status?: string; page?: number; limit?: number; sort?: string }): Promise<{ items: UserProfile[]; total: number; page: number; limit: number; total_pages: number }> {
   const response = await apiClient.get(apiUrl('/api/v1/admin/hub/users'), {
-    params: search ? { search } : undefined,
+    params,
   });
-  return response.data.items as UserProfile[];
+  return response.data;
+}
+
+export async function fetchAdminUserResources(profileId: number): Promise<{ papers: Array<Pick<Paper, 'id' | 'title' | 'course_code' | 'course_name' | 'year' | 'paper_type' | 'verification_status' | 'is_hidden' | 'created_at'>>; books: Array<{ id: number; title: string; language?: string | null; status: string; visibility: string; created_at?: string | null; deleted_at?: string | null; file_name?: string | null; file_size?: number | null }>; activity: Array<{ kind: string; title: string; action: string; created_at?: string | null }> }> {
+  const response = await apiClient.get(apiUrl(`/api/v1/admin/hub/users/${profileId}/resources`));
+  return response.data;
 }
 
 export async function fetchAdminRoleRequests(): Promise<UserProfile[]> {

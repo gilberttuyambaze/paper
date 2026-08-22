@@ -11,7 +11,10 @@ import AvatarFallback from '../components/AvatarFallback';
 import AcademicContextFields from '../components/AcademicContextFields';
 import { updateUserProfile, uploadFileObject } from '../lib/client';
 import { authApi } from '../lib/auth';
+import { showMessage } from '@/lib/messages';
 import GoogleSignInButton from '../components/GoogleSignInButton';
+import InlineFieldMessage from '../components/InlineFieldMessage';
+import { normalizeEmail } from '../lib/normalization';
 import {
   buildProfilePictureObjectKey,
   createEmptyProfileForm,
@@ -37,6 +40,8 @@ export default function RegisterPage() {
   const [profileImageUrlInput, setProfileImageUrlInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { if (error) showMessage({ type: 'error', title: 'Registration failed', message: error }); }, [error]);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   useEffect(() => {
@@ -45,7 +50,7 @@ export default function RegisterPage() {
       try {
         const current = await authApi.getCurrentUser();
         if (!cancelled && current) {
-          navigate('/past-papers?sort=-download_count', { replace: true });
+          navigate('/resources?sort=-download_count', { replace: true });
         }
       } catch (_) {
         // ignore
@@ -56,6 +61,12 @@ export default function RegisterPage() {
   const passwordStrength = getPasswordStrength(password);
   const hasStartedConfirmingPassword = confirmPassword.length > 0;
   const passwordsMatch = password === confirmPassword;
+  const emailError = email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()) ? 'Enter a valid email address.' : undefined;
+  const nameError = !profileForm.display_name.trim() ? 'Full name is required.' : undefined;
+  const passwordError = password && password.length < 6 ? 'Password must contain at least 6 characters.' : undefined;
+  const confirmError = confirmPassword && !passwordsMatch ? 'Passwords do not match.' : undefined;
+  const universityError = profileForm.institution_type !== 'ur_student' && !profileForm.university_name.trim() ? 'University name is required.' : undefined;
+  const studentCodeError = profileForm.institution_type === 'ur_student' && !profileForm.ur_student_code.trim() ? 'UR student code is required for UR verification.' : undefined;
   const passwordMatchMessage = hasStartedConfirmingPassword
     ? passwordsMatch
       ? 'Passwords match.'
@@ -302,6 +313,7 @@ export default function RegisterPage() {
                     required
                     className="theme-form-input mt-2 h-12 rounded-xl"
                   />
+                  <InlineFieldMessage message={nameError} />
                 </div>
 
                 <div>
@@ -311,10 +323,12 @@ export default function RegisterPage() {
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    onBlur={() => setEmail(normalizeEmail(email))}
                     placeholder="you@example.com"
                     required
                     className="theme-form-input mt-2 h-12 rounded-xl"
                   />
+                  <InlineFieldMessage message={emailError} />
                 </div>
 
                 <div>
@@ -346,6 +360,7 @@ export default function RegisterPage() {
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
                     <div className={`${passwordStrength.barClass} h-full rounded-full transition-all`} style={{ width: passwordStrength.width }} />
                   </div>
+                  <InlineFieldMessage message={passwordError} />
                 </div>
 
                 <div>
@@ -373,6 +388,7 @@ export default function RegisterPage() {
                   <p className={`mt-2 text-xs ${hasStartedConfirmingPassword ? (passwordsMatch ? 'text-success-foreground' : 'text-error-foreground') : 'theme-muted'}`}>
                     {passwordMatchMessage}
                   </p>
+                  <InlineFieldMessage message={confirmError} />
                 </div>
 
                 <div>
@@ -405,6 +421,7 @@ export default function RegisterPage() {
                     disabled={profileForm.institution_type === 'ur_student'}
                     className="theme-form-input mt-2 h-12 rounded-xl disabled:opacity-80"
                   />
+                  <InlineFieldMessage message={universityError} />
                 </div>
 
                 <div>
@@ -418,6 +435,7 @@ export default function RegisterPage() {
                     disabled={profileForm.institution_type !== 'ur_student'}
                     className="theme-form-input mt-2 h-12 rounded-xl disabled:opacity-60"
                   />
+                  <InlineFieldMessage message={studentCodeError} />
                 </div>
 
                 <div>

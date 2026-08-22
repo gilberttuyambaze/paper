@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, BadgeCheck, BookOpen, School, UserCircle2 } from 'lucide-react';
 import { resolvePublicUserProfile, type PublicUserProfile } from '../lib/client';
-import { toast } from 'sonner';
+import { toast } from '@/lib/messages';
 import AvatarFallback from '../components/AvatarFallback';
 
 function URVerificationBadge({ status }: { status?: string | null }) {

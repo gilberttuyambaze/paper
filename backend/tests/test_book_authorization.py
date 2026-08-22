@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from services.authorization import CP_WINDOW, can_create_book, can_manage_book, can_manage_paper, can_upload
+from services.authorization import CP_WINDOW, can_create_book, can_manage_book, can_manage_paper, can_read_book, can_upload
 from pydantic import ValidationError
 from routers.books import BookCreate, BookUpdate
 
@@ -12,7 +12,29 @@ def user(user_id: str, role: str):
 
 
 def book(owner: str, created_at: datetime):
-    return SimpleNamespace(uploaded_by=owner, created_at=created_at)
+    return SimpleNamespace(uploaded_by=owner, created_at=created_at, deleted_at=None, status="active", visibility="public")
+
+
+def test_active_public_books_are_readable_across_users_but_private_books_are_not():
+    now = datetime(2026, 8, 23, 10, 0, tzinfo=timezone.utc)
+    book_a = book("cp-a", now)
+    admin, cp_a, cp_b, student = user("admin", "admin"), user("cp-a", "cp"), user("cp-b", "cp"), user("student", "normal")
+
+    assert all(can_read_book(actor, book_a) for actor in (admin, cp_a, cp_b, student))
+
+    book_a.status = "draft"
+    assert can_read_book(admin, book_a)
+    assert not any(can_read_book(actor, book_a) for actor in (cp_a, cp_b, student))
+
+    book_a.status = "active"
+    book_a.visibility = "private"
+    assert can_read_book(admin, book_a)
+    assert not any(can_read_book(actor, book_a) for actor in (cp_a, cp_b, student))
+
+    book_a.visibility = "public"
+    book_a.deleted_at = now
+    assert can_read_book(admin, book_a)
+    assert not any(can_read_book(actor, book_a) for actor in (cp_a, cp_b, student))
 
 
 def test_upload_permission_is_shared_by_papers_and_books():

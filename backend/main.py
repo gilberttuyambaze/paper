@@ -8,6 +8,7 @@ from datetime import datetime
 
 from core.config import settings
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
@@ -197,17 +198,53 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-# Add exception handler for all exceptions except HTTPException
+def safe_error_message(status_code: int) -> str:
+    messages = {
+        400: "The request could not be processed.",
+        401: "Your session has expired. Please sign in again.",
+        403: "You do not have permission to perform this action.",
+        404: "The requested resource was not found.",
+        409: "This change conflicts with the current record state.",
+        413: "The uploaded file is too large.",
+        422: "Some information needs attention.",
+        429: "Too many requests have been made. Please try again later.",
+    }
+    return messages.get(status_code, "We couldn't complete this action. Please try again.")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError):
+    """Return field-level validation without exposing Pydantic internals."""
+    fields = {}
+    for error in exc.errors():
+        location = [str(part) for part in error.get("loc", []) if part != "body"]
+        field = ".".join(location) or "request"
+        fields.setdefault(field, "Please check this field.")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": {"code": "VALIDATION_ERROR", "message": safe_error_message(422), "fields": fields}},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Keep HTTP error responses useful while filtering implementation details."""
+    detail = exc.detail
+    if isinstance(detail, dict) and isinstance(detail.get("code"), str) and isinstance(detail.get("message"), str):
+        content = {"detail": {"code": detail["code"], "message": detail["message"]}}
+        if isinstance(detail.get("fields"), dict):
+            content["detail"]["fields"] = {
+                str(key): str(value) for key, value in detail["fields"].items() if isinstance(value, (str, int, float))
+            }
+    else:
+        content = {"detail": {"code": f"HTTP_{exc.status_code}", "message": safe_error_message(exc.status_code)}}
+    return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
+
+
+# Add exception handler for all remaining exceptions
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """Handle all exceptions except HTTPException
-
-    - Dev environment: Return full stack trace and exception details
-    - Prod environment: Return only "Internal server error"
-    """
-    # Re-raise HTTPException to let FastAPI handle it normally
-    if isinstance(exc, HTTPException):
-        raise exc
+    """Log technical details while returning a safe user-facing response."""
 
     logger = logging.getLogger(__name__)
     error_message = str(exc)
@@ -216,18 +253,10 @@ async def general_exception_handler(request: Request, exc: Exception):
     # Log full error details regardless of environment
     logger.error(f"Exception: {error_type}: {error_message}\n{traceback.format_exc()}")
 
-    # Determine if we're in dev environment
-    is_dev = os.getenv("ENVIRONMENT", "prod").lower() == "dev"
-
-    if is_dev:
-        # Dev environment: return full stack trace and exception details
-        error_detail = f"{error_type}: {error_message}\n{traceback.format_exc()}"
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": error_detail})
-    else:
-        # Prod environment: return only generic error message
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": "Internal Server Error"}
-        )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": {"code": "INTERNAL_ERROR", "message": "We couldn't complete this action. Please try again."}},
+    )
 
 
 @app.get("/")

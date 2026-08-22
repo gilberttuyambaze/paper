@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
-from dependencies.auth import get_current_user
+from dependencies.auth import get_optional_current_user
 from models.books import Author, Book, BookAuthor, BookCourse, BookModule, Module
 from models.courses import Course
 from models.papers import Papers
@@ -18,7 +18,7 @@ async def _profile(db, user_id):
     return {"id": user_id, "name": row.display_name if row else user_id}
 
 @router.get("")
-async def list_resources(type: Literal["all", "paper", "book"] = "all", q: Optional[str] = None, course_id: Optional[int] = None, module_id: Optional[int] = None, year: Optional[int] = None, skip: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100), _user: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_resources(type: Literal["all", "paper", "book"] = "all", q: Optional[str] = None, course_id: Optional[int] = None, module_id: Optional[int] = None, year: Optional[int] = None, skip: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100), _user: UserResponse | None = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
     items = []
     if type in {"all", "paper"}:
         query = select(Papers).where(Papers.is_hidden.is_not(True))

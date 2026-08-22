@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import SeoMeta from '@/components/SeoMeta';
 import { authApi } from '../lib/auth';
+import { showMessage } from '@/lib/messages';
+import InlineFieldMessage from '../components/InlineFieldMessage';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -18,6 +20,11 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const passwordError = password && password.length < 6 ? 'Password must contain at least 6 characters.' : undefined;
+  const confirmationError = confirmPassword && password !== confirmPassword ? 'Passwords do not match.' : undefined;
+
+  useEffect(() => { if (error) showMessage({ type: 'error', title: 'Password reset failed', message: error }); }, [error]);
+  useEffect(() => { if (message) showMessage({ type: 'success', title: 'Password updated', message }); }, [message]);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,7 +32,7 @@ export default function ResetPasswordPage() {
       try {
         const current = await authApi.getCurrentUser();
         if (!cancelled && current) {
-          navigate('/past-papers?sort=-download_count', { replace: true });
+          navigate('/resources?sort=-download_count', { replace: true });
         }
       } catch (_) {
         // ignore
@@ -111,6 +118,7 @@ export default function ResetPasswordPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <InlineFieldMessage message={passwordError} />
               </div>
 
               <div>
@@ -135,6 +143,7 @@ export default function ResetPasswordPage() {
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <InlineFieldMessage message={confirmationError} />
               </div>
 
               {error && <p className="theme-error-note rounded-xl px-4 py-3 text-sm">{error}</p>}

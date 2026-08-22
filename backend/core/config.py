@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -11,8 +12,23 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
+
+def _should_load_local_env() -> bool:
+    """Avoid loading repo-local secrets in test/CI environments.
+
+    Local developer overrides are still useful in normal runs, but automated tests
+    should default to safe, self-contained settings rather than a remote database.
+    """
+    argv = " ".join(sys.argv).lower()
+    if "pytest" in argv or os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    environment = (os.getenv("ENVIRONMENT") or "").strip().lower()
+    return environment not in {"test", "testing", "ci"}
+
+
 load_dotenv(BASE_DIR / ".env", override=False)
-load_dotenv(BASE_DIR / ".env.local", override=True)
+if _should_load_local_env():
+    load_dotenv(BASE_DIR / ".env.local", override=True)
 
 
 class Settings(BaseSettings):
@@ -21,6 +37,13 @@ class Settings(BaseSettings):
     debug: bool = False
     version: str = "1.0.0"
     oidc_scope: str = "openid email profile"
+    database_url: str = "sqlite+aiosqlite:///./ur_past_paper.db"
+    jwt_secret_key: str = "dev-secret-key-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60
+    oidc_issuer_url: str = "https://accounts.google.com"
+    oidc_client_id: Optional[str] = None
+    oidc_client_secret: Optional[str] = None
 
     # Server
     host: str = "0.0.0.0"

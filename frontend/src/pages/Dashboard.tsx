@@ -15,6 +15,7 @@ import {
 import { authApi } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
 import OfflineDataBanner from '../components/OfflineDataBanner';
+import BookManagementPanel from '../components/BookManagementPanel';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -42,7 +43,7 @@ import {
   CheckCheck,
 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, XAxis } from 'recharts';
-import { toast } from 'sonner';
+import { toast } from '@/lib/messages';
 
 function VerificationBadge({ status }: { status: string }) {
   if (status === 'verified') {
@@ -185,6 +186,8 @@ export default function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {user.role === 'cp' && <div className="mb-8"><BookManagementPanel mode="cp" userId={user.id} /></div>}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

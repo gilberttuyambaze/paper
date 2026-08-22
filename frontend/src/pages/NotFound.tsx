@@ -20,7 +20,7 @@ export default function NotFoundPage() {
         <h1 className="theme-title mb-4 text-3xl font-bold">Page not found</h1>
         <p className="theme-muted mb-8 max-w-lg">
           The page you were trying to open does not exist or may have been moved. You can head back home
-          or continue browsing papers.
+          or continue browsing academic resources.
         </p>
         <div className="flex flex-wrap justify-center gap-3">
           <Button asChild className="theme-accent-bg">
@@ -30,9 +30,9 @@ export default function NotFoundPage() {
             </Link>
           </Button>
           <Button asChild variant="outline">
-            <Link to="/past-papers">
+            <Link to="/resources">
               <Search className="mr-2 h-4 w-4" />
-              Browse Papers
+              Browse Resources
             </Link>
           </Button>
         </div>

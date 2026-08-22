@@ -4,17 +4,18 @@ from datetime import timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from dependencies.auth import get_current_user
+from dependencies.auth import get_current_user, get_optional_current_user
 from models.books import Author, Book, BookActivity, BookAuthor, BookCourse, BookModule, Module
 from models.user_profiles import User_profiles
 from models.courses import Course
 from schemas.auth import UserResponse
-from services.authorization import CP_WINDOW, _utc, can_create_book, can_manage_book, database_now, require_book_management
+from services.authorization import CP_WINDOW, _utc, can_create_book, can_manage_book, can_read_book, database_now, require_book_management
+from core.input_normalization import normalize_isbn, normalize_text, normalize_unique
 
 router = APIRouter(prefix="/api/v1/books", tags=["books"])
 MANAGEMENT_ROLES = {"admin", "cp"}
@@ -27,6 +28,17 @@ class FileReference(BaseModel):
     original_filename: Optional[str] = Field(default=None, max_length=500)
     mime_type: Optional[str] = Field(default=None, max_length=150)
     size: Optional[int] = Field(default=None, ge=0)
+
+    @field_validator("key", mode="before")
+    @classmethod
+    def normalize_key(cls, value):
+        from core.input_normalization import normalize_storage_key
+        return normalize_storage_key(str(value))
+
+    @field_validator("original_filename", mode="before")
+    @classmethod
+    def normalize_original_filename(cls, value):
+        return normalize_text(value)
 
 
 class BookCreate(BaseModel):
@@ -48,6 +60,26 @@ class BookCreate(BaseModel):
     cover: FileReference
     file: FileReference
 
+    @field_validator("title", "description", "edition", "publisher", "category", "subject", mode="before")
+    @classmethod
+    def normalize_metadata(cls, value):
+        return normalize_text(value)
+
+    @field_validator("isbn", mode="before")
+    @classmethod
+    def normalize_book_isbn(cls, value):
+        return normalize_isbn(value)
+
+    @field_validator("authors", mode="before")
+    @classmethod
+    def normalize_authors(cls, value):
+        return normalize_unique(value or [])
+
+    @field_validator("course_ids", "module_ids", mode="before")
+    @classmethod
+    def normalize_ids(cls, value):
+        return list(dict.fromkeys(item for item in (value or []) if item is not None and str(item).strip()))
+
 
 class BookUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -61,6 +93,16 @@ class BookUpdate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=120)
     subject: Optional[str] = Field(default=None, max_length=120)
     visibility: Optional[Literal["public", "private"]] = None
+
+    @field_validator("title", "description", "edition", "publisher", "category", "subject", mode="before")
+    @classmethod
+    def normalize_metadata(cls, value):
+        return normalize_text(value)
+
+    @field_validator("isbn", mode="before")
+    @classmethod
+    def normalize_book_isbn(cls, value):
+        return normalize_isbn(value)
 
 
 class StatusUpdate(BaseModel):
@@ -137,11 +179,12 @@ async def _replace_modules(db: AsyncSession, book_id: int, module_ids: list[int]
 async def _serialize(book: Book, db: AsyncSession, actor: UserResponse | None = None) -> dict:
     authors = (await db.execute(select(Author.name).join(BookAuthor, BookAuthor.author_id == Author.id).where(BookAuthor.book_id == book.id))).scalars().all()
     courses = (await db.execute(select(BookCourse.course_id).where(BookCourse.book_id == book.id))).scalars().all()
+    course_rows = (await db.execute(select(Course).join(BookCourse, BookCourse.course_id == Course.id).where(BookCourse.book_id == book.id))).scalars().all()
     modules = (await db.execute(select(Module).join(BookModule, BookModule.module_id == Module.id).where(BookModule.book_id == book.id))).scalars().all()
     profile = (await db.execute(select(User_profiles).where(User_profiles.user_id == book.uploaded_by))).scalar_one_or_none()
     deadline = _utc(book.created_at) + CP_WINDOW if book.created_at else None
     payload = {column.name: getattr(book, column.name) for column in Book.__table__.columns}
-    payload.update({"authors": authors, "course_ids": courses, "modules": [{"id": module.id, "name": module.name, "code": module.code, "course_id": module.course_id} for module in modules], "uploader_name": profile.display_name if profile else None, "uploader_role": profile.role if profile else None, "management_deadline": deadline, "can_manage": bool(actor and can_manage_book(actor, book, await database_now(db)))})
+    payload.update({"authors": authors, "course_ids": courses, "courses": [{"id": course.id, "code": course.code, "name": course.name} for course in course_rows], "modules": [{"id": module.id, "name": module.name, "code": module.code, "course_id": module.course_id} for module in modules], "uploader_name": profile.display_name if profile else None, "uploader_role": profile.role if profile else None, "management_deadline": deadline, "can_manage": bool(actor and can_manage_book(actor, book, await database_now(db)))})
     return payload
 
 
@@ -169,14 +212,17 @@ async def create_book(payload: BookCreate, actor: UserResponse = Depends(get_cur
 
 
 @router.get("")
-async def list_books(include_deleted: bool = False, status_filter: Optional[str] = Query(None, alias="status"), uploaded_by: Optional[str] = None, uploader_role: Optional[str] = None, course_id: Optional[str] = None, author: Optional[str] = None, management_state: Optional[Literal["within_48h", "expired"]] = None, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_books(include_deleted: bool = False, status_filter: Optional[str] = Query(None, alias="status"), uploaded_by: Optional[str] = None, uploader_role: Optional[str] = None, course_id: Optional[str] = None, author: Optional[str] = None, management_state: Optional[Literal["within_48h", "expired"]] = None, actor: Optional[UserResponse] = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
     query = select(Book)
     if include_deleted:
-        if actor.role != "admin": raise HTTPException(403, "Only administrators can view deleted books")
+        if not actor or actor.role != "admin": raise HTTPException(403, "Only administrators can view deleted books")
     else: query = query.where(Book.deleted_at.is_(None))
     # Readers only receive published books. Management users can inspect the
     # catalogue (including drafts) as part of their review responsibilities.
-    if actor.role not in MANAGEMENT_ROLES:
+    # CP management views may inspect their own Books (including drafts and
+    # private records); they never gain access to another uploader's catalogue.
+    own_cp_management_view = bool(actor and actor.role == "cp" and uploaded_by == str(actor.id))
+    if not actor or (actor.role != "admin" and not own_cp_management_view):
         query = query.where(Book.status == "active", Book.visibility == "public")
     if status_filter: query = query.where(Book.status == status_filter)
     if uploaded_by: query = query.where(Book.uploaded_by == uploaded_by)
@@ -206,9 +252,9 @@ async def book_stats(actor: UserResponse = Depends(get_current_user), db: AsyncS
 
 
 @router.post("/{book_id}/record-download")
-async def record_book_download(book_id: int, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def record_book_download(book_id: int, actor: Optional[UserResponse] = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
     book = await _get_book(book_id, db)
-    if actor.role not in MANAGEMENT_ROLES and (book.status != "active" or book.visibility != "public"):
+    if not can_read_book(actor, book):
         raise HTTPException(status_code=404, detail="Book not found")
     book.download_count = (book.download_count or 0) + 1
     await db.commit()
@@ -216,9 +262,9 @@ async def record_book_download(book_id: int, actor: UserResponse = Depends(get_c
 
 
 @router.get("/{book_id}")
-async def get_book(book_id: int, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    book = await _get_book(book_id, db)
-    if actor.role not in MANAGEMENT_ROLES and (book.status != "active" or book.visibility != "public"):
+async def get_book(book_id: int, actor: Optional[UserResponse] = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
+    book = await _get_book(book_id, db, include_deleted=bool(actor and actor.role == "admin"))
+    if not can_read_book(actor, book):
         raise HTTPException(404, "Book not found")
     return await _serialize(book, db, actor)
 

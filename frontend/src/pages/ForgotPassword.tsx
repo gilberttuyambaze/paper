@@ -5,6 +5,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import SeoMeta from '@/components/SeoMeta';
 import { authApi } from '../lib/auth';
+import { showMessage } from '@/lib/messages';
+import InlineFieldMessage from '../components/InlineFieldMessage';
+import { normalizeEmail } from '../lib/normalization';
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
@@ -13,6 +16,10 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [debugResetUrl, setDebugResetUrl] = useState<string | null>(null);
+  const emailError = email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()) ? 'Enter a valid email address.' : undefined;
+
+  useEffect(() => { if (error) showMessage({ type: 'error', title: 'Password reset unavailable', message: error }); }, [error]);
+  useEffect(() => { if (message) showMessage({ type: 'success', title: 'Check your email', message }); }, [message]);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,7 +27,7 @@ export default function ForgotPasswordPage() {
       try {
         const current = await authApi.getCurrentUser();
         if (!cancelled && current) {
-          navigate('/past-papers?sort=-download_count', { replace: true });
+          navigate('/resources?sort=-download_count', { replace: true });
         }
       } catch (_) {
         // ignore
@@ -74,10 +81,12 @@ export default function ForgotPasswordPage() {
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
+                  onBlur={() => setEmail(normalizeEmail(email))}
                   placeholder="you@example.com"
                   required
                   className="theme-form-input mt-2 h-12 rounded-xl"
                 />
+                <InlineFieldMessage message={emailError} />
               </div>
 
               {error && <p className="theme-error-note rounded-xl px-4 py-3 text-sm">{error}</p>}

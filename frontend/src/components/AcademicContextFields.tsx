@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import InlineFieldMessage from './InlineFieldMessage';
 
 export type AcademicContextValue = { institution_id: string; campus_id: string; college_id: string; school_id: string; programme_id: string };
 const empty = { institution_id: 'ur', campus_id: '', college_id: '', school_id: '', programme_id: '' };
@@ -13,6 +14,7 @@ export default function AcademicContextFields({ value, onChange, otherName = '',
   const [error, setError] = useState('');
   const [matches, setMatches] = useState<ProgrammeRecommendation[]>([]);
   const [matching, setMatching] = useState(false);
+  const [touched, setTouched] = useState<Partial<Record<keyof AcademicContextValue, boolean>>>({});
 
   useEffect(() => {
     fetchAcademicTaxonomy().then(setTaxonomy).catch(() => setError('Academic information could not load. Please try again.'));
@@ -21,6 +23,7 @@ export default function AcademicContextFields({ value, onChange, otherName = '',
   const children = (parent: string) => taxonomy?.nodes.filter(n => n.parent_id === parent).sort((a, b) => a.order - b.order) || [];
 
   const set = (key: keyof AcademicContextValue, id: string) => {
+    setTouched((current) => ({ ...current, [key]: true }));
     const next = { ...value, [key]: id };
     if (key === 'campus_id') Object.assign(next, { college_id: '', school_id: '', programme_id: '' });
     if (key === 'college_id') Object.assign(next, { school_id: '', programme_id: '' });
@@ -56,7 +59,7 @@ export default function AcademicContextFields({ value, onChange, otherName = '',
     <div>
       <Label className="theme-form-label">{label}</Label>
       <Select value={value[key]} onValueChange={id => set(key, id)} disabled={disabled}>
-        <SelectTrigger className="theme-form-input mt-2 h-12 rounded-xl">
+        <SelectTrigger className="theme-form-input mt-2 h-12 rounded-xl" aria-invalid={Boolean(touched[key] && !value[key])}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
@@ -64,6 +67,7 @@ export default function AcademicContextFields({ value, onChange, otherName = '',
           {key === 'programme_id' && value.school_id && <SelectItem value="other">Programme not listed</SelectItem>}
         </SelectContent>
       </Select>
+      <InlineFieldMessage message={touched[key] && !disabled && !value[key] ? `${label} is required.` : undefined} />
     </div>
   );
 
@@ -94,7 +98,8 @@ export default function AcademicContextFields({ value, onChange, otherName = '',
         <div className="theme-soft-panel rounded-xl p-4">
           <Label className="theme-form-label">Enter your programme</Label>
           <div className="mt-2 flex gap-2">
-            <Input value={otherName} maxLength={180} onChange={(event) => onOtherNameChange?.(event.target.value)} className="theme-form-input" placeholder="Your programme name" />
+            <Input value={otherName} maxLength={180} onChange={(event) => onOtherNameChange?.(event.target.value)} onBlur={() => setTouched((current) => ({ ...current, programme_id: true }))} className="theme-form-input" placeholder="Your programme name" aria-invalid={Boolean(touched.programme_id && !otherName.trim())} />
+            <InlineFieldMessage message={touched.programme_id && !otherName.trim() ? 'Programme name is required.' : undefined} />
             <Button type="button" variant="outline" onClick={() => void recommend()} disabled={matching}>{matching ? 'Finding…' : 'Find matches'}</Button>
           </div>
 

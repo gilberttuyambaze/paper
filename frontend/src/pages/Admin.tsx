@@ -7,19 +7,24 @@ import {
   verifyProgrammeCandidate,
   rejectProgrammeCandidateGroup,
   deleteAdminUser,
+  deleteMyPaper,
   fetchAdminOverview,
   fetchAdminUsers,
-  fetchAllPapers,
+  fetchAdminUserResources,
+  fetchAdminPapers,
   moderatePaper,
   reviewAdminRoleRequest,
   updateAdminReport,
   updateAdminUser,
+  updatePaper,
   type AdminOverview,
   type Paper,
   type UserProfile,
   type ProgrammeCandidateItem,
 } from '../lib/client';
 import AvatarFallback from '../components/AvatarFallback';
+import BookManagementPanel from '../components/BookManagementPanel';
+import AdminDetailDialog from '../components/AdminDetailDialog';
 import { resolvePublicUserProfiles } from '../lib/client';
 import { authApi } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
@@ -57,7 +62,10 @@ import {
   UserCog,
   Users,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showMessage, toast } from '@/lib/messages';
+import { normalizeApiError } from '@/lib/api-errors';
+import InlineFieldMessage from '@/components/InlineFieldMessage';
+import { normalizeEmail, normalizeText } from '@/lib/normalization';
 
 const ROLE_OPTIONS = [
   { value: 'normal', label: 'Community Student' },
@@ -190,6 +198,9 @@ export default function AdminPage() {
   const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   const [papers, setPapers] = useState<Paper[]>([]);
+  const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
+  const [paperEditing, setPaperEditing] = useState(false);
+  const [paperDraft, setPaperDraft] = useState<{ title: string; description: string }>({ title: '', description: '' });
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [roleRequests, setRoleRequests] = useState<UserProfile[]>([]);
@@ -200,11 +211,25 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [paperSearch, setPaperSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('all');
+  const [userStatusFilter, setUserStatusFilter] = useState('all');
+  const [userTotal, setUserTotal] = useState(0);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [draft, setDraft] = useState<UserDraft | null>(null);
+  const [draftTouched, setDraftTouched] = useState<Record<string, boolean>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteUserConfirmation, setDeleteUserConfirmation] = useState(false);
+  const [userResources, setUserResources] = useState<{ papers: any[]; books: any[]; activity: any[] } | null>(null);
+  const [userResourcesLoading, setUserResourcesLoading] = useState(false);
+  const [userPage, setUserPage] = useState(1);
+  const USERS_PER_PAGE = 24;
+  const [paperPage, setPaperPage] = useState(1);
+  const PAPERS_PER_PAGE = 50;
+  const [paperTotal, setPaperTotal] = useState(0);
+  const debouncedUserSearch = useDebounced(userSearch, 250);
+  const debouncedPaperSearch = useDebounced(paperSearch, 250);
 
   const isContentManagerView = location.pathname === '/content-manager' || user?.role === 'content_manager';
   const canAssignAdmin = user?.role === 'admin';
@@ -214,14 +239,16 @@ export default function AdminPage() {
     try {
       setLoading(true);
       const [paperData, overviewData, userData, roleRequestData] = await Promise.all([
-        fetchAllPapers({ sort: '-created_at', limit: 200 }),
+        fetchAdminPapers({ sort: 'newest', limit: PAPERS_PER_PAGE, page: paperPage, search: debouncedPaperSearch || undefined }),
         fetchAdminOverview(),
-        fetchAdminUsers(),
+        fetchAdminUsers({ page: userPage, limit: USERS_PER_PAGE, search: debouncedUserSearch || undefined, role: userRoleFilter === 'all' ? undefined : userRoleFilter, status: userStatusFilter === 'all' ? undefined : userStatusFilter }),
         fetchAdminRoleRequests(),
       ]);
       setPapers(paperData.items);
+      setPaperTotal(paperData.total);
       setOverview(overviewData);
-      setUsers(userData);
+      setUsers(userData.items);
+      setUserTotal(userData.total);
       setRoleRequests(roleRequestData);
     } catch (error) {
       console.error('Failed to load management data:', error);
@@ -235,22 +262,28 @@ export default function AdminPage() {
     if (user) {
       void loadData();
     }
-  }, [user]);
-
-  const debouncedUserSearch = useDebounced(userSearch, 250);
-  const debouncedPaperSearch = useDebounced(paperSearch, 250);
+  }, [user, userPage, userRoleFilter, userStatusFilter, debouncedUserSearch, paperPage, debouncedPaperSearch]);
 
   const filteredUsers = useMemo(() => {
-    if (!debouncedUserSearch) return users;
+    const matchesFilters = (profile: UserProfile) =>
+      (userRoleFilter === 'all' || profile.role === userRoleFilter)
+      && (userStatusFilter === 'all' || (profile.account_status || 'active') === userStatusFilter);
+    if (!debouncedUserSearch) return users.filter(matchesFilters);
     const q = debouncedUserSearch.toLowerCase();
-    return users.filter((profile) =>
+    return users.filter((profile) => matchesFilters(profile) && (
       profile.display_name.toLowerCase().includes(q) ||
       (profile.email || '').toLowerCase().includes(q) ||
       profile.role.toLowerCase().includes(q) ||
       (profile.university_name || '').toLowerCase().includes(q) ||
-      (profile.ur_student_code || '').toLowerCase().includes(q)
-    );
-  }, [users, debouncedUserSearch]);
+      (profile.ur_student_code || '').toLowerCase().includes(q) ||
+      (profile.user_id || '').toLowerCase().includes(q)
+    ));
+  }, [users, debouncedUserSearch, userRoleFilter, userStatusFilter]);
+
+  const openUser = (profile: UserProfile) => {
+    setSelectedUser(profile); setDraft(createDraft(profile)); setDialogOpen(true); setUserResources(null); setUserResourcesLoading(true);
+    void fetchAdminUserResources(profile.id).then(setUserResources).catch(() => toast.error('Unable to load this user’s related resources')).finally(() => setUserResourcesLoading(false));
+  };
 
   const filteredRoleRequests = useMemo(() => {
     if (!debouncedUserSearch) return roleRequests;
@@ -265,28 +298,18 @@ export default function AdminPage() {
   }, [roleRequests, debouncedUserSearch]);
 
   const filteredPapers = useMemo(() => {
-    if (!debouncedPaperSearch) return papers;
-    const q = debouncedPaperSearch.toLowerCase();
-    return papers.filter((paper) =>
-      paper.title.toLowerCase().includes(q) ||
-      paper.course_code.toLowerCase().includes(q) ||
-      paper.course_name.toLowerCase().includes(q) ||
-      (paper.lecturer || '').toLowerCase().includes(q)
-    );
-  }, [papers, debouncedPaperSearch]);
+    return papers;
+  }, [papers]);
 
   const pendingPapers = useMemo(() => filteredPapers.filter((paper) => paper.verification_status === 'unverified'), [filteredPapers]);
   const reportedPapers = useMemo(() => filteredPapers.filter((paper) => (paper.report_count || 0) > 0), [filteredPapers]);
   const hiddenPapers = useMemo(() => filteredPapers.filter((paper) => paper.is_hidden), [filteredPapers]);
   const totalDownloads = useMemo(() => papers.reduce((sum, paper) => sum + (paper.download_count || 0), 0), [papers]);
   // Pagination state to avoid rendering huge lists at once
-  const [userPage, setUserPage] = useState(1);
-  const USERS_PER_PAGE = 50;
-  const userPageCount = Math.max(1, Math.ceil(filteredUsers.length / USERS_PER_PAGE));
+  const userPageCount = Math.max(1, Math.ceil(userTotal / USERS_PER_PAGE));
   const paginatedUsers = useMemo(() => {
-    const start = (userPage - 1) * USERS_PER_PAGE;
-    return filteredUsers.slice(start, start + USERS_PER_PAGE);
-  }, [filteredUsers, userPage]);
+    return filteredUsers;
+  }, [filteredUsers]);
 
   useEffect(() => {
     if (userPage > userPageCount) setUserPage(1);
@@ -304,13 +327,8 @@ export default function AdminPage() {
     if (roleRequestPage > roleRequestPageCount) setRoleRequestPage(1);
   }, [roleRequestPageCount]);
 
-  const [paperPage, setPaperPage] = useState(1);
-  const PAPERS_PER_PAGE = 50;
-  const paperPageCount = Math.max(1, Math.ceil(filteredPapers.length / PAPERS_PER_PAGE));
-  const paginatedPapers = useMemo(() => {
-    const start = (paperPage - 1) * PAPERS_PER_PAGE;
-    return filteredPapers.slice(start, start + PAPERS_PER_PAGE);
-  }, [filteredPapers, paperPage]);
+  const paperPageCount = Math.max(1, Math.ceil(paperTotal / PAPERS_PER_PAGE));
+  const paginatedPapers = filteredPapers;
 
   useEffect(() => {
     if (paperPage > paperPageCount) setPaperPage(1);
@@ -319,14 +337,19 @@ export default function AdminPage() {
   const selectedUserIsAdmin = selectedUser?.role === 'admin';
   const adminProtected = selectedUserIsAdmin && !canAssignAdmin;
 
+  const updateDraft = <K extends keyof UserDraft>(field: K, value: UserDraft[K]) => {
+    setDraft((current) => current ? { ...current, [field]: value } : current);
+    setDraftTouched((current) => ({ ...current, [field]: true }));
+  };
+
   const handleSaveUser = async () => {
     if (!selectedUser || !draft) return;
 
     try {
       setSaving(true);
       const updated = await updateAdminUser(selectedUser.id, {
-        email: draft.email,
-        display_name: draft.display_name,
+        email: normalizeEmail(draft.email),
+        display_name: normalizeText(draft.display_name) || '',
         role: draft.role,
         trust_score: Number(draft.trust_score || '0'),
         account_status: draft.account_status,
@@ -352,8 +375,8 @@ export default function AdminPage() {
       setSelectedUser(updated);
       setDraft(createDraft(updated));
       toast.success('User updated successfully');
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Failed to update user');
+    } catch (error) {
+      toast.error(normalizeApiError(error).message || 'Failed to update user');
     } finally {
       setSaving(false);
     }
@@ -369,7 +392,7 @@ export default function AdminPage() {
     let cancelled = false;
     (async () => {
       try {
-        const resolved = await resolvePublicUserProfiles(visiblePaperIds);
+        const resolved: Record<string, { profile?: any; imageUrl?: string | null }> = await resolvePublicUserProfiles(visiblePaperIds);
         if (cancelled) return;
         const next: Record<string, { profile?: any; imageUrl?: string | null }> = {};
         for (const id of visiblePaperIds) {
@@ -388,20 +411,17 @@ export default function AdminPage() {
 
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
-    if (!window.confirm(`Delete ${selectedUser.display_name}'s account and related content?`)) {
-      return;
-    }
-
     try {
       setDeleting(true);
       await deleteAdminUser(selectedUser.id);
       setUsers((current) => current.filter((profile) => profile.id !== selectedUser.id));
       setDialogOpen(false);
+      setDeleteUserConfirmation(false);
       setSelectedUser(null);
       setDraft(null);
       toast.success('User deleted');
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Failed to delete user');
+    } catch (error) {
+      toast.error(normalizeApiError(error).message || 'Failed to delete user');
     } finally {
       setDeleting(false);
     }
@@ -411,6 +431,7 @@ export default function AdminPage() {
     try {
       const updated = await moderatePaper(paperId, { verification_status: 'verified' });
       setPapers((current) => current.map((paper) => (paper.id === updated.id ? updated : paper)));
+      setSelectedPaper((current) => current?.id === updated.id ? updated : current);
       toast.success('Paper verified');
     } catch {
       toast.error('Failed to verify paper');
@@ -421,11 +442,23 @@ export default function AdminPage() {
     try {
       const updated = await moderatePaper(paperId, { is_hidden: !isHidden });
       setPapers((current) => current.map((paper) => (paper.id === updated.id ? updated : paper)));
+      setSelectedPaper((current) => current?.id === updated.id ? updated : current);
       toast.success(isHidden ? 'Paper is visible again' : 'Paper hidden successfully');
     } catch {
       toast.error('Failed to update paper');
     }
   };
+
+  const openPaper = (paper: Paper) => { setSelectedPaper(paper); setPaperDraft({ title: paper.title, description: paper.description || '' }); setPaperEditing(false); };
+  const savePaperMetadata = async () => {
+    if (!selectedPaper) return;
+    try {
+      const updated = await updatePaper(selectedPaper.id, paperDraft);
+      setPapers((items) => items.map((paper) => paper.id === updated.id ? updated : paper));
+      setSelectedPaper(updated); setPaperEditing(false); toast.success('Paper metadata updated');
+    } catch (error) { toast.error(normalizeApiError(error).message || 'Unable to update paper metadata'); }
+  };
+  const confirmDeletePaper = (paper: Paper) => showMessage({ type: 'confirmation', title: 'Delete Paper?', message: 'This removes the Paper according to the existing backend deletion policy.', actions: [{ label: 'Cancel', variant: 'outline', onClick: () => undefined }, { label: 'Delete', variant: 'destructive', onClick: async () => { try { await deleteMyPaper(paper.id); setPapers((items) => items.filter((item) => item.id !== paper.id)); setSelectedPaper(null); toast.success('Paper deleted'); } catch (error) { toast.error(normalizeApiError(error).message || 'Unable to delete paper'); } } }] });
 
   const handleRoleRequestReview = async (profileId: number, action: 'approve' | 'reject') => {
     try {
@@ -448,8 +481,8 @@ export default function AdminPage() {
         setDraft(createDraft(updated));
       }
       toast.success(action === 'approve' ? 'Role request approved' : 'Role request rejected');
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Failed to review role request');
+    } catch (error) {
+      toast.error(normalizeApiError(error).message || 'Failed to review role request');
     }
   };
 
@@ -544,6 +577,7 @@ export default function AdminPage() {
               <TabsTrigger value="role-requests" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Role Requests ({overview?.stats.pending_role_requests || filteredRoleRequests.length})</TabsTrigger>
               <TabsTrigger value="reports" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Reports ({overview?.recent_reports?.length || 0})</TabsTrigger>
               <TabsTrigger value="papers" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Papers ({filteredPapers.length})</TabsTrigger>
+              <TabsTrigger value="books" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Books</TabsTrigger>
               <TabsTrigger value="programme-candidates" className="w-full px-3 py-2 text-sm rounded-md flex items-center justify-center gap-2">Programme Discovery</TabsTrigger>
             </div>
           </TabsList>
@@ -566,6 +600,10 @@ export default function AdminPage() {
                   className="pl-10"
                 />
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Select value={userRoleFilter} onValueChange={setUserRoleFilter}><SelectTrigger><SelectValue placeholder="All roles" /></SelectTrigger><SelectContent><SelectItem value="all">All roles</SelectItem>{ROLE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>
+                <Select value={userStatusFilter} onValueChange={setUserStatusFilter}><SelectTrigger><SelectValue placeholder="All statuses" /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem>{STATUS_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select>
+              </div>
 
               {loading ? (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -578,14 +616,11 @@ export default function AdminPage() {
                   No users match the current search.
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
                   {paginatedUsers.map((profile) => (
-                    <div key={profile.id} className="p-2 rounded border">
-                      <div className="font-medium">{profile.display_name}</div>
-                      <div className="text-xs text-muted-foreground">{profile.email || ''}</div>
-                    </div>
+                    <Card key={profile.id} className="theme-soft-panel"><CardContent className="p-4"><div className="flex items-center gap-3"><div className="h-11 w-11 overflow-hidden rounded-full"><AvatarFallback name={profile.display_name} /></div><div className="min-w-0"><p className="theme-title truncate font-semibold">{profile.display_name}</p><p className="theme-muted truncate text-xs">{profile.email || profile.user_id}</p></div></div><div className="mt-4 flex flex-wrap gap-2"><RoleBadge role={profile.role} /><StatusBadge status={profile.account_status} /></div><p className="theme-muted mt-3 text-xs">{profile.college_name || profile.department_name || 'Academic profile not set'} · Joined {formatDate(profile.created_at)}</p><Button className="mt-4 w-full" variant="outline" onClick={() => openUser(profile)}>View Full Profile</Button></CardContent></Card>
                   ))}
-                  <div className="mt-2 flex items-center justify-center gap-2">
+                  <div className="col-span-full mt-2 flex items-center justify-center gap-2">
                     <Button disabled={userPage <= 1} onClick={() => setUserPage((p) => Math.max(1, p - 1))}>{'<'}</Button>
                     <div className="text-sm">Page {userPage} / {userPageCount}</div>
                     <Button disabled={userPage >= userPageCount} onClick={() => setUserPage((p) => Math.min(userPageCount, p + 1))}>{'>'}</Button>
@@ -645,14 +680,26 @@ export default function AdminPage() {
                           <div className="flex gap-2">
                             {item.best_match ? <Badge>{item.best_match.name} · {item.best_match.confidence}%</Badge> : null}
                             <Button variant="outline" onClick={async () => {
-                              if (!confirm(`Verify alias for \"${item.normalized_programme_name}\" to the best match ${item.best_match?.name || ''}?`)) return;
-                              try {
-                                setLoading(true);
-                                const target = item.best_match?.id;
-                                if (!target) { alert('No recommended programme available'); return; }
-                                await verifyProgrammeCandidate({ normalized_programme_name: item.normalized_programme_name, campus_id: item.campus_id, college_id: item.college_id, school_id: item.school_id, programme_id: target });
-                                alert('Alias verified');
-                              } catch (e) { console.error(e); alert('Failed to verify alias'); } finally { setLoading(false); }
+                              showMessage({
+                                type: 'confirmation',
+                                title: 'Verify alias?',
+                                message: `Verify "${item.normalized_programme_name}" to the best match ${item.best_match?.name || 'selected programme'}?`,
+                                actions: [{ label: 'Cancel', variant: 'outline', onClick: () => undefined }, { label: 'Verify', onClick: async () => {
+                                  try {
+                                    setLoading(true);
+                                    const target = item.best_match?.id;
+                                    if (!target) {
+                                      showMessage({ type: 'warning', title: 'No recommendation available', message: 'There is no recommended programme available to verify this alias.' });
+                                      return;
+                                    }
+                                    await verifyProgrammeCandidate({ normalized_programme_name: item.normalized_programme_name, campus_id: item.campus_id, college_id: item.college_id, school_id: item.school_id, programme_id: target });
+                                    showMessage({ type: 'success', title: 'Alias verified', message: 'The programme alias was updated successfully.' });
+                                  } catch (e) {
+                                    console.error(e);
+                                    showMessage({ type: 'error', title: 'Verification failed', message: 'The programme alias could not be verified.' });
+                                  } finally { setLoading(false); }
+                                } }],
+                              });
                             }}>Verify Alias</Button>
                             <Button variant="outline" onClick={async () => {
                               try {
@@ -661,11 +708,20 @@ export default function AdminPage() {
                                 setSelectedCandidateSubmissions(res.items || []);
                                 setSelectedCandidateName(item.normalized_programme_name);
                                 setDetailsOpen(true);
-                              } catch (e) { console.error(e); alert('Failed to load submissions'); } finally { setLoading(false); }
+                              } catch (e) {
+                                console.error(e);
+                                showMessage({ type: 'error', title: 'Unable to load submissions', message: 'The programme submission history could not be loaded.' });
+                              } finally { setLoading(false); }
                             }}>View Details</Button>
                             <Button variant="destructive" onClick={async () => {
-                              if (!confirm(`Reject all submissions for \"${item.normalized_programme_name}\" in this context?`)) return;
-                              try { setLoading(true); await rejectProgrammeCandidateGroup({ normalized_programme_name: item.normalized_programme_name, campus_id: item.campus_id, college_id: item.college_id, school_id: item.school_id }); alert('Rejected'); } catch (e) { console.error(e); alert('Failed'); } finally { setLoading(false); }
+                              showMessage({
+                                type: 'confirmation',
+                                title: 'Reject submissions?',
+                                message: `Reject all submissions for "${item.normalized_programme_name}" in this context?`,
+                                actions: [{ label: 'Cancel', variant: 'outline', onClick: () => undefined }, { label: 'Reject', variant: 'destructive', onClick: async () => {
+                                  try { setLoading(true); await rejectProgrammeCandidateGroup({ normalized_programme_name: item.normalized_programme_name, campus_id: item.campus_id, college_id: item.college_id, school_id: item.school_id }); showMessage({ type: 'success', title: 'Rejected', message: 'The grouped submissions were rejected.' }); } catch (e) { console.error(e); showMessage({ type: 'error', title: 'Rejection failed', message: 'The submissions could not be rejected.' }); } finally { setLoading(false); }
+                                } }],
+                              });
                             }}>Reject</Button>
                           </div>
                         </div>
@@ -727,7 +783,7 @@ export default function AdminPage() {
                                 : profile.university_name || 'University not specified'}
                             </p>
                           </div>
-                          <Button variant="outline" size="sm" onClick={() => openUserDialog(profile)}>
+                          <Button variant="outline" size="sm" onClick={() => openUser(profile)}>
                             View details
                           </Button>
                         </div>
@@ -856,75 +912,16 @@ export default function AdminPage() {
             </Card>
           </div>
 
-            <div className="space-y-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-4">
             {paginatedPapers.map((paper) => (
-              <Card key={paper.id} className="theme-panel">
-                <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center">
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <h4 className="theme-title truncate font-medium">{paper.title}</h4>
-                      <PaperVerificationBadge status={paper.verification_status} />
-                      {paper.is_hidden && <Badge className="theme-error-note border-0">hidden</Badge>}
-                    </div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="h-8 w-8 overflow-hidden rounded-full">
-                        <AvatarFallback
-                          name={uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
-                          imageUrl={uploaderProfiles[paper.user_id]?.imageUrl ?? undefined}
-                          imageAlt={`${uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Uploader'} avatar`}
-                        />
-                      </div>
-                      <div className="text-xs theme-muted">
-                        <div className="font-medium text-sm">{uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}</div>
-                        <div>{paper.course_code} · {paper.year}</div>
-                      </div>
-                    </div>
-                    <div className="theme-muted flex flex-wrap items-center gap-3 text-xs">
-                      <span>{paper.course_code}</span>
-                      <span>{paper.paper_type}</span>
-                      <span>{paper.year}</span>
-                      <span className="flex items-center gap-1">
-                        <Download className="h-3 w-3" />
-                        {paper.download_count || 0}
-                      </span>
-                      {(paper.report_count || 0) > 0 && (
-                        <span className="flex items-center gap-1 text-error">
-                          <Flag className="h-3 w-3" />
-                          {paper.report_count} reports
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {paper.created_at ? new Date(paper.created_at).toLocaleDateString() : 'N/A'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {paper.verification_status !== 'verified' && (
-                      <Button size="sm" onClick={() => handleVerifyPaper(paper.id)} className="bg-success text-success-foreground hover:bg-success/90">
-                        <CheckCircle className="mr-1 h-4 w-4" />
-                        Verify
-                      </Button>
-                    )}
-                    <Button size="sm" variant="outline" onClick={() => handleTogglePaperVisibility(paper.id, !!paper.is_hidden)}>
-                      {paper.is_hidden ? (
-                        <>
-                          <Eye className="mr-1 h-4 w-4" />
-                          Show
-                        </>
-                      ) : (
-                        <>
-                          <EyeOff className="mr-1 h-4 w-4" />
-                          Hide
-                        </>
-                      )}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => navigate(`/paper/${paper.id}`)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <Card key={paper.id} className="theme-panel"><CardContent className="flex h-full flex-col p-4">
+                <div className="flex flex-wrap gap-2"><PaperVerificationBadge status={paper.verification_status} />{paper.is_hidden && <Badge className="theme-error-note border-0">hidden</Badge>}</div>
+                <h4 className="theme-title mt-3 line-clamp-2 font-medium">{paper.title}</h4>
+                <p className="theme-muted mt-2 text-sm">{paper.course_code} · {paper.course_name}</p>
+                <p className="theme-muted mt-1 text-xs">{paper.year} · {paper.paper_type} · {uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Unknown uploader'}</p>
+                <div className="theme-muted mt-3 flex gap-3 text-xs"><span>{paper.download_count || 0} downloads</span>{(paper.report_count || 0) > 0 && <span className="text-error">{paper.report_count} reports</span>}</div>
+                <Button className="mt-auto pt-4" variant="outline" onClick={() => openPaper(paper)}><Eye className="mr-1 h-4 w-4" />View Full Paper</Button>
+              </CardContent></Card>
             ))}
           </div>
           <div className="mt-4 flex items-center justify-center gap-2">
@@ -933,7 +930,37 @@ export default function AdminPage() {
             <Button disabled={paperPage >= paperPageCount} onClick={() => setPaperPage((p) => Math.min(paperPageCount, p + 1))}>{'>'}</Button>
           </div>
         </TabsContent>
+        <TabsContent value="books" className="space-y-4">
+          {user && <BookManagementPanel mode="admin" userId={user.id} />}
+        </TabsContent>
       </Tabs>
+
+      <AdminDetailDialog
+        open={Boolean(selectedPaper)}
+        onOpenChange={(open) => !open && setSelectedPaper(null)}
+        title={selectedPaper?.title || 'Paper management'}
+        description="Review the submitted academic metadata and use the existing server-authorized moderation actions."
+      >
+        {selectedPaper && <div className="space-y-5">
+          {paperEditing && <div><Label htmlFor="paper-admin-title">Title</Label><Input id="paper-admin-title" value={paperDraft.title} onChange={(event) => setPaperDraft((draft) => ({ ...draft, title: event.target.value }))} /></div>}
+          <div className="grid gap-3 text-sm sm:grid-cols-2">
+            <p><span className="theme-muted">Course</span><br />{selectedPaper.course_code} — {selectedPaper.course_name || 'Not provided'}</p>
+            <p><span className="theme-muted">Academic information</span><br />{selectedPaper.college || 'Not provided'} · {selectedPaper.department || 'Not provided'}</p>
+            <p><span className="theme-muted">Programme</span><br />{selectedPaper.programme_name_other || selectedPaper.programme_id || 'Not provided'}</p>
+            <p><span className="theme-muted">Year / type</span><br />{selectedPaper.year} · {selectedPaper.paper_type}</p>
+            <p><span className="theme-muted">Uploader</span><br />{uploaderProfiles[selectedPaper.user_id]?.profile?.display_name || selectedPaper.uploader_display_name || selectedPaper.user_id}</p>
+            <p><span className="theme-muted">Uploaded</span><br />{formatDate(selectedPaper.created_at)}</p>
+            <div className="sm:col-span-2"><span className="theme-muted">Description</span><br />{paperEditing ? <Textarea value={paperDraft.description} onChange={(event) => setPaperDraft((draft) => ({ ...draft, description: event.target.value }))} /> : selectedPaper.description || 'Not provided'}</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => navigate(`/paper/${selectedPaper.id}`)}><Eye className="mr-1 h-4 w-4" />Open public page</Button>
+            {paperEditing ? <><Button onClick={() => void savePaperMetadata()}>Save metadata</Button><Button variant="outline" onClick={() => setPaperEditing(false)}>Cancel</Button></> : <Button variant="outline" onClick={() => setPaperEditing(true)}>Edit metadata</Button>}
+            {selectedPaper.verification_status !== 'verified' && <Button onClick={() => void handleVerifyPaper(selectedPaper.id)} className="bg-success text-success-foreground hover:bg-success/90"><CheckCircle className="mr-1 h-4 w-4" />Verify</Button>}
+            <Button variant="outline" onClick={() => void handleTogglePaperVisibility(selectedPaper.id, !!selectedPaper.is_hidden)}>{selectedPaper.is_hidden ? <><Eye className="mr-1 h-4 w-4" />Show</> : <><EyeOff className="mr-1 h-4 w-4" />Hide</>}</Button>
+            <Button variant="destructive" onClick={() => confirmDeletePaper(selectedPaper)}><Trash2 className="mr-1 h-4 w-4" />Delete</Button>
+          </div>
+        </div>}
+      </AdminDetailDialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
@@ -943,6 +970,16 @@ export default function AdminPage() {
               Review the complete user profile, update role and verification, or remove the account when needed.
             </DialogDescription>
           </DialogHeader>
+
+          <Tabs defaultValue="overview" className="min-w-0">
+            <TabsList className="flex w-full justify-start overflow-x-auto">
+              <TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger><TabsTrigger value="papers">Papers</TabsTrigger><TabsTrigger value="books">Books</TabsTrigger>
+            </TabsList>
+            <TabsContent value="overview" className="theme-muted px-1 pt-3 text-sm">Edit the user’s non-sensitive identity, account, and academic information below.</TabsContent>
+            <TabsContent value="activity" className="space-y-2 pt-3">{userResourcesLoading ? <div className="h-24 animate-pulse rounded bg-muted" /> : !userResources?.activity.length ? <p className="theme-muted text-sm">No recorded resource activity is available.</p> : userResources.activity.map((item, index) => <div key={`${item.kind}-${item.title}-${index}`} className="theme-soft-panel rounded-lg p-3 text-sm"><p className="theme-title">{item.action}: {item.title}</p><p className="theme-muted mt-1 text-xs">{formatDate(item.created_at)}</p></div>)}</TabsContent>
+            <TabsContent value="papers" className="space-y-2 pt-3">{userResourcesLoading ? <div className="h-24 animate-pulse rounded bg-muted" /> : !userResources?.papers.length ? <p className="theme-muted text-sm">This user has no Papers.</p> : userResources.papers.map((paper) => <div key={paper.id} className="theme-soft-panel flex items-center justify-between gap-3 rounded-lg p-3 text-sm"><div><p className="theme-title">{paper.title}</p><p className="theme-muted text-xs">{paper.course_code} · {paper.year} · {paper.paper_type}</p></div><Button size="sm" variant="outline" onClick={() => navigate(`/paper/${paper.id}`)}>View</Button></div>)}</TabsContent>
+            <TabsContent value="books" className="space-y-2 pt-3">{userResourcesLoading ? <div className="h-24 animate-pulse rounded bg-muted" /> : !userResources?.books.length ? <p className="theme-muted text-sm">This user has no Books.</p> : userResources.books.map((book) => <div key={book.id} className="theme-soft-panel flex items-center justify-between gap-3 rounded-lg p-3 text-sm"><div><p className="theme-title">{book.title}</p><p className="theme-muted text-xs">{book.language || 'Language unavailable'} · {book.deleted_at ? 'deleted' : book.status} · {book.visibility}</p></div><Button size="sm" variant="outline" onClick={() => navigate(`/book/${book.id}`)}>View</Button></div>)}</TabsContent>
+          </Tabs>
 
           {draft && selectedUser && (
             <div className="space-y-6">
@@ -981,11 +1018,13 @@ export default function AdminPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <Label htmlFor="user-display-name">Display name</Label>
-                  <Input id="user-display-name" value={draft.display_name} onChange={(event) => updateDraft('display_name', event.target.value)} disabled={adminProtected} />
+                  <Input id="user-display-name" value={draft.display_name} onChange={(event) => updateDraft('display_name', event.target.value)} onBlur={() => setDraftTouched((current) => ({ ...current, display_name: true }))} aria-invalid={Boolean(draftTouched.display_name && !draft.display_name.trim())} aria-describedby="user-display-name-error" disabled={adminProtected} />
+                  <InlineFieldMessage id="user-display-name-error" message={draftTouched.display_name && !draft.display_name.trim() ? 'Display name is required.' : undefined} />
                 </div>
                 <div>
                   <Label htmlFor="user-email">Email</Label>
-                  <Input id="user-email" value={draft.email} onChange={(event) => updateDraft('email', event.target.value)} disabled={adminProtected} />
+                  <Input id="user-email" type="email" value={draft.email} onChange={(event) => updateDraft('email', event.target.value)} onBlur={() => updateDraft('email', normalizeEmail(draft.email))} aria-invalid={Boolean(draftTouched.email && !/^\S+@\S+\.\S+$/.test(draft.email.trim()))} aria-describedby="user-email-error" disabled={adminProtected} />
+                  <InlineFieldMessage id="user-email-error" message={draftTouched.email && !/^\S+@\S+\.\S+$/.test(draft.email.trim()) ? 'Enter a valid email address.' : undefined} />
                 </div>
                 <div>
                   <Label>Role</Label>
@@ -1087,7 +1126,7 @@ export default function AdminPage() {
           <DialogFooter className="gap-3">
             <Button
               variant="destructive"
-              onClick={() => void handleDeleteUser()}
+              onClick={() => setDeleteUserConfirmation(true)}
               disabled={adminProtected || deleting || selectedUser?.user_id === user.id}
             >
               <Trash2 className="mr-2 h-4 w-4" />
@@ -1099,6 +1138,22 @@ export default function AdminPage() {
           </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={deleteUserConfirmation} onOpenChange={setDeleteUserConfirmation}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete user?</DialogTitle>
+            <DialogDescription>
+              This permanently removes the account and its associated content according to the existing backend deletion policy.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteUserConfirmation(false)}>Cancel</Button>
+            <Button variant="destructive" disabled={deleting} onClick={() => void handleDeleteUser()}>
+              {deleting ? 'Deleting…' : 'Delete user'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

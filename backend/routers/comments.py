@@ -22,7 +22,8 @@ router = APIRouter(prefix="/api/v1/entities/comments", tags=["comments"])
 # ---------- Pydantic Schemas ----------
 class CommentsData(BaseModel):
     """Entity data schema (for create/update)"""
-    paper_id: int
+    paper_id: Optional[int] = None
+    book_id: Optional[int] = None
     content: str
     parent_id: int = None
     upvotes: int = None
@@ -32,6 +33,7 @@ class CommentsData(BaseModel):
 class CommentsUpdateData(BaseModel):
     """Update entity data (partial updates allowed)"""
     paper_id: Optional[int] = None
+    book_id: Optional[int] = None
     content: Optional[str] = None
     parent_id: Optional[int] = None
     upvotes: Optional[int] = None
@@ -42,7 +44,8 @@ class CommentsResponse(BaseModel):
     """Entity response schema"""
     id: int
     user_id: str
-    paper_id: int
+    paper_id: Optional[int] = None
+    book_id: Optional[int] = None
     content: str
     parent_id: Optional[int] = None
     upvotes: Optional[int] = None

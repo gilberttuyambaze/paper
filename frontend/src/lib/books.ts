@@ -1,6 +1,5 @@
-import axios from 'axios';
 import { getAPIBaseURL } from './config';
-import { getStoredAuthToken } from './auth';
+import { apiClient } from './client';
 
 export type BookStatus = 'draft' | 'active' | 'inactive' | 'archived';
 export type BookFile = { key: string; original_filename?: string | null; mime_type?: string | null; size?: number | null };
@@ -10,18 +9,12 @@ export type Book = {
   status: BookStatus; visibility: 'public' | 'private'; uploaded_by: string; uploader_name?: string | null; uploader_role?: string | null;
   download_count?: number | null;
   created_at: string; updated_at: string; management_deadline: string; can_manage: boolean; deleted_at?: string | null;
-  authors: string[]; course_ids: number[]; modules?: Module[]; cover_key?: string | null; file_key?: string | null; file_name?: string | null;
+  authors: string[]; course_ids: number[]; courses?: Course[]; modules?: Module[]; cover_key?: string | null; file_key?: string | null; file_name?: string | null;
 };
 export type BookDraft = Omit<Partial<Book>, 'authors' | 'course_ids' | 'status'> & { title: string; authors: string[]; course_ids: number[]; module_ids?: number[]; status: BookStatus; file?: BookFile; cover?: BookFile };
 export type Module = { id: number; name: string; code?: string | null; description?: string | null; course_id?: number | null; existing?: boolean };
 export type Course = { id: number; code?: string | null; name: string; description?: string | null; existing?: boolean };
 
-const client = axios.create();
-client.interceptors.request.use((config) => {
-  const token = getStoredAuthToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
 const url = (path: string) => `${getAPIBaseURL()}${path}`;
 
 /** UI-only convenience. Server authorization remains authoritative. */
@@ -32,14 +25,23 @@ export function canManageBook(user: { id: string; role: string } | null | undefi
 }
 
 export async function fetchBooks(params?: Record<string, string | boolean | undefined>) {
-  return (await client.get(url('/api/v1/books'), { params })).data as { items: Book[]; total: number };
+  return (await apiClient.get(url('/api/v1/books'), { params })).data as { items: Book[]; total: number };
 }
-export async function fetchBookStats() { return (await client.get(url('/api/v1/books/stats'))).data as Record<string, number>; }
-export async function createBook(data: BookDraft) { return (await client.post(url('/api/v1/books'), data)).data as Book; }
-export async function updateBook(id: number, data: Partial<BookDraft>) { return (await client.put(url(`/api/v1/books/${id}`), data)).data as Book; }
-export async function deleteBook(id: number) { await client.delete(url(`/api/v1/books/${id}`)); }
-export async function setBookStatus(id: number, status: BookStatus) { return (await client.patch(url(`/api/v1/books/${id}/status`), { status })).data as Book; }
-export async function fetchModules(query?: string) { return (await client.get(url('/api/v1/modules/search'), { params: { q: query || 'a' } })).data as { items: Module[] }; }
-export async function createModule(data: { name: string; code?: string; description?: string; course_id?: number }) { return (await client.post(url('/api/v1/modules'), data)).data as Module; }
-export async function searchCourses(q: string) { return (await client.get(url('/api/v1/courses/search'), { params: { q } })).data as { items: Course[]; total: number }; }
-export async function createCourse(data: { name: string; code?: string; description?: string }) { return (await client.post(url('/api/v1/courses'), data)).data as Course; }
+export async function fetchBookById(id: number) { return (await apiClient.get(url(`/api/v1/books/${id}`))).data as Book; }
+export async function recordBookDownload(id: number) { return (await apiClient.post(url(`/api/v1/books/${id}/record-download`))).data as { download_count: number }; }
+export async function fetchBookStats() { return (await apiClient.get(url('/api/v1/books/stats'))).data as Record<string, number>; }
+export async function createBook(data: BookDraft) { return (await apiClient.post(url('/api/v1/books'), data)).data as Book; }
+export async function updateBook(id: number, data: Partial<BookDraft>) { return (await apiClient.put(url(`/api/v1/books/${id}`), data)).data as Book; }
+export async function deleteBook(id: number) { await apiClient.delete(url(`/api/v1/books/${id}`)); }
+export async function restoreBook(id: number) { return (await apiClient.post(url(`/api/v1/books/${id}/restore`))).data as Book; }
+export async function setBookStatus(id: number, status: BookStatus) { return (await apiClient.patch(url(`/api/v1/books/${id}/status`), { status })).data as Book; }
+export async function updateBookAuthors(id: number, authors: string[]) { return (await apiClient.patch(url(`/api/v1/books/${id}/authors`), { authors })).data as Book; }
+export async function updateBookCourses(id: number, course_ids: number[]) { return (await apiClient.patch(url(`/api/v1/books/${id}/courses`), { course_ids })).data as Book; }
+export async function updateBookModules(id: number, module_ids: number[]) { return (await apiClient.patch(url(`/api/v1/books/${id}/modules`), { module_ids })).data as Book; }
+export async function fetchBookActivity(id: number) { return (await apiClient.get(url(`/api/v1/books/${id}/activity`))).data as { items: Array<{ id: number; action: string; detail?: string | null; created_at?: string | null; actor_id?: string | null }> }; }
+export async function replaceBookFile(id: number, file: BookFile) { return (await apiClient.post(url(`/api/v1/books/${id}/file`), file)).data as Book; }
+export async function replaceBookCover(id: number, file: BookFile) { return (await apiClient.post(url(`/api/v1/books/${id}/cover`), file)).data as Book; }
+export async function fetchModules(query?: string) { return (await apiClient.get(url('/api/v1/modules/search'), { params: { q: query || 'a' } })).data as { items: Module[] }; }
+export async function createModule(data: { name: string; code?: string; description?: string; course_id?: number }) { return (await apiClient.post(url('/api/v1/modules'), data)).data as Module; }
+export async function searchCourses(q: string) { return (await apiClient.get(url('/api/v1/courses/search'), { params: { q } })).data as { items: Course[]; total: number }; }
+export async function createCourse(data: { name: string; code?: string; description?: string }) { return (await apiClient.post(url('/api/v1/courses'), data)).data as Course; }

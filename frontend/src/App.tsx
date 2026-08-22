@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react';
-import { Toaster } from '@/components/ui/sonner';
+import GlobalMessageProvider from '@/components/GlobalMessageProvider';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom';
@@ -10,6 +10,7 @@ import ProtectedAdminRoute from './components/ProtectedAdminRoute';
 const Index = lazy(() => import('./pages/Index'));
 const SearchResults = lazy(() => import('./pages/SearchResults'));
 const PaperDetails = lazy(() => import('./pages/PaperDetails'));
+const BookDetails = lazy(() => import('./pages/BookDetails'));
 const Upload = lazy(() => import('./pages/Upload'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Profile = lazy(() => import('./pages/Profile'));
@@ -40,7 +41,7 @@ function RouteFallback() {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
+      <GlobalMessageProvider />
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ScrollToTop />
         <Suspense fallback={<RouteFallback />}>
@@ -55,13 +56,14 @@ const App = () => (
             <Route path="/" element={<Layout><Index /></Layout>} />
             <Route path="/resources" element={<Layout><SearchResults /></Layout>} />
             <Route path="/search" element={<Navigate to="/resources" replace />} />
-            <Route path="/past-papers" element={<Navigate to="/resources?type=paper" replace />} />
+            <Route path="/past-papers" element={<Navigate to="/resources" replace />} />
             <Route path="/study-resources" element={<Layout><Index /></Layout>} />
             <Route path="/story" element={<Layout><Story /></Layout>} />
             <Route path="/student-stories" element={<Layout><Story /></Layout>} />
             <Route path="/terms" element={<Layout><Terms /></Layout>} />
             <Route path="/privacy" element={<Layout><Privacy /></Layout>} />
             <Route path="/paper/:id" element={<Layout><PaperDetails /></Layout>} />
+            <Route path="/book/:id" element={<Layout><BookDetails /></Layout>} />
             <Route
               path="/upload"
               element={
@@ -71,7 +73,6 @@ const App = () => (
               }
             />
             <Route path="/dashboard" element={<Layout><Dashboard /></Layout>} />
-            <Route path="/books" element={<Navigate to="/resources?type=book" replace />} />
             <Route path="/profile" element={<Layout><Profile /></Layout>} />
             <Route path="/profile/:userId" element={<Layout><PublicProfile /></Layout>} />
             <Route
