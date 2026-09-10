@@ -6,6 +6,7 @@ import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import ScrollToTop from './components/ScrollToTop';
 import ProtectedAdminRoute from './components/ProtectedAdminRoute';
+import MaintenanceGate from './components/MaintenanceGate';
 
 const Index = lazy(() => import('./pages/Index'));
 const SearchResults = lazy(() => import('./pages/SearchResults'));
@@ -27,6 +28,7 @@ const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const NotFoundPage = lazy(() => import('./pages/NotFound'));
+const MaintenancePage = lazy(() => import('./pages/Maintenance'));
 
 const queryClient = new QueryClient();
 
@@ -44,8 +46,11 @@ const App = () => (
       <GlobalMessageProvider />
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ScrollToTop />
+        <MaintenanceGate>
         <Suspense fallback={<RouteFallback />}>
           <Routes>
+            <Route path="/locked" element={<MaintenancePage />} />
+            <Route path="/maintenance" element={<Navigate to="/locked" replace />} />
             <Route path="/login" element={<Layout><Login /></Layout>} />
             <Route path="/register" element={<Layout><Register /></Layout>} />
             <Route path="/forgot-password" element={<Layout><ForgotPassword /></Layout>} />
@@ -67,7 +72,7 @@ const App = () => (
             <Route
               path="/upload"
               element={
-                <ProtectedAdminRoute allowedRoles={['admin', 'cp']} title="upload">
+                <ProtectedAdminRoute requiredPermission="books.create" title="upload">
                   <Layout><Upload /></Layout>
                 </ProtectedAdminRoute>
               }
@@ -78,7 +83,7 @@ const App = () => (
             <Route
               path="/admin"
               element={
-                <ProtectedAdminRoute allowedRoles={['admin', 'content_manager']} title="management">
+                <ProtectedAdminRoute requiredPermission="admin.dashboard.view" title="management">
                   <Layout>
                     <Admin />
                   </Layout>
@@ -88,7 +93,7 @@ const App = () => (
             <Route
               path="/content-manager"
               element={
-                <ProtectedAdminRoute allowedRoles={['admin', 'content_manager']} title="management">
+                <ProtectedAdminRoute requiredPermission="admin.dashboard.view" title="management">
                   <Layout>
                     <Admin />
                   </Layout>
@@ -98,6 +103,7 @@ const App = () => (
             <Route path="*" element={<Layout><NotFoundPage /></Layout>} />
           </Routes>
         </Suspense>
+        </MaintenanceGate>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

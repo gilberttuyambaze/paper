@@ -13,6 +13,8 @@ interface User {
   name?: string;
   role: string;
   last_login?: string;
+  permissions: string[];
+  is_super_admin: boolean;
 }
 
 interface AuthContextType {
@@ -23,6 +25,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   refetch: () => Promise<void>;
   isAdmin: boolean;
+  hasPermission: (permission: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -61,7 +64,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       const userData = await authApi.getCurrentUser();
-      setUser(userData);
+      setUser(userData ? { ...userData, permissions: userData.permissions || [], is_super_admin: Boolean(userData.is_super_admin) } : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
       setUser(null);
@@ -99,7 +102,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     login,
     logout,
     refetch: checkAuthStatus,
-    isAdmin: user?.role === 'admin',
+    isAdmin: user?.permissions.includes('admin.dashboard.view') ?? false,
+    hasPermission: (permission: string) => user?.permissions.includes(permission) ?? false,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

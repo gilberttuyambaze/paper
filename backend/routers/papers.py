@@ -17,8 +17,9 @@ from services.passage_indexing import PassageIndexService
 from dependencies.auth import get_current_user
 from schemas.auth import UserResponse
 from schemas.storage import ObjectRequest
-from services.authorization import require_upload_permission
+from services.authorization import has_permission, require_upload_permission
 from services.authorization import require_paper_management
+from services.site_access import require_resource_upload
 from models.papers import Papers
 
 # Set up logging
@@ -334,7 +335,7 @@ async def get_papers(
 
     service = PapersService(db)
     try:
-        result = await service.get_by_id(id, user_id=None if current_user.role == "admin" else str(current_user.id))
+        result = await service.get_by_id(id, user_id=None if has_permission(current_user, "papers.edit") else str(current_user.id))
         if not result:
             logger.warning(f"Papers with id {id} not found")
             raise HTTPException(status_code=404, detail="Papers not found")
@@ -472,7 +473,7 @@ async def create_papers(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new papers"""
-    await require_upload_permission(current_user)
+    await require_resource_upload(db, current_user, "paper")
     logger.debug(f"Creating new papers with data: {data}")
 
     service = PapersService(db)
@@ -498,7 +499,7 @@ async def create_paperss_batch(
     db: AsyncSession = Depends(get_db),
 ):
     """Create multiple paperss in a single request"""
-    await require_upload_permission(current_user)
+    await require_resource_upload(db, current_user, "paper")
     logger.debug(f"Batch creating {len(request.items)} paperss")
 
     service = PapersService(db)

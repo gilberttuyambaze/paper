@@ -69,8 +69,10 @@ import { showMessage, toast } from '@/lib/messages';
 import { normalizeApiError } from '@/lib/api-errors';
 import InlineFieldMessage from '@/components/InlineFieldMessage';
 import { normalizeEmail, normalizeText } from '@/lib/normalization';
+import SiteAccessPanel from '../components/SiteAccessPanel';
 
 const ROLE_OPTIONS = [
+  { value: 'super_admin', label: 'Super Admin' },
   { value: 'normal', label: 'Community Student' },
   { value: 'verified_contributor', label: 'Verified Contributor' },
   { value: 'cp', label: 'Class Representative (CP)' },
@@ -199,7 +201,7 @@ function PaperVerificationBadge({ status }: { status: string }) {
 export default function AdminPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, hasPermission } = useAuth();
   const [papers, setPapers] = useState<Paper[]>([]);
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
   const [paperEditing, setPaperEditing] = useState(false);
@@ -237,7 +239,7 @@ export default function AdminPage() {
   const debouncedPaperSearch = useDebounced(paperSearch, 250);
 
   const isContentManagerView = location.pathname === '/content-manager' || user?.role === 'content_manager';
-  const canAssignAdmin = user?.role === 'admin';
+  const canAssignAdmin = hasPermission('users.manage');
   const roleOptions = canAssignAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((option) => option.value !== 'admin');
 
   const loadData = async () => {
@@ -348,7 +350,7 @@ export default function AdminPage() {
     if (paperPage > paperPageCount) setPaperPage(1);
   }, [paperPageCount]);
   const [uploaderProfiles, setUploaderProfiles] = useState<Record<string, { profile?: any; imageUrl?: string | null }>>({});
-  const selectedUserIsAdmin = selectedUser?.role === 'admin';
+  const selectedUserIsAdmin = selectedUser?.permissions?.includes('users.manage') ?? false;
   const adminProtected = selectedUserIsAdmin && !canAssignAdmin;
 
   const updateDraft = <K extends keyof UserDraft>(field: K, value: UserDraft[K]) => {
@@ -526,6 +528,7 @@ export default function AdminPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {hasPermission('site.settings.manage') && <div className="mb-8"><SiteAccessPanel /></div>}
       <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="mb-3 flex items-center gap-3">

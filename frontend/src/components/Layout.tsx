@@ -36,7 +36,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, login, logout } = useAuth();
+  const { user, login, logout, hasPermission } = useAuth();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -108,11 +108,11 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/', label: 'Home', icon: BookOpen },
     { path: '/resources', label: 'Browse Resources', icon: Search },
-    { path: '/upload', label: 'Upload', icon: Upload, auth: true, roles: ['admin', 'cp'] },
+    { path: '/upload', label: 'Upload', icon: Upload, auth: true, permission: 'books.create' },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, auth: true },
   ];
-  const canUpload = user?.role === 'admin' || user?.role === 'cp';
-  const canAccessManagement = user?.role === 'admin' || user?.role === 'content_manager';
+  const canUpload = hasPermission('books.create');
+  const canAccessManagement = hasPermission('admin.dashboard.view');
   const managementPath = user?.role === 'content_manager' ? '/content-manager' : '/admin';
   const managementLabel = user?.role === 'content_manager' ? 'Content Manager' : 'Admin';
   const seoConfig = (() => {
@@ -245,7 +245,7 @@ export default function Layout({ children }: LayoutProps) {
             <nav className="hidden items-center gap-1 md:flex">
               {navItems.map((item) => {
                 if (item.auth && !user) return null;
-                if (item.roles && (!user || !item.roles.includes(user.role))) return null;
+                if (item.permission && !hasPermission(item.permission)) return null;
                 const Icon = item.icon;
 
                 return (
@@ -378,7 +378,7 @@ export default function Layout({ children }: LayoutProps) {
                     )}
                     {navItems.map((item) => {
                       if (item.auth && !user) return null;
-                      if (item.roles && (!user || !item.roles.includes(user.role))) return null;
+                      if (item.permission && !hasPermission(item.permission)) return null;
                       const Icon = item.icon;
 
                       return (

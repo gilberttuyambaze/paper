@@ -88,7 +88,7 @@ export default function BookDetails() {
 
   const roots = comments.filter((comment) => !comment.parent_id).sort((a, b) => (b.upvotes || 0) - (a.upvotes || 0));
   const replies = (parentId: number) => comments.filter((comment) => comment.parent_id === parentId).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
-  const displayName = viewBook ? profiles[viewBook.uploaded_by]?.display_name || viewBook.uploader_name || `Uploader ${viewBook.uploaded_by}` : 'Loading uploader';
+  const displayName = viewBook ? profiles[viewBook.uploaded_by]?.display_name || viewBook.uploader_name || 'Unknown uploader' : 'Loading uploader';
 
   return <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
     <Button variant="ghost" onClick={() => navigate(-1)} className="theme-muted mb-6"><ArrowLeft className="mr-2 h-4 w-4" />Back</Button>

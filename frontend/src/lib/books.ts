@@ -20,8 +20,9 @@ const url = (path: string) => `${getAPIBaseURL()}${path}`;
 /** UI-only convenience. Server authorization remains authoritative. */
 export function canManageBook(user: { id: string; role: string } | null | undefined, book: Pick<Book, 'uploaded_by' | 'created_at'>): boolean {
   if (!user) return false;
-  if (user.role === 'admin') return true;
-  return user.role === 'cp' && user.id === book.uploaded_by && Date.now() <= new Date(book.created_at).getTime() + 48 * 60 * 60 * 1000;
+  const permissions = (user as { permissions?: string[] }).permissions || [];
+  if (permissions.includes('books.edit')) return true;
+  return permissions.includes('books.own.manage') && user.id === book.uploaded_by && Date.now() <= new Date(book.created_at).getTime() + 48 * 60 * 60 * 1000;
 }
 
 export async function fetchBooks(params?: Record<string, string | boolean | undefined>) {

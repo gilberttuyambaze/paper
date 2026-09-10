@@ -88,10 +88,15 @@ export function normalizeAuthError(error: unknown, fallbackMessage: string): Err
   const responseData = error.response?.data;
   const detail = responseData?.detail;
   const detailObject = detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : null;
-  const code = typeof detailObject?.code === 'string' ? detailObject.code : '';
+  const code = typeof detailObject?.code === 'string'
+    ? detailObject.code
+    : typeof responseData?.code === 'string'
+      ? responseData.code
+      : '';
   const safeDetailMessage = typeof detailObject?.message === 'string' ? detailObject.message : '';
 
   const knownMessages: Record<string, string> = {
+    SITE_MAINTENANCE: 'The site is currently under maintenance. Authorized personnel may sign in to continue.',
     invalid_credentials: 'Incorrect email or password. Please check your details and try again.',
     email_not_found: 'No account was found with that email address.',
     password_incorrect: 'Incorrect email or password. Please check your details and try again.',
@@ -105,6 +110,9 @@ export function normalizeAuthError(error: unknown, fallbackMessage: string): Err
     token_expired: 'Google sign-in expired before it could be verified. Please try again.',
     rate_limited: 'Too many requests were made. Please wait a moment and try again.',
   };
+  if (code === 'SITE_MAINTENANCE' && isBrowser()) {
+    window.location.replace('/locked');
+  }
   if (code && knownMessages[code]) return new Error(knownMessages[code]);
 
   if (Array.isArray(detail)) {

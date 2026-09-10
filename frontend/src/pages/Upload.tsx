@@ -331,7 +331,7 @@ export default function UploadPage() {
 
   const inferVerificationStatus = () => {
     if (!profile) return 'unverified';
-    if (['admin', 'content_manager', 'cp', 'lecturer'].includes(profile.role)) {
+    if (user.permissions?.includes('uploads.paper') || user.permissions?.includes('uploads.book')) {
       return 'verified';
     }
     if (profile.role === 'verified_contributor' || (profile.trust_score || 0) >= 50) {

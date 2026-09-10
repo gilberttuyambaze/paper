@@ -7,18 +7,18 @@ import { Shield, User, LogIn } from 'lucide-react';
 
 interface ProtectedAdminRouteProps {
   children: React.ReactNode;
-  allowedRoles?: string[];
+  requiredPermission: string;
   title?: string;
 }
 
 const ProtectedAdminRoute: React.FC<ProtectedAdminRouteProps> = ({
   children,
-  allowedRoles = ['admin'],
   title = 'management',
+  requiredPermission,
 }) => {
   const location = useLocation();
   const { user, loading, login } = useAuth();
-  const isAllowed = !!user && allowedRoles.includes(user.role);
+  const isAllowed = !!user && user.permissions.includes(requiredPermission);
 
   // Loading state
   if (loading) {
@@ -63,11 +63,11 @@ const ProtectedAdminRoute: React.FC<ProtectedAdminRouteProps> = ({
                   </span>
                 </div>
                 <div className="theme-muted mt-1 text-xs">
-                  Role: {user.role === 'user' ? 'Regular user' : user.role}
+                  Role: {user.role}
                 </div>
               </div>
               <p className="text-sm">
-                Please log in with an account that has one of these roles: {allowedRoles.join(', ')}.
+                This area requires the {requiredPermission} permission.
               </p>
             </div>
 

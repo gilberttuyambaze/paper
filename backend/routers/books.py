@@ -17,10 +17,11 @@ from models.user_profiles import User_profiles
 from models.courses import Course
 from schemas.auth import UserResponse
 from schemas.storage import ObjectRequest
-from services.authorization import CP_WINDOW, _utc, can_create_book, can_manage_book, can_read_book, database_now, require_book_management
+from services.authorization import CP_WINDOW, _utc, can_create_book, can_manage_book, can_read_book, database_now, has_permission, require_book_management
 from core.input_normalization import normalize_isbn, normalize_text, normalize_unique
 from routers.notifications import create_notification
 from services.storage import StorageService
+from services.site_access import require_resource_upload
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +290,7 @@ def _ensure_creator(actor: UserResponse) -> None:
 
 @router.post("", status_code=201)
 async def create_book(payload: BookCreate, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    _ensure_creator(actor)
+    await require_resource_upload(db, actor, "book")
     data = payload.model_dump(exclude={"authors", "course_ids", "module_ids", "cover", "file"})
     profile = (await db.execute(select(User_profiles).where(User_profiles.user_id == str(actor.id)))).scalar_one_or_none()
     if profile is None:
@@ -325,8 +326,8 @@ async def list_books(status_filter: Optional[str] = Query(None, alias="status"),
     # catalogue (including drafts) as part of their review responsibilities.
     # CP management views may inspect their own Books (including drafts and
     # private records); they never gain access to another uploader's catalogue.
-    own_cp_management_view = bool(actor and actor.role == "cp" and uploaded_by == str(actor.id))
-    if not actor or (actor.role != "admin" and not own_cp_management_view):
+    own_cp_management_view = bool(actor and has_permission(actor, "books.own.manage") and uploaded_by == str(actor.id))
+    if not actor or (not has_permission(actor, "books.edit") and not own_cp_management_view):
         query = query.where(Book.status == "active", Book.visibility == "public")
     if status_filter: query = query.where(Book.status == status_filter)
     if uploaded_by: query = query.where(Book.uploaded_by == uploaded_by)
@@ -348,7 +349,7 @@ async def list_books(status_filter: Optional[str] = Query(None, alias="status"),
 
 @router.get("/stats")
 async def book_stats(actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if actor.role != "admin": raise HTTPException(403, "Admin access required")
+    if not has_permission(actor, "books.edit"): raise HTTPException(403, "Book statistics permission required")
     books = (await db.execute(select(Book))).scalars().all()
     now = await database_now(db)
     today, week = now - timedelta(days=1), now - timedelta(days=7)
@@ -477,6 +478,6 @@ async def delete_book(book_id: int, actor: UserResponse = Depends(get_current_us
 @router.get("/{book_id}/activity")
 async def book_activity(book_id: int, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     book = await _get_book(book_id, db)
-    if actor.role != "admin" and book.uploaded_by != str(actor.id): raise HTTPException(403, "You can only view activity for your own books")
+    if not has_permission(actor, "books.edit") and book.uploaded_by != str(actor.id): raise HTTPException(403, "You can only view activity for your own books")
     rows = (await db.execute(select(BookActivity).where(BookActivity.book_id == book_id).order_by(BookActivity.created_at.desc()))).scalars().all()
     return {"items": [{c.name: getattr(row, c.name) for c in BookActivity.__table__.columns} for row in rows]}

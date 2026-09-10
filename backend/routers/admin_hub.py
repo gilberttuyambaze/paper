@@ -22,11 +22,12 @@ from services.academic_taxonomy import NODES
 from routers.notifications import create_notification
 from schemas.auth import UserResponse
 from services.programme_discovery import find_programme_matches
+from services.authorization import has_permission, is_super_admin, permissions_for_role, require_permission, role_has_permission
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin/hub", tags=["admin-hub"])
-MANAGEMENT_ROLES = {"normal", "verified_contributor", "cp", "lecturer", "content_manager", "admin"}
+MANAGEMENT_ROLES = {"normal", "verified_contributor", "cp", "lecturer", "content_manager", "admin", "super_admin"}
 REQUESTABLE_ROLES = {"cp", "lecturer"}
 ACCOUNT_STATUSES = {"active", "suspended", "banned"}
 UR_VERIFICATION_STATUSES = {"not_requested", "pending", "verified", "rejected"}
@@ -249,6 +250,8 @@ def _serialize_user(profile: User_profiles, user: Optional[User]) -> dict:
         "email": user.email if user else None,
         "name": user.name if user else profile.display_name,
         "auth_role": user.role if user else "user",
+        "permissions": sorted(permissions_for_role(user.role if user else profile.role)),
+        "is_super_admin": is_super_admin(user) if user else is_super_admin(profile),
         "last_login": user.last_login if user else None,
     }
 
@@ -256,13 +259,48 @@ def _serialize_user(profile: User_profiles, user: Optional[User]) -> dict:
 def _ensure_role_assignment_allowed(actor: UserResponse, target_profile: User_profiles, requested_role: str) -> None:
     if requested_role not in MANAGEMENT_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role selection")
-    if actor.role != "admin" and (requested_role == "admin" or target_profile.role == "admin"):
+    if requested_role == "super_admin" or target_profile.role == "super_admin":
+        if not is_super_admin(actor):
+            raise HTTPException(status_code=403, detail="Only the Super Admin can change Super Admin assignments")
+        if target_profile.role == "super_admin":
+            raise HTTPException(status_code=400, detail="Use the Super Admin transfer operation to change this role")
+        if requested_role == "super_admin":
+            raise HTTPException(status_code=400, detail="Use the Super Admin transfer operation to assign this role")
+    if not has_permission(actor, "users.manage") and (role_has_permission(requested_role, "users.manage") or role_has_permission(target_profile.role, "users.manage")):
         raise HTTPException(status_code=403, detail="Only admins can modify administrator accounts")
     # An administrator should not be able to lock themselves out of the
     # management hub through a role edit. Other administrator changes remain
     # subject to the existing server-side authorization above.
-    if actor.role == "admin" and str(actor.id) == str(target_profile.user_id) and requested_role != "admin":
+    if has_permission(actor, "users.manage") and str(actor.id) == str(target_profile.user_id) and not role_has_permission(requested_role, "users.manage"):
         raise HTTPException(status_code=400, detail="You cannot remove your own administrator role")
+
+
+class SuperAdminTransferRequest(BaseModel):
+    replacement_profile_id: int
+    confirm: bool = False
+
+
+@router.post("/super-admin/transfer")
+async def transfer_super_admin(payload: SuperAdminTransferRequest, current_user: UserResponse = Depends(get_management_user), db: AsyncSession = Depends(get_db)):
+    if not has_permission(current_user, "users.transfer_super_admin"):
+        raise HTTPException(status_code=403, detail="Only the Super Admin can transfer this role")
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Explicit confirmation is required")
+    current_rows = (await db.execute(select(User).where(User.role == "super_admin").with_for_update())).scalars().all()
+    if len(current_rows) != 1 or current_rows[0].id != str(current_user.id):
+        raise HTTPException(status_code=409, detail="The Super Admin state is invalid; resolve it before transferring")
+    replacement = await db.get(User_profiles, payload.replacement_profile_id)
+    if not replacement or replacement.user_id == str(current_user.id):
+        raise HTTPException(status_code=400, detail="Select a valid replacement account")
+    replacement_user = (await db.execute(select(User).where(User.id == replacement.user_id).with_for_update())).scalar_one_or_none()
+    current = await db.get(User, str(current_user.id))
+    if not replacement_user or not current:
+        raise HTTPException(status_code=400, detail="Replacement account is not valid")
+    replacement_user.role = "super_admin"
+    replacement.role = "admin"
+    current.role = "user"
+    await db.commit()
+    return {"transferred": True, "super_admin_user_id": replacement.user_id}
 
 
 @router.get("/overview")
@@ -475,8 +513,9 @@ async def update_user(
 
     user = await db.get(User, profile.user_id)
 
-    if current_user.role != "admin" and profile.role == "admin":
-        raise HTTPException(status_code=403, detail="Only admins can modify administrator accounts")
+    require_permission(current_user, "users.manage")
+    if user and is_super_admin(user) and payload.role is not None:
+        raise HTTPException(status_code=400, detail="Use the Super Admin transfer operation to change this role")
 
     if payload.email is not None:
         normalized_email = _normalize_email(payload.email)
@@ -628,10 +667,12 @@ async def delete_user(
     if current_user.id == profile.user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account from the management hub")
 
-    if current_user.role != "admin" and profile.role == "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete administrator accounts")
-
     user = await db.get(User, profile.user_id)
+    if is_super_admin(profile) or is_super_admin(user):
+        raise HTTPException(status_code=400, detail="The current Super Admin cannot be deleted")
+
+    require_permission(current_user, "users.delete")
+
     await db.execute(delete(Reports).where(Reports.user_id == profile.user_id))
     await db.execute(delete(Comments).where(Comments.user_id == profile.user_id))
     await db.execute(delete(Notifications).where(Notifications.user_id == profile.user_id))

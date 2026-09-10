@@ -100,13 +100,13 @@ function PaperCard({ paper, uploaderProfiles }: { paper: Paper; uploaderProfiles
           <div className="mt-3 flex items-center gap-3">
             <div className="h-8 w-8 overflow-hidden rounded-full">
               <AvatarFallback
-                name={uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                name={uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Unknown uploader'}
                 imageUrl={uploaderProfiles?.[paper.user_id]?.imageUrl ?? undefined}
                 imageAlt={`${uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Uploader'} avatar`}
               />
             </div>
             <div className="text-xs theme-muted">
-              <div className="font-medium text-sm">{uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}</div>
+              <div className="font-medium text-sm">{uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Unknown uploader'}</div>
               <div>{paper.course_code} · {paper.year}</div>
             </div>
           </div>

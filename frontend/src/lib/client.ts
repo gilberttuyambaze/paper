@@ -25,7 +25,14 @@ apiClient.interceptors.request.use((config) => {
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => Promise.reject(error)
+  (error) => {
+    const code = error?.response?.data?.code ?? error?.response?.data?.detail?.code;
+    if (code === 'SITE_MAINTENANCE' && typeof window !== 'undefined' && window.location.pathname !== '/locked') {
+      window.sessionStorage.setItem('ur-hud-return-to', `${window.location.pathname}${window.location.search}${window.location.hash}`);
+      window.location.replace('/locked');
+    }
+    return Promise.reject(error);
+  }
 );
 
 function apiUrl(path: string) {
@@ -116,6 +123,8 @@ export interface UserProfile {
   user_id: string;
   display_name: string;
   role: string;
+  permissions?: string[];
+  is_super_admin?: boolean;
   trust_score: number | null;
   upload_count: number | null;
   download_count: number | null;
@@ -942,6 +951,47 @@ export async function fetchLeaderboard(): Promise<UserProfile[]> {
 export async function fetchAdminOverview(): Promise<AdminOverview> {
   const response = await apiClient.get(apiUrl('/api/v1/admin/hub/overview'));
   return response.data as AdminOverview;
+}
+
+export interface SiteAccessSettings {
+  maintenance_mode: boolean;
+  maintenance_message: string;
+  upload_access_mode: 'nobody' | 'authenticated' | 'selected_roles';
+  upload_roles: string[];
+  allowed_resource_types: string[];
+  heartbeat_enabled: boolean;
+  heartbeat_min_weekly_checks: number;
+  heartbeat_max_weekly_checks: number;
+  heartbeat_retry_delay_hours: number;
+  heartbeat_max_retry_attempts: number;
+  heartbeat_retry_enabled: boolean;
+  heartbeat_retry_jitter_minutes: number;
+  heartbeat_run_on_startup: boolean;
+  heartbeat?: HeartbeatStatus;
+}
+
+export interface HeartbeatStatus { enabled: boolean; scheduler_running: boolean; last_attempt_at?: string; last_success_at?: string; last_failure_at?: string; next_scheduled_at?: string; next_retry_at?: string; total_attempts: number; total_successes: number; total_failures: number; consecutive_failures: number; retry_attempts: number; status: string; activity_message?: string; }
+
+export async function fetchSiteAccessSettings(): Promise<SiteAccessSettings> {
+  const response = await apiClient.get(apiUrl('/api/v1/admin/settings/site-access'));
+  return response.data as SiteAccessSettings;
+}
+
+export async function saveSiteAccessSettings(settings: Partial<SiteAccessSettings>): Promise<SiteAccessSettings> {
+  const response = await apiClient.put(apiUrl('/api/v1/admin/settings/site-access'), settings);
+  return response.data as SiteAccessSettings;
+}
+
+export async function fetchHeartbeatStatus(): Promise<HeartbeatStatus> {
+  return (await apiClient.get(apiUrl('/api/v1/admin/settings/heartbeat'))).data as HeartbeatStatus;
+}
+
+export async function runHeartbeatNow(): Promise<{ executed: boolean; success: boolean; reason: string; heartbeat: HeartbeatStatus }> {
+  return (await apiClient.post(apiUrl('/api/v1/admin/settings/heartbeat/run'))).data;
+}
+
+export async function transferSuperAdmin(replacementProfileId: number): Promise<void> {
+  await apiClient.post(apiUrl('/api/v1/admin/hub/super-admin/transfer'), { replacement_profile_id: replacementProfileId, confirm: true });
 }
 
 export async function fetchAdminUsers(params?: { search?: string; role?: string; status?: string; page?: number; limit?: number; sort?: string }): Promise<{ items: UserProfile[]; total: number; page: number; limit: number; total_pages: number }> {

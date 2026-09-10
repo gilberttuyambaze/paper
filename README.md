@@ -61,6 +61,16 @@ The backend can use different storage backends. The application currently suppor
 
 When Google Drive is enabled, uploaded documents are stored under a configured Drive folder and served through a backend proxy.
 
+## Database Health Activity
+
+The backend includes an optional, lightweight database heartbeat for Supabase-backed deployments. It updates one singleton system-health row and does not create users, resources, analytics, or other business records. The Super Admin can configure it in the Admin Dashboard under Database Health / Activity.
+
+By default, the scheduler plans two to three checks per week with server-side randomized days and time windows. Failures are recorded and retried after several hours with bounded jitter and a maximum retry count. The in-process scheduler runs only while a long-lived FastAPI process is alive; sleeping/serverless deployments should invoke a protected external scheduler or cron job instead.
+
+For sleeping/serverless deployments, a secret-bearing scheduler can call `POST /api/v1/admin/settings/heartbeat/run` with a current Super Admin bearer token. Never expose that token to browser code or anonymous callers.
+
+This is a best-effort activity mechanism and does not guarantee that a Supabase Free project will never pause. Upgrading to a paid Supabase plan is the platform-supported way to eliminate automatic Free-plan pausing.
+
 ## Notes
 
 - Keep the `backend/` and `frontend/` directories separated.

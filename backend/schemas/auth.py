@@ -12,6 +12,8 @@ class UserResponse(BaseModel):
     auth_provider: str = "email"
     has_password: bool = False
     last_login: Optional[datetime] = None
+    permissions: list[str] = Field(default_factory=list)
+    is_super_admin: bool = False
 
     class Config:
         from_attributes = True

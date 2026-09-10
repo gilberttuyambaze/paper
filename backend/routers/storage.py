@@ -12,7 +12,7 @@ from models.books import Book
 from models.papers import Papers
 from models.solutions import Solutions
 from models.user_profiles import User_profiles
-from services.authorization import can_read_book
+from services.authorization import can_read_book, has_permission
 from schemas.auth import UserResponse
 from schemas.storage import (
     BucketListResponse,
@@ -31,6 +31,7 @@ from schemas.storage import (
 )
 from services.storage import StorageService, storage_key_candidates
 from services.pdf_text import extract_pdf_text
+from services.site_access import require_resource_upload
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ async def _resolve_authorized_object(bucket_name: str, requested_key: str, curre
             Papers.file_key.in_(candidates), Papers.cover_key.in_(candidates), Papers.solution_key.in_(candidates)
         )))).scalar_one_or_none()
         solution = (await db.execute(select(Solutions).where(Solutions.file_key.in_(candidates)))).scalar_one_or_none()
-        if paper and (paper.is_hidden and (not current_user or current_user.role != "admin")):
+        if paper and (paper.is_hidden and (not current_user or not has_permission(current_user, "papers.edit"))):
             raise HTTPException(status_code=404, detail="Paper file not found")
         if paper:
             key = next(key for key in (paper.file_key, paper.solution_key) if key in candidates)
@@ -125,7 +126,7 @@ async def _resolve_authorized_object(bucket_name: str, requested_key: str, curre
         if solution:
             paper_visibility = await db.execute(select(Papers.is_hidden).where(Papers.id == solution.paper_id))
             is_hidden = paper_visibility.scalar_one_or_none()
-            if is_hidden and (not current_user or current_user.role != "admin"):
+            if is_hidden and (not current_user or not has_permission(current_user, "papers.edit")):
                 raise HTTPException(status_code=404, detail="Solution file not found")
             return AuthorizedStorageObject(bucket_name, solution.file_key, solution.drive_file_id, solution.storage_provider, "solution", solution.id, solution)
         logger.warning(
@@ -135,7 +136,7 @@ async def _resolve_authorized_object(bucket_name: str, requested_key: str, curre
         raise HTTPException(status_code=404, detail="Paper file not found")
     if bucket_name == "profiles":
         profile = (await db.execute(select(User_profiles).where(User_profiles.profile_picture_key.in_(candidates)))).scalar_one_or_none()
-        if not profile and (not current_user or current_user.role != "admin"):
+        if not profile and (not current_user or not has_permission(current_user, "users.manage")):
             raise HTTPException(status_code=404, detail="Profile image not found")
         return AuthorizedStorageObject(
             bucket_name, profile.profile_picture_key if profile else requested_key,
@@ -259,7 +260,7 @@ async def delete_object(request: ObjectRequest, _current_user: UserResponse = De
 
 
 @router.post("/upload-url", response_model=FileUpDownResponse)
-async def upload_file(request: FileUpDownRequest, _current_user: UserResponse = Depends(get_current_user)):
+async def upload_file(request: FileUpDownRequest, _current_user: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """
     Get a presigned URL for uploading a file to StorageService.
 
@@ -271,10 +272,13 @@ async def upload_file(request: FileUpDownRequest, _current_user: UserResponse = 
     5. File is accessible at the returned access_url
     """
     try:
-        if request.bucket_name in {"books", "book-covers", "papers"} and _current_user.role not in {"admin", "cp"}:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators and CPs can upload academic resources")
+        resource_type = {"books": "book", "book-covers": "book", "papers": "paper"}.get(request.bucket_name)
+        if resource_type:
+            await require_resource_upload(db, _current_user, resource_type)
         service = StorageService()
         return await service.create_upload_url(request)
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.error(f"Invalid upload request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -289,13 +293,15 @@ async def upload_file_direct(
     object_key: str = Form(...),
     file: UploadFile = File(...),
     _current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Upload a file to the configured storage backend through the backend.
     """
     try:
-        if bucket_name in {"books", "book-covers", "papers"} and _current_user.role not in {"admin", "cp"}:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators and CPs can upload academic resources")
+        resource_type = {"books": "book", "book-covers": "book", "papers": "paper"}.get(bucket_name)
+        if resource_type:
+            await require_resource_upload(db, _current_user, resource_type)
         request = FileUpDownRequest(bucket_name=bucket_name, object_key=object_key)
         file_bytes = await file.read()
         if not file_bytes:
@@ -313,6 +319,8 @@ async def upload_file_direct(
             provider_file_id=upload_result.provider_file_id,
             storage_provider=upload_result.storage_provider,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.error(f"Invalid upload request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

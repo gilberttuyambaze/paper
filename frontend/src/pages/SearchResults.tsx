@@ -152,9 +152,9 @@ export default function SearchResults() {
   const uploaderDisplayMap = useMemo(() => {
     const map = new Map<string, string>();
     papers.forEach((paper) => {
-      map.set(paper.user_id, paper.uploader_display_name || `Uploader ${paper.user_id}`);
+      map.set(paper.user_id, paper.uploader_display_name || 'Unknown uploader');
     });
-    books.forEach((book) => map.set(book.uploaded_by, book.uploader_name || `Uploader ${book.uploaded_by}`));
+    books.forEach((book) => map.set(book.uploaded_by, book.uploader_name || 'Unknown uploader'));
     return map;
   }, [papers, books]);
 

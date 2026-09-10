@@ -2,10 +2,15 @@ import os
 from pathlib import Path
 from typing import Dict
 
-from dependencies.auth import get_admin_user
-from fastapi import APIRouter, Depends, HTTPException
+from core.database import get_db
+from dependencies.auth import get_current_user, get_admin_user
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from schemas.auth import UserResponse
+from services.authorization import require_permission
+from services.site_access import get_site_settings, serialize_site_settings, update_site_settings
+from services.heartbeat import heartbeat_status, run_heartbeat_once, validate_heartbeat_config
+from models.system_health import SystemHealthHeartbeat
 
 router = APIRouter(prefix="/api/v1/admin/settings", tags=["admin-settings"])
 
@@ -34,6 +39,77 @@ class EnvConfig(BaseModel):
 
 class EnvVariableUpdate(BaseModel):
     value: str
+
+
+class SiteAccessUpdate(BaseModel):
+    maintenance_mode: bool | None = None
+    maintenance_message: str | None = None
+    upload_access_mode: str | None = None
+    upload_roles: list[str] | None = None
+    allowed_resource_types: list[str] | None = None
+    heartbeat_enabled: bool | None = None
+    heartbeat_min_weekly_checks: int | None = None
+    heartbeat_max_weekly_checks: int | None = None
+    heartbeat_retry_delay_hours: int | None = None
+    heartbeat_max_retry_attempts: int | None = None
+    heartbeat_retry_enabled: bool | None = None
+    heartbeat_retry_jitter_minutes: int | None = None
+    heartbeat_run_on_startup: bool | None = None
+
+
+@router.get("/site-access")
+async def get_site_access(_current_user: UserResponse = Depends(get_current_user), db=Depends(get_db)):
+    require_permission(_current_user, "site.settings.view")
+    require_permission(_current_user, "system.health.view")
+    settings = await get_site_settings(db)
+    payload = serialize_site_settings(settings)
+    heartbeat = await db.get(SystemHealthHeartbeat, 1)
+    if heartbeat:
+        payload["heartbeat"] = heartbeat_status(heartbeat, settings, False)
+    return payload
+
+
+@router.put("/site-access")
+async def save_site_access(payload: SiteAccessUpdate, _current_user: UserResponse = Depends(get_current_user), db=Depends(get_db)):
+    values = payload.model_dump(exclude_none=True)
+    heartbeat_fields = {
+        "heartbeat_enabled", "heartbeat_min_weekly_checks", "heartbeat_max_weekly_checks",
+        "heartbeat_retry_delay_hours", "heartbeat_max_retry_attempts", "heartbeat_retry_enabled",
+        "heartbeat_retry_jitter_minutes", "heartbeat_run_on_startup",
+    }
+    # Lock state/message are site settings; heartbeat configuration separately
+    # requires the narrower system-health management capability.
+    if any(field in values for field in heartbeat_fields):
+        require_permission(_current_user, "system.health.manage")
+    if any(field not in heartbeat_fields for field in values):
+        require_permission(_current_user, "site.settings.manage")
+    existing = await get_site_settings(db)
+    try:
+        validate_heartbeat_config({**serialize_site_settings(existing), **values})
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    settings = await update_site_settings(db, values)
+    await db.commit()
+    await db.refresh(settings)
+    return serialize_site_settings(settings)
+
+
+@router.post("/heartbeat/run")
+async def run_heartbeat_now(_current_user: UserResponse = Depends(get_current_user), db=Depends(get_db)):
+    require_permission(_current_user, "system.health.manage")
+    settings = await get_site_settings(db)
+    result = await run_heartbeat_once(db, settings, manual=True)
+    heartbeat = await db.get(SystemHealthHeartbeat, 1)
+    return {**result, "heartbeat": heartbeat_status(heartbeat, settings, False)}
+
+
+@router.get("/heartbeat")
+async def get_heartbeat(request: Request, _current_user: UserResponse = Depends(get_current_user), db=Depends(get_db)):
+    """Administrative read-only health telemetry; errors are already sanitized."""
+    require_permission(_current_user, "system.health.view")
+    settings = await get_site_settings(db)
+    heartbeat = await db.get(SystemHealthHeartbeat, 1)
+    return heartbeat_status(heartbeat, settings, bool(getattr(request.app.state, "heartbeat_scheduler_running", False)))
 
 
 def get_env_file_path(env_type: str) -> Path:

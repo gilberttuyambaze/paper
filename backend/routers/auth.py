@@ -26,11 +26,12 @@ from schemas.auth import (
     TokenExchangeResponse,
     UserResponse,
 )
-from services.auth import AccountLinkRequiredError, AuthService
+from services.auth import AccountLinkRequiredError, AuthService, role_for_identity
 from services.academic_taxonomy import context_names, validate_context
 from services.programme_discovery import record_submission
 from services.programme_discovery import normalize_programme_name
 from services.mailer import send_account_created_email, send_password_reset_email, should_expose_password_reset_links
+from services.site_access import get_site_settings
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -115,6 +116,9 @@ async def login_user(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 @router.post("/register", response_model=TokenExchangeResponse)
 async def register_user(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Create a new user account and return an app token."""
+    site_settings = await get_site_settings(db)
+    if site_settings.maintenance_mode:
+        raise HTTPException(status_code=503, detail={"message": "Site is currently under maintenance", "code": "SITE_MAINTENANCE"})
     auth_service = AuthService(db)
     try:
         validate_context(payload.institution_id, payload.campus_id, payload.college_id, payload.school_id, payload.programme_id, payload.academic_department_id)
@@ -275,8 +279,8 @@ async def exchange_platform_token(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Platform token payload missing user_id")
 
     platform_user_id = str(raw_user_id)
-    is_admin = platform_user_id == str(settings.admin_user_id)
-    role = "admin" if is_admin else "user"
+    role = role_for_identity(platform_user_id, payload_data.get("email", "") or "")
+    is_admin = role in {"admin", "super_admin"}
 
     logger.info(f"[token/exchange] User verified: platform_user_id={platform_user_id}, role={role}")
     auth_service = AuthService(db)

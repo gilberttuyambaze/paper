@@ -562,7 +562,7 @@ export default function PaperDetails() {
               >
                   <div className="theme-accent-soft h-11 w-11 overflow-hidden rounded-full text-sm">
                     <AvatarFallback
-                      name={authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                      name={authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Unknown uploader'}
                       imageUrl={authorProfiles[paper.user_id]?.imageUrl ?? uploaderImageUrl ?? undefined}
                       imageAlt={`${authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Uploader'} profile picture`}
                     />
@@ -570,7 +570,7 @@ export default function PaperDetails() {
                   <div className="min-w-0">
                     <p className="theme-muted text-xs uppercase tracking-[0.2em]">Uploaded by</p>
                     <p className="theme-title truncate text-sm font-medium">
-                      {authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
+                      {authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Unknown uploader'}
                     </p>
                     <p className="theme-link-accent text-xs">View uploader profile</p>
                   </div>

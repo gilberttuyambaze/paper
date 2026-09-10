@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 INSTITUTION_TYPES = {"ur_student", "other_university"}
 UR_VERIFICATION_STATUSES = {"not_requested", "pending", "verified", "rejected"}
-PROFILE_ROLES = {"normal", "verified_contributor", "cp", "lecturer", "content_manager", "admin"}
+# This is the persistence allowlist, not the public self-registration allowlist.
+# A Super Admin profile is created/synchronised during login and must therefore
+# be accepted here even though it can never be selected during registration.
+PROFILE_ROLES = {"normal", "verified_contributor", "cp", "lecturer", "content_manager", "admin", "super_admin"}
 PUBLIC_REGISTRATION_ROLES = {"normal", "cp", "lecturer"}
 REQUESTABLE_REGISTRATION_ROLES = {"cp", "lecturer"}
 REQUESTABLE_ROLE_STATUSES = {"none", "pending", "approved", "rejected"}
@@ -32,6 +35,17 @@ def _admin_matches(platform_sub: str, email: str) -> bool:
     admin_user_id = getattr(settings, "admin_user_id", "") or ""
     admin_user_email = (getattr(settings, "admin_user_email", "") or "").strip().lower()
     return bool((admin_user_id and platform_sub == admin_user_id) or (admin_user_email and email.lower() == admin_user_email))
+
+
+def role_for_identity(platform_sub: str, email: str) -> str:
+    """Resolve configured elevated identities before issuing an app token."""
+    super_admin_id = (os.getenv("SUPER_ADMIN_USER_ID", "") or "").strip()
+    super_admin_email = (os.getenv("SUPER_ADMIN_USER_EMAIL", "") or "").strip().lower()
+    if (super_admin_id and platform_sub == super_admin_id) or (super_admin_email and email.lower() == super_admin_email):
+        return "super_admin"
+    if _admin_matches(platform_sub, email):
+        return "admin"
+    return "user"
 
 
 async def _ensure_admin_profile(db: AsyncSession, user: User) -> None:
@@ -151,6 +165,8 @@ async def ensure_user_profile_record(
         raise ValueError("Invalid UR verification status")
 
     role = requested_profile_role or (profile.role if profile and profile.role else "normal")
+    if user.role == "super_admin":
+        role = "super_admin"
     if role not in PROFILE_ROLES:
         raise ValueError("Invalid account role")
     if user.role == "admin":
@@ -293,11 +309,12 @@ class AuthService:
         )
         self.db.add(user)
 
-        if _admin_matches(user.id, normalized_email):
-            user.role = "admin"
+        resolved_role = role_for_identity(user.id, normalized_email)
+        if resolved_role != "user":
+            user.role = resolved_role
 
         profile_payload = dict(profile_data or {})
-        if requested_role in REQUESTABLE_REGISTRATION_ROLES and user.role != "admin":
+        if requested_role in REQUESTABLE_REGISTRATION_ROLES and user.role not in {"admin", "super_admin"}:
             profile_payload["role"] = "normal"
             profile_payload["requested_role"] = requested_role
             profile_payload["requested_role_status"] = "pending"
@@ -330,8 +347,9 @@ class AuthService:
 
         user.last_login = datetime.now(timezone.utc)
 
-        if _admin_matches(user.id, normalized_email):
-            user.role = "admin"
+        resolved_role = role_for_identity(user.id, normalized_email)
+        if resolved_role == "super_admin" or (resolved_role == "admin" and user.role != "super_admin"):
+            user.role = resolved_role
 
         await ensure_user_profile_record(self.db, user)
         await self.db.commit()
@@ -439,8 +457,9 @@ class AuthService:
             )
             self.db.add(user)
 
-        if _admin_matches(platform_sub, normalized_email):
-            user.role = "admin"
+        resolved_role = role_for_identity(platform_sub, normalized_email)
+        if resolved_role == "super_admin" or (resolved_role == "admin" and user.role != "super_admin"):
+            user.role = resolved_role
         if google_sub:
             user.google_sub = google_sub
             user.auth_provider = "google"
@@ -538,7 +557,8 @@ async def initialize_admin_user():
             user = result.scalar_one_or_none()
 
         if user:
-            user.role = "admin"
+            if user.role != "super_admin":
+                user.role = "super_admin" if role_for_identity(user.id, user.email) == "super_admin" else "admin"
             if admin_user_email:
                 user.email = admin_user_email
             await _ensure_admin_profile(db, user)
@@ -547,7 +567,8 @@ async def initialize_admin_user():
             return
 
         if admin_user_id and admin_user_email:
-            admin_user = User(id=admin_user_id, email=admin_user_email, role="admin")
+            configured_role = role_for_identity(admin_user_id, admin_user_email)
+            admin_user = User(id=admin_user_id, email=admin_user_email, role=configured_role if configured_role != "user" else "admin")
             db.add(admin_user)
             await _ensure_admin_profile(db, admin_user)
             await db.commit()

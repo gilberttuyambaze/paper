@@ -12,6 +12,7 @@ from models.user_profiles import User_profiles
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.auth import UserResponse
+from services.authorization import is_super_admin, permissions_for_role, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,8 @@ async def get_current_user(
     if db_user:
         user.auth_provider = db_user.auth_provider or "email"
         user.has_password = bool(db_user.password_hash)
+        if is_super_admin(db_user):
+            user.role = db_user.role
 
     profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
     profile = profile_result.scalar_one_or_none()
@@ -80,9 +83,11 @@ async def get_current_user(
             if suspended_until is None or suspended_until > datetime.now(timezone.utc):
                 reason = profile.suspension_reason or "This account is currently suspended"
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
-        if profile.role:
+        if profile.role and not is_super_admin(user):
             user.role = profile.role
 
+    user.permissions = sorted(permissions_for_role(user.role))
+    user.is_super_admin = is_super_admin(user)
     return user
 
 
@@ -107,22 +112,29 @@ async def get_optional_current_user(
         name=payload.get("name"),
         role=payload.get("role", "user"),
     )
+    db_user = await db.get(User, user_id)
+    if db_user and is_super_admin(db_user):
+        user.role = db_user.role
     profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
     profile = profile_result.scalar_one_or_none()
-    if profile and profile.role:
+    if profile and profile.role and not is_super_admin(user):
         user.role = profile.role
+    user.permissions = sorted(permissions_for_role(user.role))
+    user.is_super_admin = is_super_admin(user)
     return user
 
 
 async def get_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
     """Dependency to ensure current user has admin role."""
-    if current_user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return require_permission(current_user, "admin.dashboard.view")
+
+
+async def get_super_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
+    if not is_super_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super Admin access required")
     return current_user
 
 
 async def get_management_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
     """Dependency to ensure current user can access the management hub."""
-    if current_user.role not in {"admin", "content_manager"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Management access required")
-    return current_user
+    return require_permission(current_user, "users.view")

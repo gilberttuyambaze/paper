@@ -10,6 +10,7 @@ import { authApi } from '../lib/auth';
 import { showMessage } from '@/lib/messages';
 import InlineFieldMessage from '../components/InlineFieldMessage';
 import { normalizeEmail } from '../lib/normalization';
+import { getAPIBaseURL } from '../lib/config';
 
 export default function LoginPage() {
   const [searchParams] = useSearchParams();
@@ -20,10 +21,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [maintenanceActive, setMaintenanceActive] = useState(false);
   const emailError = email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()) ? 'Enter a valid email address.' : undefined;
   const passwordError = !password ? 'Password is required.' : undefined;
 
   useEffect(() => { if (error) showMessage({ type: 'error', title: 'Sign in failed', message: error }); }, [error]);
+  useEffect(() => { void fetch(`${getAPIBaseURL()}/health/site-access`).then((response) => response.json()).then((data) => setMaintenanceActive(Boolean(data.maintenance_mode))).catch(() => undefined); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -171,7 +174,7 @@ export default function LoginPage() {
               />
             </form>
 
-            <div className="theme-auth-subtle mt-6 rounded-2xl px-4 py-4 text-sm">
+            {!maintenanceActive && <div className="theme-auth-subtle mt-6 rounded-2xl px-4 py-4 text-sm">
               <p>
                 New here?{' '}
                 <button
@@ -183,7 +186,7 @@ export default function LoginPage() {
                 </button>
               </p>
               <p className="theme-muted mt-2 text-xs">You will be returned to your previous page after signing in.</p>
-            </div>
+            </div>}
           </div>
         </div>
       </div>

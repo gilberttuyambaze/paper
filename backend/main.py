@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import logging
 import os
@@ -7,16 +8,36 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from core.config import settings
+from core.auth import AccessTokenError, decode_access_token
+from core.database import db_manager
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
+from sqlalchemy import select
+from models.auth import User
+from models.user_profiles import User_profiles
+from schemas.auth import UserResponse
+from services.site_access import get_site_settings
+from services.authorization import has_permission
+from services.heartbeat import scheduler_loop
+
+MAINTENANCE_TECHNICAL_EXEMPTIONS = frozenset({
+    "/api/v1/auth/login", "/api/v1/auth/token/exchange", "/api/v1/auth/firebase/exchange",
+    "/api/v1/auth/google", "/api/v1/auth/password-reset/request", "/api/v1/auth/password-reset/confirm",
+    "/api/v1/auth/me", "/api/v1/auth/logout",
+})
+
+
+def is_maintenance_technical_exemption(path: str) -> bool:
+    return path in MAINTENANCE_TECHNICAL_EXEMPTIONS or path.startswith("/health")
 
 # MODULE_IMPORTS_START
 from services.database import initialize_database, close_database
 from services.mock_data import initialize_mock_data
 from services.auth import initialize_admin_user
+from services.site_access import bootstrap_super_admin
 # MODULE_IMPORTS_END
 
 
@@ -70,10 +91,25 @@ async def lifespan(app: FastAPI):
     await initialize_database()
     await initialize_mock_data()
     await initialize_admin_user()
+    if db_manager.async_session_maker:
+        async with db_manager.async_session_maker() as db:
+            await get_site_settings(db)
+            await bootstrap_super_admin(db)
+            await db.commit()
     # MODULE_STARTUP_END
 
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = None
+    app.state.heartbeat_scheduler_running = False
+    if db_manager.async_session_maker and os.getenv("IS_LAMBDA", "").lower() not in {"1", "true", "yes"}:
+        heartbeat_task = asyncio.create_task(scheduler_loop(db_manager.async_session_maker, heartbeat_stop, startup=True))
+        app.state.heartbeat_scheduler_running = True
     logger.info("=== Application startup completed successfully ===")
     yield
+    if heartbeat_task:
+        heartbeat_stop.set()
+        await heartbeat_task
+    app.state.heartbeat_scheduler_running = False
     # MODULE_SHUTDOWN_START
     await close_database()
     # MODULE_SHUTDOWN_END
@@ -196,6 +232,37 @@ async def add_security_headers(request: Request, call_next):
     # Required for Firebase popup auth in modern browsers.
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
     return response
+
+
+@app.middleware("http")
+async def enforce_maintenance_mode(request: Request, call_next):
+    path = request.url.path
+    exempt = is_maintenance_technical_exemption(path)
+    if not exempt and db_manager.async_session_maker:
+        try:
+            async with db_manager.async_session_maker() as db:
+                site_settings = await get_site_settings(db)
+                if site_settings.maintenance_mode:
+                    role = None
+                    user_id = None
+                    authorization = request.headers.get("Authorization", "")
+                    if authorization.lower().startswith("bearer "):
+                        try:
+                            payload = decode_access_token(authorization[7:].strip())
+                            user_id = payload.get("sub")
+                            user = await db.get(User, user_id) if user_id else None
+                            role = user.role if user else None
+                            profile = await db.scalar(select(User_profiles).where(User_profiles.user_id == user_id)) if user_id else None
+                            if not has_permission(UserResponse(id=user_id, email="", role=role or "user"), "site.maintenance.bypass") and profile:
+                                role = profile.role
+                        except (AccessTokenError, ValueError):
+                            role = None
+                    if not has_permission(UserResponse(id=user_id or "", email="", role=role or "user"), "site.maintenance.bypass"):
+                        return JSONResponse(status_code=503, content={"detail": site_settings.maintenance_message, "code": "SITE_MAINTENANCE", "maintenance": True})
+        except Exception:
+            logger.exception("Maintenance access check failed")
+            return JSONResponse(status_code=503, content={"detail": "Site is currently under maintenance", "code": "SITE_MAINTENANCE", "maintenance": True})
+    return await call_next(request)
 
 
 def safe_error_message(status_code: int) -> str:
