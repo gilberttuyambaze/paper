@@ -986,6 +986,10 @@ export async function fetchHeartbeatStatus(): Promise<HeartbeatStatus> {
   return (await apiClient.get(apiUrl('/api/v1/admin/settings/heartbeat'))).data as HeartbeatStatus;
 }
 
+export function heartbeatStreamUrl(): string {
+  return apiUrl('/api/v1/admin/settings/heartbeat/stream');
+}
+
 export async function runHeartbeatNow(): Promise<{ executed: boolean; success: boolean; reason: string; heartbeat: HeartbeatStatus }> {
   return (await apiClient.post(apiUrl('/api/v1/admin/settings/heartbeat/run'))).data;
 }

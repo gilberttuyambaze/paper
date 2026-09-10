@@ -17,6 +17,7 @@ HEARTBEAT_LOCK = asyncio.Lock()
 ADVISORY_LOCK_ID = 614_201_771
 MAX_WEEKLY_CHECKS, MAX_RETRY_HOURS, MAX_RETRIES, MAX_JITTER_MINUTES = 7, 72, 5, 720
 RECENT_ATTEMPT_GUARD_SECONDS = 30
+HEARTBEAT_ACTIVITY_SUBSCRIBERS: set[asyncio.Queue] = set()
 
 
 def utc_now() -> datetime:
@@ -58,6 +59,30 @@ def _sanitize_error(error: Exception) -> str:
     name, message = type(error).__name__, str(error).replace("\n", " ").strip()
     if any(marker in message.lower() for marker in ("password", "secret", "token", "postgres://", "postgresql://", "@")): return name
     return f"{name}: {message[:180]}" if message else name
+
+
+async def publish_heartbeat_activity(message: str, state: str) -> None:
+    event = {"message": message, "state": state, "timestamp": utc_now().isoformat()}
+    logger.info("[heartbeat:%s] %s", state, message)
+    for subscriber in tuple(HEARTBEAT_ACTIVITY_SUBSCRIBERS):
+        if not subscriber.full():
+            subscriber.put_nowait(event)
+
+
+async def heartbeat_activity_stream():
+    subscriber: asyncio.Queue = asyncio.Queue(maxsize=20)
+    HEARTBEAT_ACTIVITY_SUBSCRIBERS.add(subscriber)
+    try:
+        logger.info("[heartbeat:stream] Backend heartbeat log stream connected")
+        yield {"message": "Connected to the backend heartbeat log stream.", "state": "connected", "timestamp": utc_now().isoformat()}
+        while True:
+            try:
+                yield await asyncio.wait_for(subscriber.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield {"message": "Monitoring is active; waiting for the next heartbeat action.", "state": "waiting", "timestamp": utc_now().isoformat()}
+    finally:
+        HEARTBEAT_ACTIVITY_SUBSCRIBERS.discard(subscriber)
+        logger.info("[heartbeat:stream] Backend heartbeat log stream disconnected")
 
 
 async def _row_for_update(db: AsyncSession) -> SystemHealthHeartbeat:
@@ -130,6 +155,7 @@ async def run_heartbeat_once(db: AsyncSession, settings: SiteSettings, now: date
     """A manually requested attempt obeys disabled policy and never consumes a slot."""
     now = _utc(now or utc_now())
     if not settings.heartbeat_enabled: return {"executed": False, "success": False, "reason": "disabled"}
+    await publish_heartbeat_activity("Starting a manual database health check.", "checking")
     async with HEARTBEAT_LOCK:
         if not await _try_database_lock(db):
             await db.rollback(); return {"executed": False, "success": False, "reason": "claimed_by_another_instance"}
@@ -137,9 +163,17 @@ async def run_heartbeat_once(db: AsyncSession, settings: SiteSettings, now: date
             row = await _row_for_update(db)
             if manual and row.last_attempt_at and (now - _utc(row.last_attempt_at)).total_seconds() < RECENT_ATTEMPT_GUARD_SECONDS:
                 await db.commit()
+                await publish_heartbeat_activity("This check was skipped because an identical check was recorded recently.", "skipped")
                 return {"executed": False, "success": False, "reason": "already_recorded_recently"}
-            return await _success(db, row, settings, now, not manual)
-        except Exception as error: return await _failure(db, settings, now, error)
+            await publish_heartbeat_activity("The health result is being recorded in the dedicated system-health table.", "recording")
+            result = await _success(db, row, settings, now, not manual)
+            await publish_heartbeat_activity("Database health check completed successfully.", "completed")
+            await publish_heartbeat_activity("This check is complete. The scheduler is idle until the next scheduled run.", "idle")
+            return result
+        except Exception as error:
+            result = await _failure(db, settings, now, error)
+            await publish_heartbeat_activity("The database health check failed; the retry policy is being evaluated.", "failed")
+            return result
 
 
 async def run_due_heartbeat(db: AsyncSession, settings: SiteSettings, now: datetime | None = None, startup: bool = False) -> dict:
@@ -154,8 +188,17 @@ async def run_due_heartbeat(db: AsyncSession, settings: SiteSettings, now: datet
         due = retry_due or bool(row.next_scheduled_at and row.next_scheduled_at <= now) or (startup and settings.heartbeat_run_on_startup)
         if not due:
             await db.commit(); return {"executed": False, "success": False, "reason": "not_due"}
-        try: return await _success(db, row, settings, now, not retry_due)
-        except Exception as error: return await _failure(db, settings, now, error)
+        try:
+            await publish_heartbeat_activity("The scheduler is running the planned database health check.", "checking")
+            await publish_heartbeat_activity("The health result is being recorded in the dedicated system-health table.", "recording")
+            result = await _success(db, row, settings, now, not retry_due)
+            await publish_heartbeat_activity("Scheduled database health check completed successfully.", "completed")
+            await publish_heartbeat_activity("This check is complete. The scheduler is idle until the next scheduled run.", "idle")
+            return result
+        except Exception as error:
+            result = await _failure(db, settings, now, error)
+            await publish_heartbeat_activity("The scheduled database health check failed; the retry policy is being evaluated.", "failed")
+            return result
 
 
 async def scheduler_loop(session_factory, stop_event: asyncio.Event, startup: bool = False) -> None:

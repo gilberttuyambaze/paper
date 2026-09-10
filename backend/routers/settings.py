@@ -1,15 +1,17 @@
 import os
+import json
 from pathlib import Path
 from typing import Dict
 
 from core.database import get_db
 from dependencies.auth import get_current_user, get_admin_user
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from schemas.auth import UserResponse
 from services.authorization import require_permission
 from services.site_access import get_site_settings, serialize_site_settings, update_site_settings
-from services.heartbeat import heartbeat_status, run_heartbeat_once, validate_heartbeat_config
+from services.heartbeat import heartbeat_activity_stream, heartbeat_status, run_heartbeat_once, validate_heartbeat_config
 from models.system_health import SystemHealthHeartbeat
 
 router = APIRouter(prefix="/api/v1/admin/settings", tags=["admin-settings"])
@@ -110,6 +112,17 @@ async def get_heartbeat(request: Request, _current_user: UserResponse = Depends(
     settings = await get_site_settings(db)
     heartbeat = await db.get(SystemHealthHeartbeat, 1)
     return heartbeat_status(heartbeat, settings, bool(getattr(request.app.state, "heartbeat_scheduler_running", False)))
+
+
+@router.get("/heartbeat/stream")
+async def heartbeat_stream(_current_user: UserResponse = Depends(get_current_user)):
+    require_permission(_current_user, "system.health.view")
+
+    async def events():
+        async for event in heartbeat_activity_stream():
+            yield f"event: heartbeat\ndata: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def get_env_file_path(env_type: str) -> Path:
