@@ -35,19 +35,31 @@ import {
 function URVerificationBadge({ status }: { status?: string | null }) {
   if (status === 'verified') {
     return (
-      <Badge className="bg-success-soft text-success-foreground hover:bg-success-soft">
+      <Badge variant="success" className="border-success-border/50 bg-success-soft text-success-foreground hover:bg-success-soft">
         <BadgeCheck className="mr-1 h-3 w-3" />
         UR verified
       </Badge>
     );
   }
   if (status === 'pending') {
-    return <Badge className="bg-warning-soft text-warning-foreground hover:bg-warning-soft">UR review pending</Badge>;
+    return (
+      <Badge variant="warning" className="border-warning-border/50 bg-warning-soft text-warning-foreground hover:bg-warning-soft">
+        UR review pending
+      </Badge>
+    );
   }
   if (status === 'rejected') {
-    return <Badge className="bg-error-soft text-error-foreground hover:bg-error-soft">UR verification rejected</Badge>;
+    return (
+      <Badge variant="error" className="border-error-border/50 bg-error-soft text-error-foreground hover:bg-error-soft">
+        UR verification rejected
+      </Badge>
+    );
   }
-  return <Badge className="theme-soft-panel  hover:bg-inherit">No UR verification</Badge>;
+  return (
+    <Badge variant="outline" className="border-border bg-muted/60 text-ink-secondary hover:bg-muted/60">
+      No UR verification
+    </Badge>
+  );
 }
 
 function profileFormFromProfile(profile: UserProfile, fallbackName: string): ProfileFormValues {
