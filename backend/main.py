@@ -20,7 +20,7 @@ from models.auth import User
 from models.user_profiles import User_profiles
 from schemas.auth import UserResponse
 from services.site_access import get_site_settings, user_can_bypass_maintenance
-from services.authorization import has_permission
+from services.authorization import has_permission, is_super_admin
 from services.heartbeat import scheduler_loop
 
 MAINTENANCE_TECHNICAL_EXEMPTIONS = frozenset({
@@ -92,10 +92,13 @@ async def lifespan(app: FastAPI):
     await initialize_mock_data()
     await initialize_admin_user()
     if db_manager.async_session_maker:
-        async with db_manager.async_session_maker() as db:
-            await get_site_settings(db)
-            await bootstrap_super_admin(db)
-            await db.commit()
+        try:
+            async with db_manager.async_session_maker() as db:
+                await get_site_settings(db)
+                await bootstrap_super_admin(db)
+                await db.commit()
+        except Exception as exc:
+            logger.warning("Could not complete initial site settings or super admin bootstrap on startup (will initialize on request): %s", exc)
     # MODULE_STARTUP_END
 
     heartbeat_stop = asyncio.Event()
@@ -253,19 +256,17 @@ async def enforce_maintenance_mode(request: Request, call_next):
                             db_user = await db.get(User, user_id) if user_id else None
                             profile = await db.scalar(select(User_profiles).where(User_profiles.user_id == user_id)) if user_id else None
 
-                            effective_role = (payload.get("role") or "user")
-                            if db_user and db_user.role and (db_user.role == "super_admin" or has_permission(db_user, "users.transfer_super_admin")):
-                                effective_role = db_user.role
-                            elif profile and profile.role and not (db_user and db_user.role == "super_admin"):
-                                effective_role = profile.role
-
-                            user = UserResponse(
-                                id=user_id or "",
-                                email=payload.get("email", ""),
-                                name=payload.get("name"),
-                                role=effective_role or "user",
-                            )
-                            user.is_super_admin = has_permission(user, "users.transfer_super_admin")
+                            if db_user and int(payload.get("session_version", -1)) == int(db_user.session_version or 0):
+                                effective_role = db_user.role or "user"
+                                if profile and profile.role and not is_super_admin(db_user):
+                                    effective_role = profile.role
+                                user = UserResponse(
+                                    id=user_id or "",
+                                    email=payload.get("email", ""),
+                                    name=payload.get("name"),
+                                    role=effective_role,
+                                )
+                                user.is_super_admin = has_permission(user, "users.transfer_super_admin")
                         except (AccessTokenError, ValueError):
                             user = None
 

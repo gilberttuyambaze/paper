@@ -15,6 +15,8 @@ class User(Base):
     auth_provider = Column(String(50), nullable=False, default="email")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
+    session_version = Column(Integer, nullable=False, default=0, server_default="0")
+    inactive_notification_sent_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class OIDCState(Base):
@@ -37,3 +39,11 @@ class PasswordResetToken(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PasswordResetRequestAttempt(Base):
+    __tablename__ = "password_reset_request_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_key = Column(String(128), index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

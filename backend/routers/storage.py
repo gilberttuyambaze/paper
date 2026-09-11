@@ -92,56 +92,130 @@ async def _resolve_authorized_object(bucket_name: str, requested_key: str, curre
     """
     if _is_external_url(requested_key):
         raise HTTPException(status_code=400, detail="External URLs are not storage object keys")
+
     candidates = storage_key_candidates(bucket_name, requested_key)
+    logger.debug(
+        "STORAGE RESOLUTION: bucket=%s raw_key=%r candidates=%s",
+        bucket_name, requested_key, candidates,
+    )
+
     if bucket_name in {"books", "book-covers"}:
-        book = (await db.execute(select(Book).where(or_(*[
+        book = (await db.execute(select(Book).where(or_(
             Book.file_key.in_(candidates), Book.cover_key.in_(candidates)
-        ])))).scalar_one_or_none()
-        if not book or not can_read_book(current_user, book):
-            raise HTTPException(status_code=404, detail="Book file not found")
-        key = next(key for key in (book.file_key, book.cover_key) if key in candidates)
-        is_cover = key == book.cover_key
+        )))).scalar_one_or_none()
+
+        if not book:
+            logger.warning(
+                "No database book record matched: bucket=%s raw_key=%r candidates=%s",
+                bucket_name, requested_key, candidates,
+            )
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        if not can_read_book(current_user, book):
+            logger.warning(
+                "Book access forbidden: book_id=%s visibility=%s status=%s user=%s",
+                book.id, book.visibility, book.status, getattr(current_user, "id", "anonymous"),
+            )
+            if not current_user:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        canonical_key = next((k for k in (book.cover_key, book.file_key) if k and k in candidates), book.file_key or requested_key)
+        is_cover = canonical_key == book.cover_key
+        logger.debug(
+            "BOOK MATCH: book_id=%s canonical_key=%r is_cover=%s",
+            book.id, canonical_key, is_cover,
+        )
         return AuthorizedStorageObject(
-            bucket_name, key,
-            getattr(book, "cover_drive_file_id" if is_cover else "file_drive_file_id"),
-            getattr(book, "cover_storage_provider" if is_cover else "file_storage_provider"),
+            bucket_name, canonical_key,
+            getattr(book, "cover_drive_file_id" if is_cover else "file_drive_file_id", None),
+            getattr(book, "cover_storage_provider" if is_cover else "file_storage_provider", None),
             "book", book.id, book,
         )
+
     if bucket_name in {"papers", "solutions"}:
+        # 1. Check Papers by file_key, solution_key, or cover_key
         paper = (await db.execute(select(Papers).where(or_(
-            Papers.file_key.in_(candidates), Papers.cover_key.in_(candidates), Papers.solution_key.in_(candidates)
+            Papers.file_key.in_(candidates),
+            Papers.solution_key.in_(candidates),
+            Papers.cover_key.in_(candidates),
         )))).scalar_one_or_none()
-        solution = (await db.execute(select(Solutions).where(Solutions.file_key.in_(candidates)))).scalar_one_or_none()
-        if paper and (paper.is_hidden and (not current_user or not has_permission(current_user, "papers.edit"))):
-            raise HTTPException(status_code=404, detail="Paper file not found")
+
         if paper:
-            key = next(key for key in (paper.file_key, paper.solution_key) if key in candidates)
-            is_solution = key == paper.solution_key
+            if paper.is_hidden and (not current_user or not has_permission(current_user, "papers.edit")):
+                logger.warning("Paper access forbidden: paper_id=%s is_hidden=True user=%s", paper.id, getattr(current_user, "id", "anonymous"))
+                if not current_user:
+                    raise HTTPException(status_code=404, detail="Resource not found")
+                raise HTTPException(status_code=403, detail="Forbidden")
+
+            if paper.solution_key and paper.solution_key in candidates:
+                canonical_key = paper.solution_key
+                is_solution = True
+                is_cover = False
+            elif paper.cover_key and paper.cover_key in candidates:
+                canonical_key = paper.cover_key
+                is_solution = False
+                is_cover = True
+            else:
+                canonical_key = paper.file_key or requested_key
+                is_solution = False
+                is_cover = False
+
+            prefix = "solution" if is_solution else "cover" if is_cover else "file"
+            logger.debug(
+                "PAPER MATCH: paper_id=%s canonical_key=%r is_solution=%s is_cover=%s db_file_key=%r db_solution_key=%r",
+                paper.id, canonical_key, is_solution, is_cover, paper.file_key, paper.solution_key,
+            )
             return AuthorizedStorageObject(
-                bucket_name, key,
-                getattr(paper, "solution_drive_file_id" if is_solution else "file_drive_file_id"),
-                getattr(paper, "solution_storage_provider" if is_solution else "file_storage_provider"),
+                bucket_name, canonical_key,
+                getattr(paper, f"{prefix}_drive_file_id", None),
+                getattr(paper, f"{prefix}_storage_provider", None),
                 "paper", paper.id, paper,
             )
+
+        # 2. Check Solutions (community solutions)
+        solution = (await db.execute(select(Solutions).where(Solutions.file_key.in_(candidates)))).scalar_one_or_none()
         if solution:
             paper_visibility = await db.execute(select(Papers.is_hidden).where(Papers.id == solution.paper_id))
             is_hidden = paper_visibility.scalar_one_or_none()
             if is_hidden and (not current_user or not has_permission(current_user, "papers.edit")):
-                raise HTTPException(status_code=404, detail="Solution file not found")
-            return AuthorizedStorageObject(bucket_name, solution.file_key, solution.drive_file_id, solution.storage_provider, "solution", solution.id, solution)
+                logger.warning("Solution access forbidden: solution_id=%s paper_id=%s is_hidden=True", solution.id, solution.paper_id)
+                if not current_user:
+                    raise HTTPException(status_code=404, detail="Resource not found")
+                raise HTTPException(status_code=403, detail="Forbidden")
+
+            logger.debug(
+                "SOLUTION MATCH: solution_id=%s paper_id=%s canonical_key=%r",
+                solution.id, solution.paper_id, solution.file_key,
+            )
+            return AuthorizedStorageObject(
+                bucket_name, solution.file_key,
+                solution.drive_file_id, solution.storage_provider,
+                "solution", solution.id, solution,
+            )
+
         logger.warning(
-            "Storage object authorization failed: entity_type=%s entity_id=%s db_key=%r bucket=%s candidates=%s",
-            "paper_or_solution", "unknown", requested_key, bucket_name, candidates,
+            "No database paper or solution record found: bucket=%s raw_key=%r candidates=%s",
+            bucket_name, requested_key, candidates,
         )
-        raise HTTPException(status_code=404, detail="Paper file not found")
+        raise HTTPException(status_code=404, detail="Resource not found")
+
     if bucket_name == "profiles":
         profile = (await db.execute(select(User_profiles).where(User_profiles.profile_picture_key.in_(candidates)))).scalar_one_or_none()
-        if not profile and (not current_user or not has_permission(current_user, "users.manage")):
-            raise HTTPException(status_code=404, detail="Profile image not found")
-        return AuthorizedStorageObject(
-            bucket_name, profile.profile_picture_key if profile else requested_key,
-            None, None, "profile", profile.id if profile else "unknown",
-        )
+        if profile:
+            logger.debug("PROFILE MATCH: profile_id=%s canonical_key=%r", profile.id, profile.profile_picture_key)
+            return AuthorizedStorageObject(
+                bucket_name, profile.profile_picture_key,
+                None, None, "profile", profile.id, profile,
+            )
+        if current_user and has_permission(current_user, "users.manage"):
+            return AuthorizedStorageObject(bucket_name, requested_key, None, None, "profile", "admin", None)
+        logger.warning("No database profile record found: bucket=%s raw_key=%r candidates=%s", bucket_name, requested_key, candidates)
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    if current_user and has_permission(current_user, "admin.access"):
+        return AuthorizedStorageObject(bucket_name, requested_key, None, None, "system", "admin", None)
+
     raise HTTPException(status_code=403, detail="Storage object access is not permitted")
 
 
@@ -374,11 +448,11 @@ async def download_file_direct(
                     last_error = exc
         if file_bytes is None:
             logger.warning(
-                "Storage object resolution failed: entity_type=%s entity_id=%s db_key=%r bucket=%s candidates=%s error=%s",
+                "Authorized database resource exists, but file is missing from storage: entity_type=%s entity_id=%s db_key=%r bucket=%s candidates=%s error=%s",
                 resolved.entity_type, resolved.entity_id, request.object_key, request.bucket_name,
                 storage_key_candidates(request.bucket_name, request.object_key), last_error,
             )
-            raise HTTPException(status_code=404, detail="Stored object not found") from last_error
+            raise HTTPException(status_code=404, detail="File missing from storage") from last_error
         return Response(
             content=file_bytes,
             media_type=metadata.get("mime_type") or "application/octet-stream",

@@ -30,7 +30,15 @@ from services.auth import AccountLinkRequiredError, AuthService, role_for_identi
 from services.academic_taxonomy import context_names, validate_context
 from services.programme_discovery import record_submission
 from services.programme_discovery import normalize_programme_name
-from services.mailer import send_account_created_email, send_password_reset_email, should_expose_password_reset_links
+from services.communications import (
+    queue_new_login_event,
+    queue_password_changed_event,
+    queue_password_reset_event,
+    queue_welcome_event,
+    send_new_login_event,
+    send_password_changed_event,
+    send_welcome_event,
+)
 from services.site_access import get_site_settings
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -110,6 +118,8 @@ async def login_user(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise auth_error(status.HTTP_401_UNAUTHORIZED, error_code or "invalid_credentials", message)
 
     app_token, _, _ = await auth_service.issue_app_token(user=user)
+    if getattr(user, "_send_new_login_notice", False):
+        await queue_new_login_event(db, user)
     return TokenExchangeResponse(token=app_token)
 
 
@@ -161,7 +171,7 @@ async def register_user(payload: RegisterRequest, db: AsyncSession = Depends(get
     login_url = f"{get_configured_frontend_url()}/login"
     # Account creation remains successful if a non-critical welcome email cannot
     # be delivered. The mailer records a safe operational failure for follow-up.
-    await send_account_created_email(user.email, user.name or derive_name_from_email(user.email), user.role or "user", login_url)
+    await queue_welcome_event(db, user, login_url)
 
     app_token, _, _ = await auth_service.issue_app_token(user=user)
     return TokenExchangeResponse(token=app_token)
@@ -180,10 +190,12 @@ async def set_or_update_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     user.password_hash = auth_service.hash_password(payload.password)
+    user.session_version = int(user.session_version or 0) + 1
     if user.auth_provider in (None, ""):
         user.auth_provider = "email"
     user.last_login = user.last_login or __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
     await db.commit()
+    await queue_password_changed_event(db, user)
     return GenericMessageResponse(message="Password updated successfully.")
 
 
@@ -192,19 +204,15 @@ async def request_password_reset(payload: PasswordResetRequest, request: Request
     """Create a password reset token and send a reset email when possible."""
     auth_service = AuthService(db)
     reset_result = await auth_service.create_password_reset_token(payload.email)
-    debug_reset_url: Optional[str] = None
 
     if reset_result:
         user, raw_token, expires_at = reset_result
         frontend_url = get_configured_frontend_url()
         reset_url = f"{frontend_url}/reset-password?{urlencode({'token': raw_token})}"
-        sent = await send_password_reset_email(user.email, reset_url, expires_at)
-        if not sent and should_expose_password_reset_links():
-            debug_reset_url = reset_url
+        await queue_password_reset_event(db, user, reset_url, expires_at)
 
     return PasswordResetRequestResponse(
-        message="If an account matches that email, a password reset link has been prepared.",
-        debug_reset_url=debug_reset_url,
+        message="If an account matches that email address, we have sent instructions to reset your password. Please check your inbox and spam folder.",
     )
 
 
@@ -213,7 +221,8 @@ async def confirm_password_reset(payload: PasswordResetConfirmRequest, db: Async
     """Consume a password reset token and store a new password."""
     auth_service = AuthService(db)
     try:
-        await auth_service.reset_password_with_token(payload.token, payload.password)
+        user = await auth_service.reset_password_with_token(payload.token, payload.password)
+        await queue_password_changed_event(db, user)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -376,12 +385,7 @@ async def exchange_google_token(
         raise auth_error(status.HTTP_409_CONFLICT, "account_link_required", str(exc)) from exc
 
     if is_new_google_user:
-        await send_account_created_email(
-            user.email,
-            user.name or derive_name_from_email(user.email),
-            user.role or "user",
-            f"{get_configured_frontend_url()}/login",
-        )
+        await send_welcome_event(db, user, f"{get_configured_frontend_url()}/login")
     app_token, expires_at, _ = await auth_service.issue_app_token(user=user)
 
     logger.info("[google/exchange] Token issued successfully for user_id=%s, expires_at=%s", user.id, expires_at)

@@ -17,8 +17,16 @@ from services.passage_indexing import PassageIndexService
 from dependencies.auth import get_current_user
 from schemas.auth import UserResponse
 from schemas.storage import ObjectRequest
-from services.authorization import has_permission, require_upload_permission
-from services.authorization import require_paper_management
+from services.authorization import (
+    CP_WINDOW,
+    CONTENT_MANAGER_EDITABLE_RESOURCE_FIELDS,
+    _utc,
+    database_now,
+    has_permission,
+    require_paper_deletion,
+    require_paper_management,
+    require_upload_permission,
+)
 from services.site_access import require_resource_upload
 from models.papers import Papers
 
@@ -348,6 +356,16 @@ async def get_papers(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+def _validate_paper_update_permissions(current_user: UserResponse, update_dict: dict) -> None:
+    if not has_permission(current_user, "papers.edit"):
+        disallowed = set(update_dict.keys()) - CONTENT_MANAGER_EDITABLE_RESOURCE_FIELDS
+        if disallowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"You do not have permission to modify these fields: {', '.join(sorted(disallowed))}",
+            )
+
+
 async def _delete_replaced_file(bucket: str, object_key: Optional[str], provider_id: Optional[str]) -> None:
     if not object_key and not provider_id:
         return
@@ -374,7 +392,9 @@ async def replace_paper_file(
     paper = await db.get(Papers, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    await require_paper_management(db, current_user, paper)
+    now = await database_now(db)
+    if not (has_permission(current_user, "papers.replace_file") or (has_permission(current_user, "papers.own.manage") and str(paper.user_id) == str(current_user.id) and paper.created_at and _utc(now) < _utc(paper.created_at) + CP_WINDOW)):
+        raise HTTPException(status_code=403, detail="You do not have permission to replace this paper's file")
     old_key, old_provider_id = paper.file_key, paper.file_drive_file_id
     paper.file_key = payload.file_key
     paper.file_name = payload.file_name
@@ -402,7 +422,9 @@ async def replace_paper_solution(
     paper = await db.get(Papers, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    await require_paper_management(db, current_user, paper)
+    now = await database_now(db)
+    if not (has_permission(current_user, "papers.manage_solutions") or (has_permission(current_user, "papers.own.manage") and str(paper.user_id) == str(current_user.id) and paper.created_at and _utc(now) < _utc(paper.created_at) + CP_WINDOW)):
+        raise HTTPException(status_code=403, detail="You do not have permission to manage this paper's solution")
     old_key, old_provider_id = paper.solution_key, paper.solution_drive_file_id
     paper.solution_key = payload.file_key
     paper.solution_file_name = payload.file_name
@@ -430,7 +452,9 @@ async def replace_paper_cover(
     paper = await db.get(Papers, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    await require_paper_management(db, current_user, paper)
+    now = await database_now(db)
+    if not (has_permission(current_user, "papers.replace_cover") or (has_permission(current_user, "papers.own.manage") and str(paper.user_id) == str(current_user.id) and paper.created_at and _utc(now) < _utc(paper.created_at) + CP_WINDOW)):
+        raise HTTPException(status_code=403, detail="You do not have permission to replace this paper's cover")
     old_key, old_provider_id = paper.cover_key, paper.cover_drive_file_id
     paper.cover_key = payload.file_key
     paper.cover_file_name = payload.file_name
@@ -457,7 +481,9 @@ async def remove_paper_solution(
     paper = await db.get(Papers, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    await require_paper_management(db, current_user, paper)
+    now = await database_now(db)
+    if not (has_permission(current_user, "papers.manage_solutions") or (has_permission(current_user, "papers.own.manage") and str(paper.user_id) == str(current_user.id) and paper.created_at and _utc(now) < _utc(paper.created_at) + CP_WINDOW)):
+        raise HTTPException(status_code=403, detail="You do not have permission to manage this paper's solution")
     old_key, old_provider_id = paper.solution_key, paper.solution_drive_file_id
     await _delete_replaced_file("papers", old_key, old_provider_id)
     paper.solution_key = paper.solution_drive_file_id = paper.solution_storage_provider = None
@@ -525,7 +551,7 @@ async def update_paperss_batch(
     current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update multiple paperss in a single request (requires ownership)"""
+    """Update multiple paperss in a single request (requires ownership or moderation rights)"""
     logger.debug(f"Batch updating {len(request.items)} paperss")
 
     service = PapersService(db)
@@ -539,6 +565,7 @@ async def update_paperss_batch(
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Paper {item.id} not found")
             await require_paper_management(db, current_user, existing)
+            _validate_paper_update_permissions(current_user, update_dict)
             result = await service.update(item.id, update_dict, user_id=None)
             if result:
                 results.append(result)
@@ -558,7 +585,7 @@ async def update_papers(
     current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an existing papers (requires ownership)"""
+    """Update an existing papers (requires ownership or moderation rights)"""
     logger.debug(f"Updating papers {id} with data: {data}")
     existing = await db.get(Papers, id)
     if not existing:
@@ -569,6 +596,7 @@ async def update_papers(
     try:
         # Only include non-None values for partial updates
         update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
+        _validate_paper_update_permissions(current_user, update_dict)
         result = await service.update(id, update_dict, user_id=None)
         if not result:
             logger.warning(f"Papers with id {id} not found for update")
@@ -607,7 +635,7 @@ async def delete_paperss_batch(
                     errors.append(f"Papers {item_id} not found")
                     continue
 
-                await require_paper_management(db, current_user, existing)
+                await require_paper_deletion(db, current_user, existing)
                 # Don't pass user_id - auth already checked
                 success = await service.delete(item_id)
                 if success:
@@ -643,8 +671,8 @@ async def delete_papers(
     if not existing:
         raise HTTPException(status_code=404, detail="Papers not found")
 
-    # Check authorization (admin can delete any paper, CP/user can only delete their own)
-    await require_paper_management(db, current_user, existing)
+    # Check deletion authorization (admin can delete any paper, CP can only delete their own within 48h)
+    await require_paper_deletion(db, current_user, existing)
 
     service = PapersService(db)
     try:

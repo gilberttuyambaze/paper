@@ -48,11 +48,28 @@ export default function BookDetails() {
     return () => { cancelled = true; };
   }, [id]);
 
+  const [fileHttpErrorStatus, setFileHttpErrorStatus] = useState<number | null>(null);
+
   const loadBookDocument = async (key: string, cancelled = false) => {
-    setFileLoading(true); setFileError(null); setFileProgress({ loaded: 0 });
-    try { const url = await downloadStorageObject('books', key, (progress) => !cancelled && setFileProgress(progress)); if (!cancelled) setFileUrl(url); }
-    catch { if (!cancelled) setFileError('The book file could not be retrieved from storage.'); }
-    finally { if (!cancelled) setFileLoading(false); }
+    setFileLoading(true); setFileError(null); setFileHttpErrorStatus(null); setFileProgress({ loaded: 0 });
+    try {
+      const url = await downloadStorageObject('books', key, (progress) => !cancelled && setFileProgress(progress));
+      if (!cancelled) setFileUrl(url);
+    } catch (err: any) {
+      if (!cancelled) {
+        const status = err?.response?.status || null;
+        setFileHttpErrorStatus(status);
+        if (status === 404) {
+          setFileError('This file could not be found in storage.');
+        } else if (status === 403) {
+          setFileError("You don't have permission to access this document.");
+        } else {
+          setFileError('The book file could not be retrieved from storage.');
+        }
+      }
+    } finally {
+      if (!cancelled) setFileLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -102,7 +119,7 @@ export default function BookDetails() {
         </div>
       </div>
       {viewBook?.description && <p className="theme-soft-panel theme-muted mt-6 rounded-lg p-4">{viewBook.description}</p>}
-      <div className="theme-surface-card mt-6 overflow-hidden rounded-xl"><div className="theme-soft-panel flex flex-wrap items-center justify-between gap-3 border-b p-3"><div className="flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.max(.6, value - .1))}><ZoomOut className="h-4 w-4" /></Button><span className="theme-muted min-w-16 text-center text-sm">{Math.round(zoom * 100)}%</span><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.min(2, value + .1))}><ZoomIn className="h-4 w-4" /></Button></div>{fileUrl && <Button size="sm" variant="outline" onClick={() => window.open(fileUrl, '_blank')}><FileText className="mr-2 h-4 w-4" />Open full book</Button>}</div>{fileLoading || fileError ? <DocumentLoadingProgress resourceType="Book" stage={fileLoading ? 'Downloading document…' : 'Document unavailable'} {...(fileProgress || {})} error={fileError} onRetry={() => viewBook?.file_key && void loadBookDocument(viewBook.file_key)} /> : <DocumentPreview src={fileUrl} title={`${viewBook?.title || 'Opening'} book preview`} minHeightClassName="min-h-[700px]" zoom={zoom} onRetry={() => viewBook?.file_key && void loadBookDocument(viewBook.file_key)} />}</div>
+      <div className="theme-surface-card mt-6 overflow-hidden rounded-xl"><div className="theme-soft-panel flex flex-wrap items-center justify-between gap-3 border-b p-3"><div className="flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.max(.6, value - .1))}><ZoomOut className="h-4 w-4" /></Button><span className="theme-muted min-w-16 text-center text-sm">{Math.round(zoom * 100)}%</span><Button size="sm" variant="outline" onClick={() => setZoom((value) => Math.min(2, value + .1))}><ZoomIn className="h-4 w-4" /></Button></div>{fileUrl && <Button size="sm" variant="outline" onClick={() => window.open(fileUrl, '_blank')}><FileText className="mr-2 h-4 w-4" />Open full book</Button>}</div>{fileLoading || fileError ? <DocumentLoadingProgress resourceType="Book" stage={fileLoading ? 'Downloading document…' : 'Document unavailable'} {...(fileProgress || {})} error={fileError} statusHttpCode={fileHttpErrorStatus} onRetry={() => viewBook?.file_key && void loadBookDocument(viewBook.file_key)} onDownload={() => viewBook?.file_key && void handleDownload()} /> : <DocumentPreview src={fileUrl} title={`${viewBook?.title || 'Opening'} book preview`} minHeightClassName="min-h-[700px]" zoom={zoom} onRetry={() => viewBook?.file_key && void loadBookDocument(viewBook.file_key)} />}</div>
       <Button onClick={handleDownload} disabled={!fileUrl || !viewBook} className="theme-accent-bg mt-6"><Download className="mr-2 h-4 w-4" />Download Book</Button>
     </CardContent></Card>
     {viewBook && <TabsSection comments={comments} commentsError={commentsError} retryComments={() => id && void fetchBookComments(Number(id)).then((data) => { setComments(data.items); setCommentsError(false); }).catch(() => setCommentsError(true))} roots={roots} replies={replies} user={user} profiles={profiles} newComment={newComment} replyTarget={replyTarget} replyDraft={replyDraft} submitting={submitting} setNewComment={setNewComment} setReplyTarget={setReplyTarget} setReplyDraft={setReplyDraft} submitComment={submitComment} setComments={setComments} />}

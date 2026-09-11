@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     version: str = "1.0.0"
     oidc_scope: str = "openid email profile"
     database_url: str = "sqlite+aiosqlite:///./ur_past_paper.db"
-    jwt_secret_key: str = "dev-secret-key-change-me"
+    jwt_secret_key: Optional[str] = None
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
     oidc_issuer_url: str = "https://accounts.google.com"

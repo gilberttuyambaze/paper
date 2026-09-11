@@ -17,7 +17,18 @@ from models.user_profiles import User_profiles
 from models.courses import Course
 from schemas.auth import UserResponse
 from schemas.storage import ObjectRequest
-from services.authorization import CP_WINDOW, _utc, can_create_book, can_manage_book, can_read_book, database_now, has_permission, require_book_management
+from services.authorization import (
+    CP_WINDOW,
+    CONTENT_MANAGER_EDITABLE_RESOURCE_FIELDS,
+    _utc,
+    can_create_book,
+    can_manage_book,
+    can_read_book,
+    database_now,
+    has_permission,
+    require_book_deletion,
+    require_book_management,
+)
 from core.input_normalization import normalize_isbn, normalize_text, normalize_unique
 from routers.notifications import create_notification
 from services.storage import StorageService
@@ -375,10 +386,22 @@ async def get_book(book_id: int, actor: Optional[UserResponse] = Depends(get_opt
     return await _serialize(book, db, actor)
 
 
+def _validate_book_update_permissions(actor: UserResponse, update_dict: dict) -> None:
+    if not has_permission(actor, "books.edit"):
+        disallowed = set(update_dict.keys()) - CONTENT_MANAGER_EDITABLE_RESOURCE_FIELDS
+        if disallowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"You do not have permission to modify these fields: {', '.join(sorted(disallowed))}",
+            )
+
+
 @router.put("/{book_id}")
 async def update_book(book_id: int, payload: BookUpdate, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     book = await _get_book(book_id, db); await _require_manager(book, actor, db)
-    for key, value in payload.model_dump(exclude_unset=True).items(): setattr(book, key, value)
+    update_data = payload.model_dump(exclude_unset=True)
+    _validate_book_update_permissions(actor, update_data)
+    for key, value in update_data.items(): setattr(book, key, value)
     await _activity(db, book, actor, "updated", "Updated book metadata"); await db.commit(); await db.refresh(book)
     return await _serialize(book, db, actor)
 
@@ -434,7 +457,10 @@ async def create_module(payload: ModuleCreate, actor: UserResponse = Depends(get
 
 @router.post("/{book_id}/file")
 async def replace_file(book_id: int, payload: FileReference, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    book = await _get_book(book_id, db); await _require_manager(book, actor, db)
+    book = await _get_book(book_id, db)
+    now = await database_now(db)
+    if not (has_permission(actor, "books.replace_file") or (has_permission(actor, "books.own.manage") and str(book.uploaded_by) == str(actor.id) and book.created_at and _utc(now) < _utc(book.created_at) + CP_WINDOW)):
+        raise HTTPException(status_code=403, detail="You do not have permission to replace this book's file")
     old_key, old_provider_id = book.file_key, book.file_drive_file_id
     book.file_key, book.file_name, book.file_mime_type, book.file_size, book.file_uploaded_at = payload.key, payload.original_filename, payload.mime_type, payload.size, await database_now(db)
     await _attach_storage_metadata(book)
@@ -446,7 +472,10 @@ async def replace_file(book_id: int, payload: FileReference, actor: UserResponse
 
 @router.post("/{book_id}/cover")
 async def replace_cover(book_id: int, payload: FileReference, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    book = await _get_book(book_id, db); await _require_manager(book, actor, db)
+    book = await _get_book(book_id, db)
+    now = await database_now(db)
+    if not (has_permission(actor, "books.replace_cover") or (has_permission(actor, "books.own.manage") and str(book.uploaded_by) == str(actor.id) and book.created_at and _utc(now) < _utc(book.created_at) + CP_WINDOW)):
+        raise HTTPException(status_code=403, detail="You do not have permission to replace this book's cover")
     old_key, old_provider_id = book.cover_key, book.cover_drive_file_id
     book.cover_key, book.cover_file_name, book.cover_mime_type = payload.key, payload.original_filename, payload.mime_type
     await _attach_storage_metadata(book)
@@ -460,7 +489,7 @@ async def replace_cover(book_id: int, payload: FileReference, actor: UserRespons
 async def delete_book(book_id: int, actor: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Permanently hard delete a Book and all associated Google Drive files."""
     book = await _get_book(book_id, db)
-    await _require_manager(book, actor, db)
+    await require_book_deletion(db, actor, book)
 
     # Clean up Google Drive files first
     await _cleanup_book_drive_files(book)

@@ -21,9 +21,9 @@ if (!env.VITE_API_BASE_URL && !env.FRONTEND_API_BASE_URL && !env.PYTHON_BACKEND_
   );
 }
 
-if (!env.SMTP_HOST || !env.SMTP_FROM_EMAIL) {
+if (!env.BREVO_API_KEY || !env.SMTP_FROM_EMAIL) {
   warnings.push(
-    'SMTP is not fully configured. Password reset will fall back to log-only delivery unless EXPOSE_PASSWORD_RESET_LINKS is enabled.'
+    'Brevo transactional email is not fully configured. Password-reset requests will remain generic, but delivery will be unavailable until BREVO_API_KEY and SMTP_FROM_EMAIL are configured.'
   );
 }
 

@@ -27,6 +27,11 @@ export default function ResetPasswordPage() {
   useEffect(() => { if (message) showMessage({ type: 'success', title: 'Password updated', message }); }, [message]);
 
   useEffect(() => {
+    if (!token || typeof window === 'undefined') return;
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
+  }, [token]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {

@@ -64,6 +64,7 @@ def serialize_site_settings(settings: SiteSettings) -> dict:
         "heartbeat_retry_enabled": bool(getattr(settings, "heartbeat_retry_enabled", True)),
         "heartbeat_retry_jitter_minutes": getattr(settings, "heartbeat_retry_jitter_minutes", 30),
         "heartbeat_run_on_startup": bool(getattr(settings, "heartbeat_run_on_startup", True)),
+        "heartbeat_notify_admin": bool(getattr(settings, "heartbeat_notify_admin", True)),
     }
 
 
@@ -118,7 +119,7 @@ async def update_site_settings(db: AsyncSession, payload: dict) -> SiteSettings:
         settings.upload_roles = json.dumps(sorted({str(value).strip().lower() for value in payload["upload_roles"] if str(value).strip()}))
     if "allowed_resource_types" in payload:
         settings.allowed_resource_types = _set_json_list(payload["allowed_resource_types"], RESOURCE_TYPES)
-    for key in ("heartbeat_enabled", "heartbeat_min_weekly_checks", "heartbeat_max_weekly_checks", "heartbeat_retry_delay_hours", "heartbeat_max_retry_attempts", "heartbeat_retry_enabled", "heartbeat_retry_jitter_minutes", "heartbeat_run_on_startup"):
+    for key in ("heartbeat_enabled", "heartbeat_min_weekly_checks", "heartbeat_max_weekly_checks", "heartbeat_retry_delay_hours", "heartbeat_max_retry_attempts", "heartbeat_retry_enabled", "heartbeat_retry_jitter_minutes", "heartbeat_run_on_startup", "heartbeat_notify_admin"):
         if key in payload:
             setattr(settings, key, payload[key])
     return settings

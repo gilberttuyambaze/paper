@@ -20,6 +20,7 @@ class SiteSettings(Base):
     heartbeat_retry_enabled = Column(Boolean, nullable=False, default=True)
     heartbeat_retry_jitter_minutes = Column(Integer, nullable=False, default=30)
     heartbeat_run_on_startup = Column(Boolean, nullable=False, default=True)
+    heartbeat_notify_admin = Column(Boolean, nullable=False, default=True)
     heartbeat_week_start = Column(DateTime(timezone=True), nullable=True)
     heartbeat_schedule = Column(Text, nullable=False, default="[]")
     heartbeat_completed_checks = Column(Integer, nullable=False, default=0)

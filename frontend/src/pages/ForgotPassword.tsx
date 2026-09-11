@@ -15,7 +15,6 @@ export default function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [debugResetUrl, setDebugResetUrl] = useState<string | null>(null);
   const emailError = email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()) ? 'Enter a valid email address.' : undefined;
 
   useEffect(() => { if (error) showMessage({ type: 'error', title: 'Password reset unavailable', message: error }); }, [error]);
@@ -41,12 +40,10 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError(null);
     setMessage(null);
-    setDebugResetUrl(null);
 
     try {
       const response = await authApi.requestPasswordReset(email);
       setMessage(response.message);
-      setDebugResetUrl(response.debug_reset_url || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to start password reset right now.');
     } finally {
@@ -91,15 +88,6 @@ export default function ForgotPasswordPage() {
 
               {error && <p className="theme-error-note rounded-xl px-4 py-3 text-sm">{error}</p>}
               {message && <p className="theme-warning-note rounded-xl px-4 py-3 text-sm">{message}</p>}
-              {debugResetUrl && (
-                <div className="theme-soft-panel rounded-2xl px-4 py-4 text-sm">
-                  <p className="theme-title font-semibold">Reset link</p>
-                  <a href={debugResetUrl} className="theme-link-accent mt-2 block break-all underline underline-offset-4">
-                    {debugResetUrl}
-                  </a>
-                </div>
-              )}
-
               <Button
                 type="submit"
                 className="theme-accent-bg h-12 w-full rounded-xl"

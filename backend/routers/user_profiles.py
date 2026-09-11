@@ -12,6 +12,7 @@ from core.database import get_db
 from services.user_profiles import User_profilesService
 from dependencies.auth import get_current_user
 from schemas.auth import UserResponse
+from services.authorization import is_admin_or_super_admin
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -24,9 +25,34 @@ class User_profilesData(BaseModel):
     """Entity data schema (for create/update)"""
     display_name: str
     role: str
-    trust_score: int = None
-    upload_count: int = None
-    download_count: int = None
+    trust_score: Optional[int] = None
+    upload_count: Optional[int] = None
+    download_count: Optional[int] = None
+    institution_type: Optional[str] = None
+    university_name: Optional[str] = None
+    ur_student_code: Optional[str] = None
+    ur_verification_status: Optional[str] = None
+    profile_picture_key: Optional[str] = None
+    phone_number: Optional[str] = None
+    college_name: Optional[str] = None
+    department_name: Optional[str] = None
+    institution_id: Optional[str] = None
+    campus_id: Optional[str] = None
+    college_id: Optional[str] = None
+    school_id: Optional[str] = None
+    academic_department_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    programme_submission_id: Optional[int] = None
+    programme_name_other: Optional[str] = None
+    programme_name_normalized: Optional[str] = None
+    academic_programme_status: Optional[str] = None
+    year_of_study: Optional[str] = None
+    bio: Optional[str] = None
+    requested_role: Optional[str] = None
+    requested_role_status: Optional[str] = None
+    account_status: Optional[str] = None
+    suspension_reason: Optional[str] = None
+    suspended_until: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
 
@@ -37,6 +63,31 @@ class User_profilesUpdateData(BaseModel):
     trust_score: Optional[int] = None
     upload_count: Optional[int] = None
     download_count: Optional[int] = None
+    institution_type: Optional[str] = None
+    university_name: Optional[str] = None
+    ur_student_code: Optional[str] = None
+    ur_verification_status: Optional[str] = None
+    profile_picture_key: Optional[str] = None
+    phone_number: Optional[str] = None
+    college_name: Optional[str] = None
+    department_name: Optional[str] = None
+    institution_id: Optional[str] = None
+    campus_id: Optional[str] = None
+    college_id: Optional[str] = None
+    school_id: Optional[str] = None
+    academic_department_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    programme_submission_id: Optional[int] = None
+    programme_name_other: Optional[str] = None
+    programme_name_normalized: Optional[str] = None
+    academic_programme_status: Optional[str] = None
+    year_of_study: Optional[str] = None
+    bio: Optional[str] = None
+    requested_role: Optional[str] = None
+    requested_role_status: Optional[str] = None
+    account_status: Optional[str] = None
+    suspension_reason: Optional[str] = None
+    suspended_until: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
 
@@ -49,6 +100,31 @@ class User_profilesResponse(BaseModel):
     trust_score: Optional[int] = None
     upload_count: Optional[int] = None
     download_count: Optional[int] = None
+    institution_type: Optional[str] = None
+    university_name: Optional[str] = None
+    ur_student_code: Optional[str] = None
+    ur_verification_status: Optional[str] = None
+    profile_picture_key: Optional[str] = None
+    phone_number: Optional[str] = None
+    college_name: Optional[str] = None
+    department_name: Optional[str] = None
+    institution_id: Optional[str] = None
+    campus_id: Optional[str] = None
+    college_id: Optional[str] = None
+    school_id: Optional[str] = None
+    academic_department_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    programme_submission_id: Optional[int] = None
+    programme_name_other: Optional[str] = None
+    programme_name_normalized: Optional[str] = None
+    academic_programme_status: Optional[str] = None
+    year_of_study: Optional[str] = None
+    bio: Optional[str] = None
+    requested_role: Optional[str] = None
+    requested_role_status: Optional[str] = None
+    account_status: Optional[str] = None
+    suspension_reason: Optional[str] = None
+    suspended_until: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -237,6 +313,23 @@ async def create_user_profiless_batch(
         raise HTTPException(status_code=500, detail=f"Batch create failed: {str(e)}")
 
 
+PRIVILEGED_PROFILE_FIELDS = frozenset({
+    "role", "trust_score", "account_status", "ur_verification_status",
+    "upload_count", "download_count", "suspension_reason", "suspended_until",
+    "requested_role_status"
+})
+
+
+def _validate_self_profile_update(current_user: UserResponse, update_dict: dict) -> None:
+    if not is_admin_or_super_admin(current_user):
+        attempted_privileged = set(update_dict.keys()) & PRIVILEGED_PROFILE_FIELDS
+        if attempted_privileged:
+            raise HTTPException(
+                status_code=403,
+                detail=f"You do not have permission to modify privileged fields: {', '.join(sorted(attempted_privileged))}",
+            )
+
+
 @router.put("/batch", response_model=List[User_profilesResponse])
 async def update_user_profiless_batch(
     request: User_profilesBatchUpdateRequest,
@@ -253,12 +346,15 @@ async def update_user_profiless_batch(
         for item in request.items:
             # Only include non-None values for partial updates
             update_dict = {k: v for k, v in item.updates.model_dump().items() if v is not None}
+            _validate_self_profile_update(current_user, update_dict)
             result = await service.update(item.id, update_dict, user_id=str(current_user.id))
             if result:
                 results.append(result)
         
         logger.info(f"Batch updated {len(results)} user_profiless successfully")
         return results
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Error in batch update: {str(e)}", exc_info=True)
@@ -279,6 +375,7 @@ async def update_user_profiles(
     try:
         # Only include non-None values for partial updates
         update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
+        _validate_self_profile_update(current_user, update_dict)
         result = await service.update(id, update_dict, user_id=str(current_user.id))
         if not result:
             logger.warning(f"User_profiles with id {id} not found for update")

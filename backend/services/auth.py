@@ -1,4 +1,6 @@
 import logging
+import hashlib
+import hmac
 import os
 import secrets
 import time
@@ -9,9 +11,9 @@ from uuid import uuid4
 from core.auth import create_access_token, hash_password, verify_password
 from core.config import settings
 from core.database import db_manager
-from models.auth import OIDCState, PasswordResetToken, User
+from models.auth import OIDCState, PasswordResetRequestAttempt, PasswordResetToken, User
 from models.user_profiles import User_profiles
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -260,6 +262,14 @@ def _hash_reset_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _reset_request_key(email: str) -> str:
+    return hashlib.sha256(f"password-reset:{_normalize_email(email)}".encode("utf-8")).hexdigest()
+
+
+def _reset_attempt_key(token: str) -> str:
+    return hashlib.sha256(f"password-reset-attempt:{_hash_reset_token(token)}".encode("utf-8")).hexdigest()
+
+
 class AuthService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -345,6 +355,7 @@ class AuthService:
         if not verify_password(password, user.password_hash):
             return None, "password_incorrect"
 
+        user._send_new_login_notice = user.last_login is None
         user.last_login = datetime.now(timezone.utc)
 
         resolved_role = role_for_identity(user.id, normalized_email)
@@ -359,12 +370,24 @@ class AuthService:
 
     async def create_password_reset_token(self, email: str) -> Optional[Tuple[User, str, datetime]]:
         normalized_email = _normalize_email(email)
+        now = datetime.now(timezone.utc)
+        request_key = _reset_request_key(normalized_email)
+        window_start = now - timedelta(minutes=15)
+        attempt_count = await self.db.scalar(
+            select(func.count(PasswordResetRequestAttempt.id)).where(
+                PasswordResetRequestAttempt.request_key == request_key,
+                PasswordResetRequestAttempt.created_at >= window_start,
+            )
+        )
+        if (attempt_count or 0) >= 3:
+            return None
+        self.db.add(PasswordResetRequestAttempt(request_key=request_key, created_at=now))
         result = await self.db.execute(select(User).where(User.email == normalized_email))
         user = result.scalar_one_or_none()
         if not user:
+            await self.db.commit()
             return None
 
-        now = datetime.now(timezone.utc)
         await self.db.execute(
             delete(PasswordResetToken).where(
                 (PasswordResetToken.user_id == user.id)
@@ -390,12 +413,24 @@ class AuthService:
             raise ValueError("Password is too weak. Use at least 6 characters.")
 
         now = datetime.now(timezone.utc)
+        attempt_key = _reset_attempt_key(token)
+        attempt_count = await self.db.scalar(
+            select(func.count(PasswordResetRequestAttempt.id)).where(
+                PasswordResetRequestAttempt.request_key == attempt_key,
+                PasswordResetRequestAttempt.created_at >= now - timedelta(minutes=15),
+            )
+        )
+        if (attempt_count or 0) >= 10:
+            raise ValueError("Password reset link is invalid or has expired")
+        self.db.add(PasswordResetRequestAttempt(request_key=attempt_key, created_at=now))
+        await self.db.commit()
+        supplied_hash = _hash_reset_token(token)
         result = await self.db.execute(
             select(PasswordResetToken).where(
-                PasswordResetToken.token_hash == _hash_reset_token(token),
+                PasswordResetToken.token_hash == supplied_hash,
                 PasswordResetToken.used_at.is_(None),
                 PasswordResetToken.expires_at > now,
-            )
+            ).with_for_update()
         )
         reset_token = result.scalar_one_or_none()
         if not reset_token:
@@ -407,6 +442,7 @@ class AuthService:
 
         user.password_hash = hash_password(new_password)
         user.last_login = now
+        user.session_version = int(user.session_version or 0) + 1
         reset_token.used_at = now
 
         await self.db.execute(
@@ -489,6 +525,7 @@ class AuthService:
             "sub": user.id,
             "email": user.email,
             "role": user.role,
+            "session_version": int(user.session_version or 0),
         }
 
         if user.name:

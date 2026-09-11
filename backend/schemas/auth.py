@@ -88,4 +88,4 @@ class GenericMessageResponse(BaseModel):
 
 
 class PasswordResetRequestResponse(GenericMessageResponse):
-    debug_reset_url: Optional[str] = None
+    pass

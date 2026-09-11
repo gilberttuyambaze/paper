@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { BadgeCheck, Camera, Eye, EyeOff, Pencil, School, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, Camera, Eye, EyeOff, KeyRound, Pencil, School, ShieldCheck } from 'lucide-react';
 import { toast } from '@/lib/messages';
 import AvatarFallback from '../components/AvatarFallback';
 import AcademicContextFields from '../components/AcademicContextFields';
@@ -47,7 +47,7 @@ function URVerificationBadge({ status }: { status?: string | null }) {
   if (status === 'rejected') {
     return <Badge className="bg-error-soft text-error-foreground hover:bg-error-soft">UR verification rejected</Badge>;
   }
-  return <Badge className="theme-soft-panel hover:bg-inherit">No UR verification</Badge>;
+  return <Badge className="theme-soft-panel  hover:bg-inherit">No UR verification</Badge>;
 }
 
 function profileFormFromProfile(profile: UserProfile, fallbackName: string): ProfileFormValues {
@@ -626,70 +626,6 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              <div className="theme-auth-subtle md:col-span-2 rounded-2xl p-4 text-sm">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <p className="font-semibold text-foreground">Password access</p>
-                  <Badge variant={user?.email ? 'secondary' : 'outline'}>
-                    {user?.email ? 'Email/password available' : 'Google only'}
-                  </Badge>
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <Label className="theme-form-label">New password</Label>
-                    <div className="relative mt-2">
-                      <Input
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        onBlur={() => setTouchedFields((current) => ({ ...current, password: true }))}
-                        aria-invalid={Boolean(touchedFields.password && password && password.length < 6)}
-                        aria-describedby="profile-password-error"
-                        placeholder="At least 6 characters"
-                        className="theme-form-input h-11 rounded-xl pr-12"
-                      />
-                      <button
-                        type="button"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                        onClick={() => setShowPassword((value) => !value)}
-                        className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <InlineFieldMessage id="profile-password-error" message={touchedFields.password && password && password.length < 6 ? 'Password must contain at least 6 characters.' : undefined} />
-                  </div>
-                  <div>
-                    <Label className="theme-form-label">Confirm password</Label>
-                    <div className="relative mt-2">
-                      <Input
-                        type={showConfirmPassword ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(event) => setConfirmPassword(event.target.value)}
-                        onBlur={() => setTouchedFields((current) => ({ ...current, confirmPassword: true }))}
-                        aria-invalid={Boolean(touchedFields.confirmPassword && confirmPassword && password !== confirmPassword)}
-                        aria-describedby="profile-confirm-password-error"
-                        placeholder="Confirm new password"
-                        className="theme-form-input h-11 rounded-xl pr-12"
-                      />
-                      <button
-                        type="button"
-                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                        onClick={() => setShowConfirmPassword((value) => !value)}
-                        className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
-                      >
-                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <InlineFieldMessage id="profile-confirm-password-error" message={touchedFields.confirmPassword && confirmPassword && password !== confirmPassword ? 'Passwords do not match.' : undefined} />
-                  </div>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <Button type="button" variant="outline" onClick={handleSavePassword} disabled={passwordSaving || !password} className="theme-accent-bg">
-                    {passwordSaving ? 'Saving…' : 'Set password'}
-                  </Button>
-                </div>
-              </div>
-
               <div className="md:col-span-2 flex justify-end gap-3">
                 <Button variant="outline" onClick={handleCancelEdit}>
                   Cancel
@@ -701,6 +637,86 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Dedicated Password & Security Card */}
+        <Card className="theme-panel mt-6">
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CardTitle className="theme-title flex items-center gap-2 text-lg">
+                <KeyRound className="theme-section-icon h-5 w-5" />
+                Password & Security
+              </CardTitle>
+              <Badge variant={user?.email ? 'secondary' : 'outline'}>
+                {user?.email ? 'Email / Password login enabled' : 'Google sign-in'}
+              </Badge>
+            </div>
+            <p className="theme-muted text-xs">
+              Set or update your account password to sign in directly using your email address and password.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label className="theme-form-label">New password</Label>
+                <div className="relative mt-2">
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    onBlur={() => setTouchedFields((current) => ({ ...current, password: true }))}
+                    aria-invalid={Boolean(touchedFields.password && password && password.length < 6)}
+                    aria-describedby="profile-password-error"
+                    placeholder="At least 6 characters"
+                    className="theme-form-input h-11 rounded-xl pr-12"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((value) => !value)}
+                    className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <InlineFieldMessage id="profile-password-error" message={touchedFields.password && password && password.length < 6 ? 'Password must contain at least 6 characters.' : undefined} />
+              </div>
+              <div>
+                <Label className="theme-form-label">Confirm password</Label>
+                <div className="relative mt-2">
+                  <Input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    onBlur={() => setTouchedFields((current) => ({ ...current, confirmPassword: true }))}
+                    aria-invalid={Boolean(touchedFields.confirmPassword && confirmPassword && password !== confirmPassword)}
+                    aria-describedby="profile-confirm-password-error"
+                    placeholder="Confirm new password"
+                    className="theme-form-input h-11 rounded-xl pr-12"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    onClick={() => setShowConfirmPassword((value) => !value)}
+                    className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <InlineFieldMessage id="profile-confirm-password-error" message={touchedFields.confirmPassword && confirmPassword && password !== confirmPassword ? 'Passwords do not match.' : undefined} />
+              </div>
+            </div>
+            <div className="flex justify-end pt-2">
+              <Button
+                type="button"
+                onClick={handleSavePassword}
+                disabled={passwordSaving || !password || password.length < 6 || password !== confirmPassword}
+                className="theme-accent-bg"
+              >
+                {passwordSaving ? 'Updating password…' : 'Update Password'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="mt-8">

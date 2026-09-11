@@ -1,11 +1,15 @@
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
 from main import app
 from routers.auth import get_configured_frontend_url
 from schemas.auth import UserResponse
+from services.auth import _hash_reset_token
+from services.communications import dispatch_communication
 
 
 class PasswordResetCORSAndSecurityTests(unittest.IsolatedAsyncioTestCase):
@@ -62,3 +66,72 @@ class PasswordResetCORSAndSecurityTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(payload.auth_provider, 'google')
         self.assertFalse(payload.has_password)
+
+    def test_password_reset_request_never_returns_debug_reset_url(self):
+        fake_user = SimpleNamespace(id="user-1", email="person@example.com")
+        fake_expiry = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        with patch("routers.auth.AuthService.create_password_reset_token", return_value=(fake_user, "raw-secret-token", fake_expiry)), \
+             patch("routers.auth.queue_password_reset_event", return_value=None):
+            response = self.client.post(
+                "/api/v1/auth/password-reset/request",
+                json={"email": "person@example.com"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"message": "If an account matches that email address, we have sent instructions to reset your password. Please check your inbox and spam folder."},
+        )
+        self.assertNotIn("raw-secret-token", response.text)
+        self.assertNotIn("debug_reset_url", response.text)
+
+    def test_password_reset_request_queues_delivery_at_api_boundary(self):
+        fake_user = SimpleNamespace(id="user-1", email="person@example.com")
+        fake_expiry = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        with patch("routers.auth.AuthService.create_password_reset_token", return_value=(fake_user, "raw-secret-token", fake_expiry)), \
+             patch("routers.auth.queue_password_reset_event", new=__import__("unittest").mock.AsyncMock()) as queue:
+            response = self.client.post("/api/v1/auth/password-reset/request", json={"email": "person@example.com"})
+
+        self.assertEqual(response.status_code, 200)
+        queue.assert_awaited_once()
+        self.assertNotIn("raw-secret-token", response.text)
+
+    def test_reset_token_hash_is_not_raw_token(self):
+        raw_token = "secure-random-reset-token"
+        self.assertNotEqual(_hash_reset_token(raw_token), raw_token)
+        self.assertEqual(len(_hash_reset_token(raw_token)), 64)
+
+    def test_communication_provider_failure_is_recorded_without_raising(self):
+        class FakeDb:
+            def __init__(self):
+                self.events = []
+                self.committed = False
+
+            def add(self, event):
+                self.events.append(event)
+
+            async def commit(self):
+                self.committed = True
+
+        async def fail(*args, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+        async def run():
+            db = FakeDb()
+            with patch("services.communications.send_transactional_email", side_effect=fail):
+                sent = await dispatch_communication(
+                    db,
+                    event_type="PASSWORD_CHANGED",
+                    user_id="user-1",
+                    recipient="person@example.com",
+                    subject="Password changed",
+                    text="Your password changed.",
+                    html="<p>Your password changed.</p>",
+                )
+            return sent, db
+
+        sent, db = __import__("asyncio").run(run())
+        self.assertFalse(sent)
+        self.assertTrue(db.committed)
+        self.assertEqual(db.events[0].status, "failed")
+        self.assertEqual(db.events[0].error_category, "provider_failure")

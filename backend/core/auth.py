@@ -150,7 +150,7 @@ class AccessTokenError(Exception):
         super().__init__(self.message)
 
 
-def hash_password(password: str, iterations: int = 200_000) -> str:
+def hash_password(password: str, iterations: int = 100_000) -> str:
     """Hash a plaintext password for secure storage."""
     if not password:
         raise ValueError("Password is required")
@@ -182,6 +182,8 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 def create_access_token(claims: Dict[str, Any], expires_minutes: Optional[int] = None) -> str:
     """Create signed JWT access token from provided claims."""
+    if not settings.jwt_secret_key:
+        raise RuntimeError("JWT_SECRET_KEY must be configured")
     if not settings.jwt_secret_key:
         logger.error("JWT secret key is not configured")
         raise ValueError("JWT secret key is not configured")

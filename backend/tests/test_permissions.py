@@ -38,7 +38,11 @@ def test_configured_super_admin_identity_resolves_before_admin(monkeypatch):
 
 def test_permission_decisions_do_not_depend_on_role_checks_in_callers():
     assert has_permission(actor("admin"), "admin.dashboard.view")
-    assert has_permission(actor("content_manager"), "users.manage")
+    assert has_permission(actor("content_manager"), "users.view")
+    assert not has_permission(actor("content_manager"), "users.manage")
+    assert not has_permission(actor("content_manager"), "users.delete")
+    assert has_permission(actor("content_manager"), "papers.verify")
+    assert not has_permission(actor("content_manager"), "papers.delete")
     assert not has_permission(actor("cp"), "users.delete")
     assert not has_permission(actor("normal"), "uploads.book")
 

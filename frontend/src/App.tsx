@@ -30,7 +30,17 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const NotFoundPage = lazy(() => import('./pages/NotFound'));
 const MaintenancePage = lazy(() => import('./pages/Maintenance'));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes fresh
+      gcTime: 15 * 60 * 1000,    // 15 minutes garbage collection time
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      retry: 1,
+    },
+  },
+});
 
 function RouteFallback() {
   return (

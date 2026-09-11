@@ -967,6 +967,7 @@ export interface SiteAccessSettings {
   heartbeat_retry_enabled: boolean;
   heartbeat_retry_jitter_minutes: number;
   heartbeat_run_on_startup: boolean;
+  heartbeat_notify_admin?: boolean;
   heartbeat?: HeartbeatStatus;
 }
 

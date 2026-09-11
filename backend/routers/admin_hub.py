@@ -22,7 +22,16 @@ from services.academic_taxonomy import NODES
 from routers.notifications import create_notification
 from schemas.auth import UserResponse
 from services.programme_discovery import find_programme_matches
-from services.authorization import has_permission, is_super_admin, permissions_for_role, require_permission, role_has_permission
+from services.authorization import (
+    actor_can_manage_target,
+    has_permission,
+    is_admin_or_super_admin,
+    is_super_admin,
+    permissions_for_role,
+    require_permission,
+    role_has_permission,
+    role_level,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +268,12 @@ def _serialize_user(profile: User_profiles, user: Optional[User]) -> dict:
 def _ensure_role_assignment_allowed(actor: UserResponse, target_profile: User_profiles, requested_role: str) -> None:
     if requested_role not in MANAGEMENT_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role selection")
+    if not has_permission(actor, "users.change_role"):
+        raise HTTPException(status_code=403, detail="Permission required: users.change_role")
+    if not actor_can_manage_target(actor, target_profile):
+        raise HTTPException(status_code=403, detail="You do not have permission to modify this user's role")
+    if str(actor.id) == str(target_profile.user_id) and not is_super_admin(actor):
+        raise HTTPException(status_code=403, detail="You cannot modify your own role")
     if requested_role == "super_admin" or target_profile.role == "super_admin":
         if not is_super_admin(actor):
             raise HTTPException(status_code=403, detail="Only the Super Admin can change Super Admin assignments")
@@ -266,13 +281,8 @@ def _ensure_role_assignment_allowed(actor: UserResponse, target_profile: User_pr
             raise HTTPException(status_code=400, detail="Use the Super Admin transfer operation to change this role")
         if requested_role == "super_admin":
             raise HTTPException(status_code=400, detail="Use the Super Admin transfer operation to assign this role")
-    if not has_permission(actor, "users.manage") and (role_has_permission(requested_role, "users.manage") or role_has_permission(target_profile.role, "users.manage")):
-        raise HTTPException(status_code=403, detail="Only admins can modify administrator accounts")
-    # An administrator should not be able to lock themselves out of the
-    # management hub through a role edit. Other administrator changes remain
-    # subject to the existing server-side authorization above.
-    if has_permission(actor, "users.manage") and str(actor.id) == str(target_profile.user_id) and not role_has_permission(requested_role, "users.manage"):
-        raise HTTPException(status_code=400, detail="You cannot remove your own administrator role")
+    if not is_super_admin(actor) and role_level(requested_role) >= role_level(actor.role):
+        raise HTTPException(status_code=403, detail="You cannot assign a role equal to or higher than your own")
 
 
 class SuperAdminTransferRequest(BaseModel):
@@ -513,29 +523,17 @@ async def update_user(
 
     user = await db.get(User, profile.user_id)
 
-    require_permission(current_user, "users.manage")
+    if not actor_can_manage_target(current_user, profile):
+        raise HTTPException(status_code=403, detail="You do not have permission to manage this account")
+
+    if (is_super_admin(profile) or (user and is_super_admin(user))) and not is_super_admin(current_user):
+        raise HTTPException(status_code=403, detail="Super Admin accounts can only be managed by Super Admin")
+
     if user and is_super_admin(user) and payload.role is not None:
         raise HTTPException(status_code=400, detail="Use the Super Admin transfer operation to change this role")
 
-    if payload.email is not None:
-        normalized_email = _normalize_email(payload.email)
-        if not normalized_email:
-            raise HTTPException(status_code=400, detail="Email cannot be empty")
-        duplicate_user = await db.execute(select(User).where(User.email == normalized_email, User.id != profile.user_id))
-        if duplicate_user.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Another account already uses that email")
-        if user:
-            user.email = normalized_email
-
-    if payload.display_name is not None:
-        display_name = _normalize_text(payload.display_name)
-        if not display_name:
-            raise HTTPException(status_code=400, detail="Display name cannot be empty")
-        profile.display_name = display_name
-        if user:
-            user.name = display_name
-
     if payload.role is not None:
+        require_permission(current_user, "users.change_role")
         _ensure_role_assignment_allowed(current_user, profile, payload.role)
         profile.role = payload.role
         if payload.role in REQUESTABLE_ROLES:
@@ -546,40 +544,77 @@ async def update_user(
             profile.requested_role_status = "none"
         if user:
             user.role = "admin" if payload.role == "admin" else "user"
-    if payload.trust_score is not None:
-        profile.trust_score = payload.trust_score
-    if payload.account_status is not None:
-        if payload.account_status not in ACCOUNT_STATUSES:
-            raise HTTPException(status_code=400, detail="Invalid account status")
-        profile.account_status = payload.account_status
+
+    if payload.account_status is not None or payload.suspension_reason is not None or payload.suspended_until is not None:
+        require_permission(current_user, "users.change_status")
+        if payload.account_status is not None:
+            if payload.account_status not in ACCOUNT_STATUSES:
+                raise HTTPException(status_code=400, detail="Invalid account status")
+            profile.account_status = payload.account_status
+        if payload.suspension_reason is not None:
+            profile.suspension_reason = _normalize_text(payload.suspension_reason)
+        if payload.suspended_until is not None:
+            profile.suspended_until = payload.suspended_until
+
     if payload.ur_verification_status is not None:
+        require_permission(current_user, "users.change_verification")
         if payload.ur_verification_status not in UR_VERIFICATION_STATUSES:
             raise HTTPException(status_code=400, detail="Invalid UR verification status")
         profile.ur_verification_status = payload.ur_verification_status
-    if payload.institution_type is not None:
-        if payload.institution_type not in INSTITUTION_TYPES:
-            raise HTTPException(status_code=400, detail="Invalid institution type")
-        profile.institution_type = payload.institution_type
-    if payload.university_name is not None:
-        profile.university_name = _normalize_text(payload.university_name)
-    if payload.ur_student_code is not None:
-        profile.ur_student_code = _normalize_text(payload.ur_student_code)
-    if payload.profile_picture_key is not None:
-        profile.profile_picture_key = _normalize_text(payload.profile_picture_key)
-    if payload.phone_number is not None:
-        profile.phone_number = _normalize_text(payload.phone_number)
-    if payload.college_name is not None:
-        profile.college_name = _normalize_text(payload.college_name)
-    if payload.department_name is not None:
-        profile.department_name = _normalize_text(payload.department_name)
-    if payload.year_of_study is not None:
-        profile.year_of_study = _normalize_text(payload.year_of_study)
-    if payload.bio is not None:
-        profile.bio = _normalize_text(payload.bio)
-    if payload.suspension_reason is not None:
-        profile.suspension_reason = _normalize_text(payload.suspension_reason)
-    if payload.suspended_until is not None:
-        profile.suspended_until = payload.suspended_until
+
+    academic_fields_present = any(v is not None for v in (
+        payload.college_name, payload.department_name, payload.year_of_study,
+        payload.institution_type, payload.university_name, payload.ur_student_code
+    ))
+    if academic_fields_present:
+        require_permission(current_user, "users.edit_academic")
+        if payload.institution_type is not None:
+            if payload.institution_type not in INSTITUTION_TYPES:
+                raise HTTPException(status_code=400, detail="Invalid institution type")
+            profile.institution_type = payload.institution_type
+        if payload.university_name is not None:
+            profile.university_name = _normalize_text(payload.university_name)
+        if payload.ur_student_code is not None:
+            profile.ur_student_code = _normalize_text(payload.ur_student_code)
+        if payload.college_name is not None:
+            profile.college_name = _normalize_text(payload.college_name)
+        if payload.department_name is not None:
+            profile.department_name = _normalize_text(payload.department_name)
+        if payload.year_of_study is not None:
+            profile.year_of_study = _normalize_text(payload.year_of_study)
+
+    profile_fields_present = any(v is not None for v in (
+        payload.email, payload.display_name, payload.trust_score,
+        payload.profile_picture_key, payload.phone_number, payload.bio
+    ))
+    if profile_fields_present:
+        require_permission(current_user, "users.edit_profile")
+        if payload.email is not None:
+            normalized_email = _normalize_email(payload.email)
+            if not normalized_email:
+                raise HTTPException(status_code=400, detail="Email cannot be empty")
+            duplicate_user = await db.execute(select(User).where(User.email == normalized_email, User.id != profile.user_id))
+            if duplicate_user.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="Another account already uses that email")
+            if user:
+                user.email = normalized_email
+
+        if payload.display_name is not None:
+            display_name = _normalize_text(payload.display_name)
+            if not display_name:
+                raise HTTPException(status_code=400, detail="Display name cannot be empty")
+            profile.display_name = display_name
+            if user:
+                user.name = display_name
+
+        if payload.trust_score is not None:
+            profile.trust_score = payload.trust_score
+        if payload.profile_picture_key is not None:
+            profile.profile_picture_key = _normalize_text(payload.profile_picture_key)
+        if payload.phone_number is not None:
+            profile.phone_number = _normalize_text(payload.phone_number)
+        if payload.bio is not None:
+            profile.bio = _normalize_text(payload.bio)
 
     await create_notification(
         db,
@@ -605,6 +640,7 @@ async def review_role_request(
     current_user: UserResponse = Depends(get_management_user),
     db: AsyncSession = Depends(get_db),
 ):
+    require_permission(current_user, "users.change_role")
     action = payload.action.strip().lower()
     if action not in {"approve", "reject"}:
         raise HTTPException(status_code=400, detail="Action must be approve or reject")
@@ -612,6 +648,9 @@ async def review_role_request(
     profile = await db.get(User_profiles, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="User profile not found")
+
+    if not actor_can_manage_target(current_user, profile):
+        raise HTTPException(status_code=403, detail="You do not have permission to review this account's role request")
 
     requested_role = (profile.requested_role or "").strip().lower() or None
     requested_role_status = (profile.requested_role_status or "none").strip().lower()
@@ -660,6 +699,7 @@ async def delete_user(
     current_user: UserResponse = Depends(get_management_user),
     db: AsyncSession = Depends(get_db),
 ):
+    require_permission(current_user, "users.delete")
     profile = await db.get(User_profiles, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="User profile not found")
@@ -668,10 +708,11 @@ async def delete_user(
         raise HTTPException(status_code=400, detail="You cannot delete your own account from the management hub")
 
     user = await db.get(User, profile.user_id)
-    if is_super_admin(profile) or is_super_admin(user):
+    if is_super_admin(profile) or (user and is_super_admin(user)):
         raise HTTPException(status_code=400, detail="The current Super Admin cannot be deleted")
 
-    require_permission(current_user, "users.delete")
+    if not actor_can_manage_target(current_user, profile):
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this user")
 
     await db.execute(delete(Reports).where(Reports.user_id == profile.user_id))
     await db.execute(delete(Comments).where(Comments.user_id == profile.user_id))
@@ -696,8 +737,10 @@ async def moderate_paper(
         raise HTTPException(status_code=404, detail="Paper not found")
 
     if payload.verification_status is not None:
+        require_permission(_current_user, "papers.verify")
         paper.verification_status = payload.verification_status
     if payload.is_hidden is not None:
+        require_permission(_current_user, "papers.hide")
         paper.is_hidden = payload.is_hidden
 
     await create_notification(
@@ -722,6 +765,7 @@ async def moderate_report(
     _current_user: UserResponse = Depends(get_management_user),
     db: AsyncSession = Depends(get_db),
 ):
+    require_permission(_current_user, "reports.manage")
     report = await db.get(Reports, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -730,8 +774,10 @@ async def moderate_report(
     paper = await db.get(Papers, report.paper_id)
     if paper:
         if payload.hide_paper is not None:
+            require_permission(_current_user, "papers.hide")
             paper.is_hidden = payload.hide_paper
         if payload.verification_status is not None:
+            require_permission(_current_user, "papers.verify")
             paper.verification_status = payload.verification_status
         await create_notification(
             db,

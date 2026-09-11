@@ -42,16 +42,36 @@ async def initialize_database():
             "yes",
             "on",
         }
-        schema_checks_on_startup = os.getenv("URHUD_SCHEMA_CHECKS_ON_STARTUP", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
+        schema_checks_on_startup = os.getenv("URHUD_SCHEMA_CHECKS_ON_STARTUP", "true").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
         }
         if schema_checks_on_startup:
-            logger.info("Checking existing schema for required auth/profile and storage metadata columns...")
-            await db_manager.ensure_tables_exist_for_models("paper_interactions")
-            await db_manager.ensure_model_columns_for_existing_tables("users", "user_profiles", "papers", "solutions")
+            logger.info("Checking existing schema for required auth/profile, site settings, and storage metadata columns...")
+            await db_manager.ensure_tables_exist_for_models(
+                "paper_interactions",
+                "system_health_heartbeats",
+                "site_settings",
+                "academic_programme_submissions",
+                "academic_programme_aliases",
+            )
+            tables_to_sync = [
+                "site_settings",
+                "users",
+                "user_profiles",
+                "papers",
+                "solutions",
+                "comments",
+                "books",
+                "reports",
+                "notifications",
+                "system_health_heartbeats",
+                "academic_programme_submissions",
+                "academic_programme_aliases",
+            ]
+            await db_manager.ensure_model_columns_for_existing_tables(*tables_to_sync)
         else:
             logger.info("Skipping schema checks during normal startup; enable URHUD_SCHEMA_CHECKS_ON_STARTUP to run them.")
         if auto_create_tables:
@@ -65,6 +85,7 @@ async def initialize_database():
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
+
 
 
 async def close_database():

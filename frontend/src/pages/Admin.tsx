@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   fetchAdminRoleRequests,
@@ -239,8 +239,11 @@ export default function AdminPage() {
   const debouncedPaperSearch = useDebounced(paperSearch, 250);
 
   const isContentManagerView = location.pathname === '/content-manager' || user?.role === 'content_manager';
-  const canAssignAdmin = hasPermission('users.manage');
-  const roleOptions = canAssignAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((option) => option.value !== 'admin');
+  const isSuperAdmin = Boolean(user?.role === 'super_admin' || user?.is_super_admin);
+  const canManageUsers = hasPermission('users.change_role') || hasPermission('users.edit_profile') || hasPermission('users.manage');
+  const canDeleteUsers = hasPermission('users.delete');
+  const canDeletePapers = hasPermission('papers.delete');
+  const roleOptions = isSuperAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((option) => option.value !== 'super_admin' && option.value !== 'admin');
 
   const loadData = async () => {
     try {
@@ -350,8 +353,9 @@ export default function AdminPage() {
     if (paperPage > paperPageCount) setPaperPage(1);
   }, [paperPageCount]);
   const [uploaderProfiles, setUploaderProfiles] = useState<Record<string, { profile?: any; imageUrl?: string | null }>>({});
-  const selectedUserIsAdmin = selectedUser?.permissions?.includes('users.manage') ?? false;
-  const adminProtected = selectedUserIsAdmin && !canAssignAdmin;
+  const selectedUserIsAdmin = Boolean(selectedUser?.role === 'admin' || selectedUser?.role === 'super_admin' || selectedUser?.permissions?.includes('users.change_role'));
+  const userReadOnly = !canManageUsers;
+  const adminProtected = userReadOnly || (selectedUserIsAdmin && !isSuperAdmin);
 
   const updateDraft = <K extends keyof UserDraft>(field: K, value: UserDraft[K]) => {
     setDraft((current) => current ? { ...current, [field]: value } : current);
@@ -645,7 +649,7 @@ export default function AdminPage() {
               ) : (
                 <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
                   {paginatedUsers.map((profile) => (
-                    <Card key={profile.id} className="theme-soft-panel"><CardContent className="p-4"><div className="flex items-center gap-3"><div className="h-11 w-11 overflow-hidden rounded-full"><AvatarFallback name={profile.display_name} /></div><div className="min-w-0"><p className="theme-title truncate font-semibold">{profile.display_name}</p><p className="theme-muted truncate text-xs">{profile.email || profile.user_id}</p></div></div><div className="mt-4 flex flex-wrap gap-2"><RoleBadge role={profile.role} /><StatusBadge status={profile.account_status} /></div><p className="theme-muted mt-3 text-xs">{profile.college_name || profile.department_name || 'Academic profile not set'} · Joined {formatDate(profile.created_at)}</p><Button className="mt-4 w-full" variant="outline" onClick={() => openUser(profile)}>View Full Profile</Button></CardContent></Card>
+                    <Card key={profile.id} className="theme-soft-panel"><CardContent className="p-4"><div className="flex items-center gap-3"><div className="h-11 w-11 overflow-hidden rounded-full"><AvatarFallback name={profile.display_name} profilePictureKey={profile.profile_picture_key} imageAlt={`${profile.display_name} avatar`} /></div><div className="min-w-0"><p className="theme-title truncate font-semibold">{profile.display_name}</p><p className="theme-muted truncate text-xs">{profile.email || profile.user_id}</p></div></div><div className="mt-4 flex flex-wrap gap-2"><RoleBadge role={profile.role} /><StatusBadge status={profile.account_status} /></div><p className="theme-muted mt-3 text-xs">{profile.college_name || profile.department_name || 'Academic profile not set'} · Joined {formatDate(profile.created_at)}</p><Button className="mt-4 w-full" variant="outline" onClick={() => openUser(profile)}>View Full Profile</Button></CardContent></Card>
                   ))}
                   <div className="col-span-full mt-2 flex items-center justify-center gap-2">
                     <Button disabled={userPage <= 1} onClick={() => setUserPage((p) => Math.max(1, p - 1))}>{'<'}</Button>
@@ -991,7 +995,7 @@ export default function AdminPage() {
             {paperEditing ? <><Button onClick={() => void savePaperMetadata()} disabled={paperSaving}>{paperSaving && <LoaderCircle className="mr-1 h-4 w-4 animate-spin" />}{paperSaving ? 'Saving...' : 'Save metadata'}</Button><Button variant="outline" onClick={() => setPaperEditing(false)} disabled={paperSaving}>Cancel</Button></> : <Button variant="outline" onClick={() => setPaperEditing(true)}>Edit metadata</Button>}
             {selectedPaper.verification_status !== 'verified' && <Button onClick={() => void handleVerifyPaper(selectedPaper.id)} className="bg-success text-success-foreground hover:bg-success/90"><CheckCircle className="mr-1 h-4 w-4" />Verify</Button>}
             <Button variant="outline" onClick={() => void handleTogglePaperVisibility(selectedPaper.id, !!selectedPaper.is_hidden)}>{selectedPaper.is_hidden ? <><Eye className="mr-1 h-4 w-4" />Show</> : <><EyeOff className="mr-1 h-4 w-4" />Hide</>}</Button>
-            <Button variant="destructive" onClick={() => confirmDeletePaper(selectedPaper)}><Trash2 className="mr-1 h-4 w-4" />Delete</Button>
+            {canDeletePapers && <Button variant="destructive" onClick={() => confirmDeletePaper(selectedPaper)}><Trash2 className="mr-1 h-4 w-4" />Delete</Button>}
           </div>
         </div>}
       </AdminDetailDialog>
@@ -1032,11 +1036,15 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {adminProtected && (
-                <div className="rounded-2xl border border-warning-border bg-warning-soft px-4 py-3 text-sm text-warning-foreground">
-                  Only administrators can edit or delete administrator accounts.
+              {userReadOnly ? (
+                <div className="rounded-2xl border border-info-border bg-info-soft px-4 py-3 text-sm text-info-foreground">
+                  User details are available in read-only mode for content moderation. User administration is restricted to Admins.
                 </div>
-              )}
+              ) : adminProtected ? (
+                <div className="rounded-2xl border border-warning-border bg-warning-soft px-4 py-3 text-sm text-warning-foreground">
+                  Only Super Administrators can edit or delete administrator accounts.
+                </div>
+              ) : null}
 
               {selectedUser.requested_role && selectedUser.requested_role_status && selectedUser.requested_role_status !== 'none' && (
                 <div className="rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
@@ -1158,17 +1166,21 @@ export default function AdminPage() {
                 </div>
               </div>
           <DialogFooter className="gap-3">
-            <Button
-              variant="destructive"
-              onClick={() => setDeleteUserConfirmation(true)}
-              disabled={adminProtected || deleting || selectedUser?.user_id === user.id}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              {deleting ? 'Deleting...' : 'Delete user'}
-            </Button>
-            <Button onClick={() => void handleSaveUser()} disabled={adminProtected || saving}>
-              {saving ? 'Saving...' : 'Save changes'}
-            </Button>
+            {canDeleteUsers && (
+              <Button
+                variant="destructive"
+                onClick={() => setDeleteUserConfirmation(true)}
+                disabled={adminProtected || deleting || selectedUser?.user_id === user.id}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                {deleting ? 'Deleting...' : 'Delete user'}
+              </Button>
+            )}
+            {canManageUsers && (
+              <Button onClick={() => void handleSaveUser()} disabled={adminProtected || saving}>
+                {saving ? 'Saving...' : 'Save changes'}
+              </Button>
+            )}
           </DialogFooter>
             </div>
           )}

@@ -53,3 +53,31 @@ def test_status_reports_disabled_retrying_degraded_and_failed():
     assert heartbeat_status(row(next_retry_at=datetime.now(timezone.utc)), settings(), True)["status"] == "retrying"
     assert heartbeat_status(row(consecutive_failures=1), settings(heartbeat_max_retry_attempts=3), True)["status"] == "degraded"
     assert heartbeat_status(row(consecutive_failures=2), settings(heartbeat_max_retry_attempts=2), True)["status"] == "failed"
+
+
+def test_heartbeat_notification_honors_admin_preference(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from services.heartbeat import _notify_admin_of_heartbeat
+
+    async def run():
+        # When enabled and admin email is configured
+        monkeypatch.setenv("ADMIN_USER_EMAIL", "admin@ur.ac.rw")
+        monkeypatch.delenv("HEARTBEAT_NOTIFY_ADMIN", raising=False)
+        with patch("services.mailer.send_system_heartbeat_email", new=AsyncMock(return_value=True)) as mock_send:
+            await _notify_admin_of_heartbeat(settings(heartbeat_notify_admin=True), {"status": "healthy"})
+            assert mock_send.call_count == 1
+            assert mock_send.call_args[0][0] == "admin@ur.ac.rw"
+
+        # When admin turned off notification in settings
+        with patch("services.mailer.send_system_heartbeat_email", new=AsyncMock(return_value=True)) as mock_send:
+            await _notify_admin_of_heartbeat(settings(heartbeat_notify_admin=False), {"status": "healthy"})
+            assert mock_send.call_count == 0
+
+        # When disabled via environment variable
+        monkeypatch.setenv("HEARTBEAT_NOTIFY_ADMIN", "false")
+        with patch("services.mailer.send_system_heartbeat_email", new=AsyncMock(return_value=True)) as mock_send:
+            await _notify_admin_of_heartbeat(settings(heartbeat_notify_admin=True), {"status": "healthy"})
+            assert mock_send.call_count == 0
+
+    asyncio.run(run())

@@ -357,15 +357,14 @@ class RPApi {
     }
   }
 
-  async requestPasswordReset(email: string): Promise<{ message: string; debug_reset_url?: string | null }> {
+  async requestPasswordReset(email: string): Promise<{ message: string }> {
     try {
       const response = await this.client.post(`${this.getBaseURL()}/api/v1/auth/password-reset/request`, {
         email,
       });
 
       return {
-        message: response.data?.message || 'If an account matches that email, a password reset link has been prepared.',
-        debug_reset_url: response.data?.debug_reset_url || null,
+        message: response.data?.message || 'If an account matches that email address, we have sent instructions to reset your password. Please check your inbox and spam folder.',
       };
     } catch (error) {
       throw normalizeAuthError(error, 'Unable to send reset instructions right now. Please try again.');

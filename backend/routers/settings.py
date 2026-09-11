@@ -57,6 +57,7 @@ class SiteAccessUpdate(BaseModel):
     heartbeat_retry_enabled: bool | None = None
     heartbeat_retry_jitter_minutes: int | None = None
     heartbeat_run_on_startup: bool | None = None
+    heartbeat_notify_admin: bool | None = None
 
 
 @router.get("/site-access")
@@ -77,7 +78,7 @@ async def save_site_access(payload: SiteAccessUpdate, _current_user: UserRespons
     heartbeat_fields = {
         "heartbeat_enabled", "heartbeat_min_weekly_checks", "heartbeat_max_weekly_checks",
         "heartbeat_retry_delay_hours", "heartbeat_max_retry_attempts", "heartbeat_retry_enabled",
-        "heartbeat_retry_jitter_minutes", "heartbeat_run_on_startup",
+        "heartbeat_retry_jitter_minutes", "heartbeat_run_on_startup", "heartbeat_notify_admin",
     }
     # Lock state/message are site settings; heartbeat configuration separately
     # requires the narrower system-health management capability.

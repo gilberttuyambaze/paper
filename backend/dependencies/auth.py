@@ -12,7 +12,7 @@ from models.user_profiles import User_profiles
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.auth import UserResponse
-from services.authorization import is_super_admin, permissions_for_role, require_permission
+from services.authorization import is_admin_or_super_admin, is_super_admin, permissions_for_role, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,15 @@ async def get_current_user(
             user_hash = hashlib.sha256(str(user_id).encode()).hexdigest()[:8] if user_id else "unknown"
             logger.debug("Failed to parse last_login for user hash: %s", user_hash)
 
+    db_user = await db.get(User, user_id)
+    if not db_user or int(payload.get("session_version", -1)) != int(db_user.session_version or 0):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication token is no longer valid")
+    profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
+    profile = profile_result.scalar_one_or_none()
+    if profile:
+        profile_status = (profile.account_status or "active").lower()
+        if profile_status == "banned" or (profile_status == "suspended" and (profile.suspended_until is None or profile.suspended_until > datetime.now(timezone.utc))):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is not active")
     user = UserResponse(
         id=user_id,
         email=payload.get("email", ""),
@@ -64,26 +73,13 @@ async def get_current_user(
         last_login=last_login,
     )
 
-    db_user_result = await db.execute(select(User).where(User.id == user_id))
-    db_user = db_user_result.scalar_one_or_none()
     if db_user:
         user.auth_provider = db_user.auth_provider or "email"
         user.has_password = bool(db_user.password_hash)
-        if is_super_admin(db_user):
-            user.role = db_user.role
+        user.role = db_user.role
 
-    profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
-    profile = profile_result.scalar_one_or_none()
     if profile:
-        profile_status = (profile.account_status or "active").lower()
-        if profile_status == "banned":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been banned")
-        if profile_status == "suspended":
-            suspended_until = profile.suspended_until
-            if suspended_until is None or suspended_until > datetime.now(timezone.utc):
-                reason = profile.suspension_reason or "This account is currently suspended"
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
-        if profile.role and not is_super_admin(user):
+        if profile.role and not is_super_admin(db_user):
             user.role = profile.role
 
     user.permissions = sorted(permissions_for_role(user.role))
@@ -106,18 +102,24 @@ async def get_optional_current_user(
     user_id = payload.get("sub")
     if not user_id:
         return None
+    db_user = await db.get(User, user_id)
+    if not db_user or int(payload.get("session_version", -1)) != int(db_user.session_version or 0):
+        return None
+    profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
+    profile = profile_result.scalar_one_or_none()
+    if profile:
+        profile_status = (profile.account_status or "active").lower()
+        if profile_status == "banned" or (profile_status == "suspended" and (profile.suspended_until is None or profile.suspended_until > datetime.now(timezone.utc))):
+            return None
     user = UserResponse(
         id=user_id,
         email=payload.get("email", ""),
         name=payload.get("name"),
         role=payload.get("role", "user"),
     )
-    db_user = await db.get(User, user_id)
-    if db_user and is_super_admin(db_user):
+    if db_user:
         user.role = db_user.role
-    profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))
-    profile = profile_result.scalar_one_or_none()
-    if profile and profile.role and not is_super_admin(user):
+    if profile and profile.role and not is_super_admin(db_user):
         user.role = profile.role
     user.permissions = sorted(permissions_for_role(user.role))
     user.is_super_admin = is_super_admin(user)
@@ -125,8 +127,10 @@ async def get_optional_current_user(
 
 
 async def get_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
-    """Dependency to ensure current user has admin role."""
-    return require_permission(current_user, "admin.dashboard.view")
+    """Dependency to ensure current user has admin or super admin role."""
+    if not is_admin_or_super_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user
 
 
 async def get_super_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:

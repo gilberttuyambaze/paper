@@ -1,7 +1,7 @@
-"""Durable, bounded heartbeat that only touches system_health_heartbeat."""
 import asyncio
 import json
 import logging
+import os
 import random
 from datetime import datetime, timedelta, timezone
 from time import monotonic
@@ -26,6 +26,43 @@ def utc_now() -> datetime:
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+async def _notify_admin_of_heartbeat(settings: SiteSettings, health_data: dict) -> None:
+    if not getattr(settings, "heartbeat_notify_admin", True):
+        return
+    if os.getenv("HEARTBEAT_NOTIFY_ADMIN", "true").strip().lower() in {"0", "false", "no", "off"}:
+        return
+
+    target_email = os.getenv("ADMIN_USER_EMAIL") or os.getenv("SUPER_ADMIN_USER_EMAIL")
+    target_name = "Administrator"
+
+    if not target_email:
+        from core.database import db_manager
+        session_factory = db_manager.async_session_maker
+        if session_factory:
+            try:
+                from models.auth import User
+                async with session_factory() as db:
+                    admin_user = (await db.execute(
+                        select(User).where(User.role.in_(["super_admin", "admin"])).order_by(User.role.desc()).limit(1)
+                    )).scalar_one_or_none()
+                    if admin_user:
+                        target_email = admin_user.email
+                        target_name = admin_user.name or admin_user.email
+            except Exception:
+                logger.exception("Failed to query admin for heartbeat notification")
+
+    if not target_email:
+        logger.debug("No admin email found for heartbeat notification")
+        return
+
+    try:
+        from services.mailer import send_system_heartbeat_email
+        await send_system_heartbeat_email(target_email, target_name, health_data)
+        await publish_heartbeat_activity(f"Admin heartbeat report emailed to {target_email[:3]}***.", "notified")
+    except Exception:
+        logger.exception("Failed to deliver heartbeat email notification to admin")
 
 
 def validate_heartbeat_config(values: dict) -> None:
@@ -127,6 +164,17 @@ async def _success(db: AsyncSession, row: SystemHealthHeartbeat, settings: SiteS
     row.last_duration_ms = max(0, int((monotonic() - started) * 1000))
     _ensure_schedule(row, settings, now)
     await db.commit()
+
+    health_data = {
+        "status": "healthy",
+        "duration_ms": row.last_duration_ms or 0,
+        "mode": "Scheduled Check" if consume_slot else "Manual Check",
+        "total_attempts": row.total_attempts or 0,
+        "total_successes": row.total_successes or 0,
+        "next_scheduled": row.next_scheduled_at.strftime("%Y-%m-%d %H:%M UTC") if row.next_scheduled_at else "Not scheduled",
+    }
+    asyncio.create_task(_notify_admin_of_heartbeat(settings, health_data))
+
     return {"executed": True, "success": True, "reason": "ok"}
 
 
@@ -145,10 +193,21 @@ async def _failure(db: AsyncSession, settings: SiteSettings, now: datetime, erro
             row.retry_attempts, row.next_retry_at = min(retry, settings.heartbeat_max_retry_attempts), None
         _ensure_schedule(row, settings, now)
         await db.commit()
+
+        health_data = {
+            "status": "failed",
+            "duration_ms": 0,
+            "mode": "Database Health Check",
+            "total_attempts": getattr(row, "total_attempts", 1),
+            "total_successes": getattr(row, "total_successes", 0),
+            "next_scheduled": row.next_retry_at.strftime("%Y-%m-%d %H:%M UTC") if getattr(row, "next_retry_at", None) else "Not scheduled",
+        }
+        asyncio.create_task(_notify_admin_of_heartbeat(settings, health_data))
     except Exception:
         await db.rollback()
         logger.exception("Unable to persist heartbeat failure telemetry")
     return {"executed": True, "success": False, "reason": "database_error"}
+
 
 
 async def run_heartbeat_once(db: AsyncSession, settings: SiteSettings, now: datetime | None = None, manual: bool = False) -> dict:
@@ -208,6 +267,8 @@ async def scheduler_loop(session_factory, stop_event: asyncio.Event, startup: bo
         try:
             async with session_factory() as db:
                 settings = await db.get(SiteSettings, 1)
+                from services.communication_jobs import run_communication_maintenance
+                await run_communication_maintenance(db)
                 if settings:
                     await run_due_heartbeat(db, settings, startup=startup)
                     row = await db.get(SystemHealthHeartbeat, 1)

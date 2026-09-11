@@ -30,10 +30,19 @@ import {
   Moon,
   Sun,
   Bell,
+  type LucideIcon,
 } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
+}
+
+interface NavItem {
+  path: string;
+  label: string;
+  icon: LucideIcon;
+  auth?: boolean;
+  permission?: string;
 }
 
 export default function Layout({ children }: LayoutProps) {
@@ -107,7 +116,7 @@ export default function Layout({ children }: LayoutProps) {
     };
   }, [user]);
 
-  const navItems = [
+  const navItems: NavItem[] = [
     { path: '/', label: 'Home', icon: BookOpen },
     { path: '/resources', label: 'Browse Resources', icon: Search },
     { path: '/upload', label: 'Upload', icon: Upload, auth: true },

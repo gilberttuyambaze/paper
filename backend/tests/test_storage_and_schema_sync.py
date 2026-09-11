@@ -226,9 +226,131 @@ async def test_storage_download_paper_and_solution_exact_keys(monkeypatch):
         assert resp_comm_sol.status_code == 200
         assert resp_comm_sol.content == b"%PDF-1.4 test document content"
 
-        # Download non-existent file
+        # Download paper file with prefix
+        resp_paper_prefixed = await client.get("/api/v1/storage/download", params={"bucket_name": "papers", "object_key": f"papers/{paper_file_key}"})
+        assert resp_paper_prefixed.status_code == 200
+        assert resp_paper_prefixed.content == b"%PDF-1.4 test document content"
+
+        # Download paper solution with prefix
+        resp_sol_prefixed = await client.get("/api/v1/storage/download", params={"bucket_name": "papers", "object_key": f"papers/{paper_solution_key}"})
+        assert resp_sol_prefixed.status_code == 200
+        assert resp_sol_prefixed.content == b"%PDF-1.4 test document content"
+
+        # Download non-existent file returns 404 Resource not found
         resp_404 = await client.get("/api/v1/storage/download", params={"bucket_name": "papers", "object_key": "non_existent.pdf"})
         assert resp_404.status_code == 404
+        assert "Resource not found" in resp_404.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_storage_download_missing_from_storage_when_db_record_exists(monkeypatch):
+    """Verify that when a DB record exists but storage throws ValueError/missing, 404 File missing from storage is returned."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    tables = [Papers.__table__]
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables))
+
+    now = datetime.now(timezone.utc)
+    paper_key = "MissingFile_CAT_2026.pdf"
+
+    async with session_factory() as session:
+        session.add(
+            Papers(
+                id=10,
+                user_id="user_123",
+                title="Missing File Paper",
+                course_code="CS102",
+                course_name="Data Structures",
+                college="CST",
+                department="CS",
+                year=2026,
+                paper_type="CAT",
+                file_key=paper_key,
+                verification_status="verified",
+                is_hidden=False,
+                created_at=now,
+            )
+        )
+        await session.commit()
+
+    class MissingStorageService:
+        async def download_file(self, bucket_name: str, object_key: str) -> bytes:
+            raise ValueError("File not found in storage bucket")
+
+        async def get_file_metadata(self, bucket_name: str, object_key: str) -> dict:
+            raise ValueError("File not found")
+
+    test_app = FastAPI()
+    test_app.include_router(storage_router)
+
+    async def override_get_db():
+        async with session_factory() as s:
+            yield s
+
+    test_app.dependency_overrides[get_db] = override_get_db
+    test_app.dependency_overrides[get_optional_current_user] = lambda: None
+    monkeypatch.setattr(storage_module, "StorageService", MissingStorageService)
+
+    transport = httpx.ASGITransport(app=test_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/storage/download", params={"bucket_name": "papers", "object_key": paper_key})
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "File missing from storage"
+
+
+@pytest.mark.anyio
+async def test_storage_download_book_resolution(monkeypatch):
+    """Verify book file and cover downloads resolve correctly."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    tables = [Book.__table__]
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables))
+
+    now = datetime.now(timezone.utc)
+    book_file_key = "books/1787330846448-0qza3avi7b7d-Electromagnetism_Group_Assignment_Applied_Physics_Y1.pdf"
+    book_cover_key = "book-covers/1787330846448-0qza3avi7b7d-1000167092.jpg"
+
+    async with session_factory() as session:
+        session.add(
+            Book(
+                id=1,
+                title="Testing Book",
+                file_key=book_file_key,
+                cover_key=book_cover_key,
+                visibility="public",
+                status="active",
+                uploaded_by="user_test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    test_app = FastAPI()
+    test_app.include_router(storage_router)
+
+    async def override_get_db():
+        async with session_factory() as s:
+            yield s
+
+    test_app.dependency_overrides[get_db] = override_get_db
+    test_app.dependency_overrides[get_optional_current_user] = lambda: None
+    monkeypatch.setattr(storage_module, "StorageService", FakeStorageService)
+
+    transport = httpx.ASGITransport(app=test_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        # Download book with exact key
+        resp_book = await client.get("/api/v1/storage/download", params={"bucket_name": "books", "object_key": book_file_key})
+        assert resp_book.status_code == 200
+        assert resp_book.content == b"%PDF-1.4 test document content"
+
+        # Download book cover
+        resp_cover = await client.get("/api/v1/storage/download", params={"bucket_name": "book-covers", "object_key": book_cover_key})
+        assert resp_cover.status_code == 200
 
 
 @pytest.mark.anyio
@@ -311,3 +433,53 @@ async def test_comments_api_with_synced_book_id():
         data = resp.json()
         assert data["total"] == 1
         assert data["items"][0]["content"] == "Great paper!"
+
+
+@pytest.mark.anyio
+async def test_site_settings_heartbeat_notify_admin_schema_sync():
+    """Verify that ensure_model_columns_for_existing_tables adds missing site_settings.heartbeat_notify_admin column."""
+    from models.site_settings import SiteSettings
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Manually create site_settings table WITHOUT heartbeat_notify_admin
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE site_settings (
+                id INTEGER PRIMARY KEY,
+                maintenance_mode BOOLEAN NOT NULL DEFAULT 0,
+                maintenance_message TEXT NOT NULL,
+                upload_access_mode VARCHAR(32) NOT NULL DEFAULT 'selected_roles',
+                upload_roles TEXT NOT NULL DEFAULT '["admin", "cp"]',
+                allowed_resource_types TEXT NOT NULL DEFAULT '["book", "paper"]',
+                heartbeat_enabled BOOLEAN NOT NULL DEFAULT 1,
+                heartbeat_min_weekly_checks INTEGER NOT NULL DEFAULT 2,
+                heartbeat_max_weekly_checks INTEGER NOT NULL DEFAULT 3,
+                heartbeat_retry_delay_hours INTEGER NOT NULL DEFAULT 6,
+                heartbeat_max_retry_attempts INTEGER NOT NULL DEFAULT 2,
+                heartbeat_retry_enabled BOOLEAN NOT NULL DEFAULT 1,
+                heartbeat_retry_jitter_minutes INTEGER NOT NULL DEFAULT 30,
+                heartbeat_run_on_startup BOOLEAN NOT NULL DEFAULT 1,
+                heartbeat_week_start TIMESTAMP,
+                heartbeat_schedule TEXT NOT NULL DEFAULT '[]',
+                heartbeat_completed_checks INTEGER NOT NULL DEFAULT 0,
+                heartbeat_retry_attempts INTEGER NOT NULL DEFAULT 0,
+                heartbeat_next_attempt_at TIMESTAMP,
+                heartbeat_scheduler_status VARCHAR(32) NOT NULL DEFAULT 'stopped'
+            )
+        """))
+        await conn.execute(text("INSERT INTO site_settings (id, maintenance_message) VALUES (1, 'Maintenance')"))
+
+    manager = DatabaseManager()
+    manager.engine = engine
+    manager.async_session_maker = session_factory
+
+    # Run schema column synchronization
+    await manager.ensure_model_columns_for_existing_tables("site_settings")
+
+    # Verify heartbeat_notify_admin was added and SiteSettings ORM can query without UndefinedColumnError
+    async with session_factory() as session:
+        settings = await session.get(SiteSettings, 1)
+        assert settings is not None
+        assert settings.heartbeat_notify_admin is True

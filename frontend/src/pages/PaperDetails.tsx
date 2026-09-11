@@ -260,21 +260,51 @@ export default function PaperDetails() {
     }
   };
 
+  const [paperHttpErrorStatus, setPaperHttpErrorStatus] = useState<number | null>(null);
+
+  const retryComments = async () => {
+    if (!id) return;
+    try {
+      const commentsData = await fetchComments(Number(id));
+      setComments(commentsData.items || []);
+      setCommentsError(false);
+    } catch {
+      setCommentsError(true);
+    }
+  };
+
   const loadDownloadUrl = async (
     objectKey: string,
-    setter: React.Dispatch<React.SetStateAction<string | null>>
+    setter: React.Dispatch<React.SetStateAction<string | null>>,
+    isMainPaper = false
   ) => {
     try {
-      const downloadUrl = await downloadStorageObject('papers', objectKey, (progress) => setPaperProgress(progress));
+      if (isMainPaper) setPaperHttpErrorStatus(null);
+      const downloadUrl = await downloadStorageObject('papers', objectKey, (progress) => {
+        if (isMainPaper) setPaperProgress(progress);
+      });
       setter(downloadUrl);
-    } catch (err) {
-      setter(null); setPaperPreviewError('The document could not be retrieved from storage.');
+    } catch (err: any) {
+      setter(null);
+      const status = err?.response?.status || null;
+      if (isMainPaper) {
+        setPaperHttpErrorStatus(status);
+        if (status === 404) {
+          setPaperPreviewError('This file could not be found in storage.');
+        } else if (status === 403) {
+          setPaperPreviewError("You don't have permission to access this document.");
+        } else {
+          setPaperPreviewError('The document could not be retrieved from storage.');
+        }
+      }
     }
   };
 
   const hydratePaperAssets = async (paperData: Paper) => {
     setPaperPreviewLoading(Boolean(paperData.file_key));
-    setPaperPreviewError(null); setPaperProgress(paperData.file_key ? { loaded: 0 } : null);
+    setPaperPreviewError(null);
+    setPaperHttpErrorStatus(null);
+    setPaperProgress(paperData.file_key ? { loaded: 0 } : null);
     const tasks: Promise<void>[] = [];
 
     tasks.push(
@@ -285,10 +315,10 @@ export default function PaperDetails() {
     );
 
     if (paperData.file_key) {
-      tasks.push(loadDownloadUrl(paperData.file_key, setPaperUrl));
+      tasks.push(loadDownloadUrl(paperData.file_key, setPaperUrl, true));
     }
     if (paperData.solution_key) {
-      tasks.push(loadDownloadUrl(paperData.solution_key, setSolutionUrl));
+      tasks.push(loadDownloadUrl(paperData.solution_key, setSolutionUrl, false));
     }
 
     await Promise.allSettled(tasks);
@@ -625,7 +655,17 @@ export default function PaperDetails() {
               <DocumentPreview src={paperUrl || offlinePaperUrl} title={`${paper.title} paper preview`} minHeightClassName="min-h-[700px]" zoom={pdfZoom} />
             </div>
           ) : (paperPreviewLoading || paper.file_key) ? (
-            <div className="mt-6"><DocumentLoadingProgress resourceType="Paper" stage="Downloading document…" {...(paperProgress || {})} error={paperPreviewError} onRetry={() => void hydratePaperAssets(paper)} /></div>
+            <div className="mt-6">
+              <DocumentLoadingProgress
+                resourceType="Paper"
+                stage="Downloading document…"
+                {...(paperProgress || {})}
+                error={paperPreviewError}
+                statusHttpCode={paperHttpErrorStatus}
+                onRetry={() => void hydratePaperAssets(paper)}
+                onDownload={() => void handleDownload()}
+              />
+            </div>
           ) : (
             <div className="mt-6"><DocumentPreview title={`${paper.title} paper preview`} unavailableMessage="Paper preview is not available. Use the download button to view the full document." /></div>
           )}
@@ -815,7 +855,7 @@ export default function PaperDetails() {
           )}
 
           {/* Comments List */}
-          {commentsError ? <div className="theme-muted py-8 text-center">Comments couldn’t be loaded. <button type="button" className="theme-link-accent underline" onClick={() => id && void loadPaper(Number(id))}>Retry</button></div> : comments.length === 0 ? (
+          {commentsError ? <div className="theme-muted py-8 text-center">Comments couldn’t be loaded. <button type="button" className="theme-link-accent underline" onClick={() => void retryComments()}>Retry</button></div> : comments.length === 0 ? (
             <Card className="theme-panel">
               <CardContent className="theme-muted p-8 text-center">
                 <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-30" />
