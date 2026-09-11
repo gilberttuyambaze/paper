@@ -30,6 +30,7 @@ import {
   Clock,
   Star,
   Upload,
+  Sparkles,
 } from 'lucide-react';
 
 const HERO_IMAGE = '/assets/illustrations/landing.jpg';
@@ -116,20 +117,119 @@ function PaperCard({ paper, uploaderProfiles }: { paper: Paper; uploaderProfiles
   );
 }
 
-function HighlightResourceTile({ item, delay }: { item: { type: 'paper'; value: Paper } | { type: 'book'; value: Book }; delay: number }) {
+function FeaturedSingleResourceCard({
+  item,
+}: {
+  item: { type: 'paper'; value: Paper } | { type: 'book'; value: Book };
+}) {
+  const paper = item.type === 'paper' ? item.value : null;
+  const book = item.type === 'book' ? item.value : null;
+  const to = paper ? `/paper/${paper.id}` : `/book/${book?.id}`;
+
+  return (
+    <div className="theme-highlight-card rounded-2xl p-5 shadow-lg border border-primary/25 bg-card/95 transition-all duration-300 hover:border-primary/50">
+      {/* Top badges bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-1.5">
+          <Badge className="theme-highlight-badge text-[11px] font-bold px-2.5 py-0.5 tracking-wide shadow-sm">
+            {paper ? '📄 PAST PAPER' : '📚 REFERENCE BOOK'}
+          </Badge>
+          {paper && <VerificationBadge status={paper.verification_status} />}
+        </div>
+        <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full border border-border/50">
+          {paper ? `${paper.paper_type} • ${paper.year}` : book?.language || 'Academic'}
+        </span>
+      </div>
+
+      {/* Main Title */}
+      <div className="space-y-1.5">
+        <Link to={to} className="group block">
+          <h3 className="text-base sm:text-lg font-bold text-foreground group-hover:text-primary transition-colors line-clamp-2">
+            {item.value.title}
+          </h3>
+        </Link>
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <p className="flex items-center gap-1.5 font-medium text-foreground/85">
+            <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="line-clamp-1">
+              {paper ? `${paper.course_code} — ${paper.course_name}` : book?.authors.join(', ') || 'Academic reference book'}
+            </span>
+          </p>
+          {paper?.department && (
+            <p className="flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground/80 shrink-0" />
+              <span className="line-clamp-1">
+                {paper.department} {paper.campus ? `• ${paper.campus}` : ''}
+              </span>
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Action and Download Stats Footer */}
+      <div className="mt-4 pt-3.5 border-t border-border/40 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Download className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>{paper ? paper.download_count || 0 : book?.download_count || 0} downloads</span>
+          </span>
+          {paper?.solution_key && (
+            <Badge className="theme-status-badge--solution text-[10px] hover:bg-inherit">
+              <Star className="h-3 w-3 mr-1" />
+              Has Solution
+            </Badge>
+          )}
+        </div>
+
+        <Link to={to}>
+          <Button size="sm" className="theme-accent-bg text-xs h-8 px-3.5 gap-1.5 font-semibold shadow-sm hover:scale-[1.02] transition-transform">
+            <span>Open Paper</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function HighlightResourceTile({
+  item,
+  delay,
+}: {
+  item: { type: 'paper'; value: Paper } | { type: 'book'; value: Book };
+  delay: number;
+}) {
   const paper = item.type === 'paper' ? item.value : null;
   const book = item.type === 'book' ? item.value : null;
   const to = paper ? `/paper/${paper.id}` : `/book/${book?.id}`;
   return (
-    <Link to={to} className="block">
-      <div className="theme-highlight-card resource-highlight-tile rounded-xl p-3 cursor-pointer" style={{ animationDelay: `${delay}ms` }}>
-        <div className="mb-2 flex items-center justify-between gap-1">
-          <Badge className="theme-highlight-badge text-[9px]">{paper ? '📄 PAPER' : '📚 BOOK'}</Badge>
-          {paper && <VerificationBadge status={paper.verification_status} />}
+    <Link to={to} className="block group h-full">
+      <div
+        className="theme-highlight-card resource-highlight-tile rounded-2xl p-3.5 cursor-pointer transition-all duration-300 hover:scale-[1.01] hover:border-primary/50 shadow-sm flex flex-col justify-between min-h-[6.8rem]"
+        style={{ animationDelay: `${delay}ms` }}
+      >
+        <div>
+          <div className="mb-1.5 flex items-center justify-between gap-1.5">
+            <Badge className="theme-highlight-badge text-[9px] font-bold px-1.5 py-0.5">
+              {paper ? '📄 PAPER' : '📚 BOOK'}
+            </Badge>
+            {paper && <VerificationBadge status={paper.verification_status} />}
+          </div>
+          <h3 className="line-clamp-2 text-xs font-bold text-foreground group-hover:text-primary transition-colors">
+            {item.value.title}
+          </h3>
         </div>
-        <h3 className="line-clamp-2 text-xs font-semibold">{item.value.title}</h3>
-        <p className="theme-highlight-muted mt-2 line-clamp-2 text-[10px]">{paper ? `${paper.course_code} • ${paper.course_name}` : book?.authors.join(', ') || 'Academic book'}</p>
-        <p className="theme-highlight-muted mt-1 text-[10px]">{paper ? `${paper.year} • ${paper.paper_type}` : `${book?.language || '—'}${book?.edition ? ` • ${book.edition}` : ''}`}</p>
+        <div className="mt-2 space-y-0.5 border-t border-border/30 pt-1.5 text-[10px]">
+          <p className="theme-highlight-muted line-clamp-1 font-medium">
+            {paper ? `${paper.course_code} • ${paper.course_name}` : book?.authors?.join(', ') || 'Academic book'}
+          </p>
+          <div className="flex items-center justify-between theme-highlight-muted">
+            <span>{paper ? `${paper.year} • ${paper.paper_type}` : `${book?.language || '—'}`}</span>
+            <span className="font-semibold text-primary flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              Open <ArrowRight className="h-2.5 w-2.5" />
+            </span>
+          </div>
+        </div>
       </div>
     </Link>
   );
@@ -161,6 +261,9 @@ function BookPickCard({ book }: { book: Book }) {
 }
 
 function chooseHighlightResources(total: number, previous: number[] = []): number[] {
+  if (total <= 0) return [];
+  if (total === 1) return [0];
+  if (total === 2) return [0, 1];
   const choices = Array.from({ length: total }, (_, index) => index)
     .sort(() => Math.random() - 0.5);
   const fresh = choices.filter((index) => !previous.includes(index));
@@ -180,7 +283,7 @@ export default function HomePage() {
   const [showOfflineBanner, setShowOfflineBanner] = useState(false);
   const [uploaderProfiles, setUploaderProfiles] = useState<Record<string, { profile?: any; imageUrl?: string | null }>>({});
   const [showPersonalizedOfflineBanner, setShowPersonalizedOfflineBanner] = useState(false);
-  const [highlightSelections, setHighlightSelections] = useState<number[][]>([[], [], []]);
+  const [highlightSelections, setHighlightSelections] = useState<number[][]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -291,25 +394,46 @@ export default function HomePage() {
     ...books.slice(0, 8).map((value) => ({ type: 'book' as const, value })),
   ];
   const highlightRows = mixedResources.length
-    ? highlightSelections.map((selection) => selection.map((index) => mixedResources[index]).filter(Boolean))
+    ? (highlightSelections.length > 0
+        ? highlightSelections
+            .map((selection) => selection.map((index) => mixedResources[index]).filter(Boolean))
+            .filter((row) => row.length > 0)
+        : [mixedResources.slice(0, 3)])
     : [];
   const hasPersonalizedContent = Boolean(
     personalized && (personalized.recommended.length > 0 || personalized.recently_viewed.length > 0)
   );
 
   useEffect(() => {
-    if (mixedResources.length < 2) return;
-    setHighlightSelections([
-      chooseHighlightResources(mixedResources.length),
-      chooseHighlightResources(mixedResources.length),
-      chooseHighlightResources(mixedResources.length),
-    ]);
-    const timers = [3100, 4700, 6300].map((duration, row) => window.setInterval(() => {
-      setHighlightSelections((selections) => selections.map((selection, index) => (
-        index === row ? chooseHighlightResources(mixedResources.length, selection) : selection
-      )));
-    }, duration));
-    return () => timers.forEach(window.clearInterval);
+    if (mixedResources.length === 0) {
+      setHighlightSelections([]);
+      return;
+    }
+    if (mixedResources.length === 1) {
+      setHighlightSelections([[0]]);
+      return;
+    }
+    if (mixedResources.length === 2) {
+      setHighlightSelections([[0, 1]]);
+      return;
+    }
+    const numRows = Math.min(3, Math.ceil(mixedResources.length / 3));
+    setHighlightSelections(
+      Array.from({ length: numRows }, () => chooseHighlightResources(mixedResources.length))
+    );
+
+    if (mixedResources.length > 3) {
+      const timers = [3100, 4700, 6300].slice(0, numRows).map((duration, row) =>
+        window.setInterval(() => {
+          setHighlightSelections((selections) =>
+            selections.map((selection, index) =>
+              index === row ? chooseHighlightResources(mixedResources.length, selection) : selection
+            )
+          );
+        }, duration)
+      );
+      return () => timers.forEach(window.clearInterval);
+    }
   }, [mixedResources.length]);
 
   return (
@@ -391,21 +515,40 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="lg:justify-self-end">
-              <div className="theme-highlight-shell rounded-[2rem] p-6 backdrop-blur-xl">
-                <div className="mb-5 flex items-center justify-between">
+            <div className="lg:justify-self-end w-full max-w-lg">
+              <div className="theme-highlight-shell rounded-[2rem] p-5 sm:p-6 backdrop-blur-xl">
+                <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">Highlighted resources</p>
-                    <h2 className="mt-2 text-1xl font-bold">What students are opening most</h2>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">
+                      {mixedResources.length === 1 ? 'Featured in Library' : 'Highlighted resources'}
+                    </p>
+                    <h2 className="mt-1 text-base sm:text-lg font-bold">
+                      {mixedResources.length === 1 ? 'Active Exam Paper' : 'What students are opening most'}
+                    </h2>
                   </div>
-                  <Badge className="theme-highlight-stat shrink-0 hover:bg-transparent">Live picks</Badge>
+                  <Badge className="theme-highlight-stat shrink-0 hover:bg-transparent gap-1.5 px-2.5 py-1">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Live picks</span>
+                  </Badge>
                 </div>
 
-                {highlightRows.length ? (
+                {loading && !mixedResources.length ? (
+                  <div className="theme-highlight-card flex flex-col justify-center gap-3 rounded-[1.6rem] p-5">
+                    <div className="h-16 animate-pulse rounded-2xl bg-muted/60" />
+                    <div className="h-16 animate-pulse rounded-2xl bg-muted/40" />
+                  </div>
+                ) : mixedResources.length === 1 ? (
+                  <FeaturedSingleResourceCard item={mixedResources[0]} />
+                ) : highlightRows.length ? (
                   <div className="resource-highlight-viewport" aria-live="polite">
-                    <div className="space-y-2">
+                    <div className="space-y-2.5">
                       {highlightRows.map((row, rowIndex) => (
-                        <div key={`highlight-row-${rowIndex}`} className="resource-highlight-grid">
+                        <div
+                          key={`highlight-row-${rowIndex}`}
+                          className={`resource-highlight-grid ${
+                            row.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3'
+                          }`}
+                        >
                           {row.map((item, columnIndex) => (
                             <HighlightResourceTile
                               key={`${item.type}-${item.value.id}-${rowIndex}-${columnIndex}`}
@@ -418,8 +561,33 @@ export default function HomePage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="theme-highlight-card flex h-[22rem] items-center justify-center rounded-[1.6rem] p-5 text-center">
-                    <p className="theme-highlight-muted text-sm">Highlighted papers and books will appear here as soon as the library loads.</p>
+                  <div className="theme-highlight-card flex flex-col items-center justify-center rounded-[1.6rem] p-6 text-center space-y-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      <BookOpen className="h-6 w-6" />
+                    </div>
+                    <div className="space-y-1 max-w-xs">
+                      <p className="text-sm font-bold text-foreground">No resources available yet</p>
+                      <p className="theme-highlight-muted text-xs leading-relaxed">
+                        Uploaded past papers and books will automatically show up here as live student picks.
+                      </p>
+                    </div>
+                    <Button size="sm" onClick={() => navigate('/upload')} className="theme-accent-bg text-xs">
+                      <Upload className="h-3.5 w-3.5 mr-1.5" />
+                      Upload First Paper
+                    </Button>
+                  </div>
+                )}
+
+                {/* Library Summary Footer */}
+                {mixedResources.length > 0 && (
+                  <div className="mt-4 pt-3.5 border-t border-border/40 flex items-center justify-between text-xs">
+                    <span className="theme-highlight-muted flex items-center gap-1.5 font-medium">
+                      <span>{papers.length} {papers.length === 1 ? 'Paper' : 'Papers'}{books.length ? ` · ${books.length} Books` : ''} in Library</span>
+                    </span>
+                    <Link to="/resources" className="font-semibold text-primary hover:underline flex items-center gap-1">
+                      <span>Browse All</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
                   </div>
                 )}
               </div>

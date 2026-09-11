@@ -89,17 +89,27 @@ class Settings(BaseSettings):
     # AI is optional. Keep keys server-only; a disabled or unconfigured provider
     # falls back to the local paper-context responder in the study route.
     ai_enabled: bool = False
-    ai_provider: str = "openai"
+    ai_provider: str = "groq"
     ai_fallback_provider: Optional[str] = None
+    ai_fallback_chain: str = "groq,gemini,deepseek,xai,openai,openrouter"
+
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4.1-mini"
-    openai_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_image_model: str = "gpt-image-1"
-    ai_timeout_seconds: float = 30.0
+
+    groq_api_key: Optional[str] = None
+    groq_model: str = "openai/gpt-oss-120b"
+
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-3.6-flash"
+
+    openrouter_api_key: Optional[str] = None
+    openrouter_model: str = "meta-llama/llama-3.3-70b-instruct"
+
+    ai_timeout_seconds: float = 12.0
     ai_max_output_tokens: int = 2048
     ai_max_context_tokens: int = 16000
-    ai_max_requests_per_user_per_minute: int = 5
     ai_max_requests_per_user_per_minute: int = 60
     ai_compatible_base_url: Optional[str] = None
     ai_compatible_api_key: Optional[str] = None

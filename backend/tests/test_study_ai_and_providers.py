@@ -6,6 +6,7 @@ import pytest
 from core.config import settings
 from services.ai.base import (
     AIGenerationRequest,
+    AIGeneration,
     AIMessage,
     AIProviderUnavailableError,
     AIUsage,
@@ -20,6 +21,9 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
             "ai_enabled": settings.ai_enabled,
             "ai_provider": settings.ai_provider,
             "openai_api_key": settings.openai_api_key,
+            "groq_api_key": getattr(settings, "groq_api_key", None),
+            "gemini_api_key": getattr(settings, "gemini_api_key", None),
+            "openrouter_api_key": getattr(settings, "openrouter_api_key", None),
             "ai_compatible_api_key": settings.ai_compatible_api_key,
             "ai_compatible_base_url": settings.ai_compatible_base_url,
             "ai_compatible_model": settings.ai_compatible_model,
@@ -135,36 +139,74 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
         settings.ai_enabled = True
         settings.ai_provider = "openai"
         settings.openai_api_key = None
-        self.assertFalse(AIService.is_configured())
+        settings.groq_api_key = None
+        settings.gemini_api_key = None
+        settings.openrouter_api_key = None
+        settings.ai_compatible_api_key = None
+        self.assertFalse(AIService.is_configured("openai"))
 
         settings.openai_api_key = "sk-live-test"
-        self.assertTrue(AIService.is_configured())
+        self.assertTrue(AIService.is_configured("openai"))
 
-        # When configured with compatible provider (e.g. DeepSeek or Groq)
-        settings.ai_provider = "deepseek"
+        # When configured with Gemini
+        settings.ai_provider = "gemini"
         settings.openai_api_key = None
-        settings.ai_compatible_api_key = "sk-deepseek-key"
-        self.assertTrue(AIService.is_configured())
+        settings.gemini_api_key = "AIzaSy_gemini_test"
+        self.assertTrue(AIService.is_configured("gemini"))
 
-        provider = AIProviderFactory.create("deepseek")
-        self.assertEqual(provider.name, "deepseek")
-        self.assertEqual(provider.default_model, "deepseek-chat")
-
-        # Groq
-        groq_provider = AIProviderFactory.create("groq")
-        self.assertEqual(groq_provider.name, "groq")
-        self.assertEqual(groq_provider.default_model, "llama-3.3-70b-versatile")
-
-        # Gemini
         gemini_provider = AIProviderFactory.create("gemini")
         self.assertEqual(gemini_provider.name, "gemini")
-        self.assertEqual(gemini_provider.default_model, "gemini-2.0-flash")
+        self.assertEqual(gemini_provider.default_model, "gemini-3.6-flash")
 
-        # Ollama
-        ollama_provider = AIProviderFactory.create("ollama")
-        self.assertEqual(ollama_provider.name, "ollama")
-        self.assertEqual(ollama_provider.default_model, "llama3.2")
-        self.assertTrue(AIProviderFactory.is_configured("ollama"))
+        # Groq
+        settings.groq_api_key = "gsk_live_key_123"
+        groq_provider = AIProviderFactory.create("groq")
+        self.assertEqual(groq_provider.name, "groq")
+        self.assertEqual(groq_provider.default_model, "openai/gpt-oss-120b")
+
+        # OpenRouter
+        settings.openrouter_api_key = "sk-or-test"
+        openrouter_provider = AIProviderFactory.create("openrouter")
+        self.assertEqual(openrouter_provider.name, "openrouter")
+        self.assertEqual(openrouter_provider.default_model, "meta-llama/llama-3.3-70b-instruct")
+
+    async def test_waterfall_failover_succeeds_on_second_provider(self):
+        settings.ai_enabled = True
+        settings.groq_api_key = "gsk_test"
+        settings.gemini_api_key = "AIzaSy_gemini_test"
+
+        failing_groq = AsyncMock()
+        failing_groq.supports = lambda cap: True
+        failing_groq.name = "groq"
+        failing_groq.generate.side_effect = Exception("Groq 429 Quota Exceeded")
+
+        successful_gemini = AsyncMock()
+        successful_gemini.supports = lambda cap: True
+        successful_gemini.name = "gemini"
+        successful_gemini.generate.return_value = AIGeneration(
+            content="Gemini successful response",
+            model="gemini-3.6-flash",
+            provider="gemini",
+            usage=AIUsage(20, 10, 30),
+            duration_ms=250,
+        )
+
+        def mock_create(name):
+            if name == "groq":
+                return failing_groq
+            return successful_gemini
+
+        with patch.object(AIProviderFactory, "create", side_effect=mock_create), \
+             patch.object(AIProviderFactory, "get_configured_providers", return_value=["groq", "gemini"]):
+
+            service = AIService(provider=failing_groq)
+            req = AIGenerationRequest(
+                messages=[AIMessage(role="user", content="Test waterfall")],
+                user_id="test-user",
+            )
+            res = await service.generate_with_waterfall(req)
+            self.assertEqual(res.provider, "gemini")
+            self.assertEqual(res.content, "Gemini successful response")
 
     def test_fallback_response_formatting(self):
         from models.papers import Papers
@@ -214,7 +256,6 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
         from models.papers import Papers
         from routers.study_ai import AIActionRequest, study_paper
         from schemas.auth import UserResponse
-        from services.ai.base import AIGeneration, AIUsage
 
         dummy_paper = Papers(
             id=10,
@@ -253,10 +294,10 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
             mock_retrieval_cls.return_value = mock_retrieval
 
             mock_ai = AsyncMock()
-            mock_ai.analyze_paper.return_value = AIGeneration(
+            mock_ai.generate_with_waterfall.return_value = AIGeneration(
                 content="## Comprehensive Revision Guide\n1. Normalization (1NF, 2NF, 3NF, BCNF)...",
-                model="deepseek-chat",
-                provider="deepseek",
+                model="gemini-3.6-flash",
+                provider="gemini",
                 usage=AIUsage(100, 50, 150),
             )
             mock_ai_service_cls.return_value = mock_ai
@@ -269,7 +310,7 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
                 db=mock_db,
             )
 
-            self.assertEqual(response["model"], "deepseek-chat")
+            self.assertEqual(response["model"], "gemini-3.6-flash")
             self.assertIn("Comprehensive Revision Guide", response["content"])
             self.assertEqual(response["usage"]["total_tokens"], 150)
-            mock_ai.analyze_paper.assert_called_once()
+            mock_ai.generate_with_waterfall.assert_called_once()

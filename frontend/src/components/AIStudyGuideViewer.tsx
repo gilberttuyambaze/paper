@@ -7,27 +7,14 @@ import {
   Copy,
   Check,
   BookOpen,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
   GraduationCap,
   Lightbulb,
   FileText,
-  HelpCircle,
   Send,
-  Zap,
-  RefreshCw,
-  Trash2,
-  ChevronDown,
-  ChevronUp,
-  Info,
+  RotateCcw,
   Brain,
   Calculator,
   AlertTriangle,
-  RotateCcw,
-  MessageSquare,
-  Activity,
-  ArrowDown,
 } from 'lucide-react';
 import { toast } from '@/lib/messages';
 import AcademicAiMark from './AcademicAiMark';
@@ -41,7 +28,9 @@ export interface StudyChatMessage {
   content: string;
   action?: AIStudyAction;
   model?: string | null;
+  provider?: string | null;
   fallbackReason?: string | null;
+  duration_ms?: number | null;
   timestamp?: Date | string;
   usage?: {
     prompt_tokens: number;
@@ -57,7 +46,9 @@ export interface AIStudyGuideViewerProps {
   loading: boolean;
   fallbackReason?: string | null;
   messages?: StudyChatMessage[];
-  onSendMessage?: (action: AIStudyAction, question?: string) => void;
+  isAuthenticated?: boolean;
+  onRequireAuth?: () => void;
+  onSendMessage?: (action: AIStudyAction, question?: string, preferredProvider?: string) => void;
   onClearMessages?: () => void;
   onQuickAction?: (promptText: string) => void;
 }
@@ -69,6 +60,8 @@ export default function AIStudyGuideViewer({
   loading,
   fallbackReason,
   messages = [],
+  isAuthenticated = true,
+  onRequireAuth,
   onSendMessage,
   onClearMessages,
   onQuickAction,
@@ -77,12 +70,10 @@ export default function AIStudyGuideViewer({
   const [loadingStep, setLoadingStep] = useState(0);
   const [inputQuestion, setInputQuestion] = useState('');
   const [aiStatus, setAiStatus] = useState<AIStatusResponse | null>(null);
-  const [statusChecking, setStatusChecking] = useState(false);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const loadingSteps = [
-    'Scanning exam paper & extracted PDF text...',
+    'Scanning exam paper & syllabus context...',
     'Analyzing curriculum competencies & questions...',
     'Synthesizing step-by-step revision strategy...',
     'Formatting comprehensive academic study guide...',
@@ -91,21 +82,16 @@ export default function AIStudyGuideViewer({
   // Fetch live AI connection status on mount
   const checkStatus = async () => {
     try {
-      setStatusChecking(true);
       const res = await fetchStudyAIStatus();
       setAiStatus(res);
     } catch {
       setAiStatus({
         enabled: true,
-        provider: 'unknown',
-        model: 'unknown',
         is_connected: false,
         latency_ms: null,
         status: 'error',
-        message: 'Could not connect to AI healthcheck endpoint.',
+        message: 'AI assistant is operating in offline/local study mode.',
       });
-    } finally {
-      setStatusChecking(false);
     }
   };
 
@@ -121,7 +107,7 @@ export default function AIStudyGuideViewer({
     }
     const interval = setInterval(() => {
       setLoadingStep((prev) => (prev < loadingSteps.length - 1 ? prev + 1 : prev));
-    }, 2500);
+    }, 2000);
     return () => clearInterval(interval);
   }, [loading]);
 
@@ -147,6 +133,10 @@ export default function AIStudyGuideViewer({
   const handleSendInput = () => {
     const trimmed = inputQuestion.trim();
     if (!trimmed || loading) return;
+    if (!isAuthenticated && onRequireAuth) {
+      onRequireAuth();
+      return;
+    }
     if (onSendMessage) {
       onSendMessage('question', trimmed);
     } else if (onQuickAction) {
@@ -157,6 +147,10 @@ export default function AIStudyGuideViewer({
 
   const handleTriggerAction = (action: AIStudyAction) => {
     if (loading) return;
+    if (!isAuthenticated && onRequireAuth) {
+      onRequireAuth();
+      return;
+    }
     if (onSendMessage) {
       onSendMessage(action);
     } else if (onQuickAction) {
@@ -276,7 +270,7 @@ export default function AIStudyGuideViewer({
         return;
       }
 
-      // Numbered items (1. 2. etc)
+      // Numbered items
       if (/^\d+\.\s+/.test(trimmed)) {
         const num = trimmed.match(/^(\d+)\.\s+/)?.[1] || '1';
         const rawContent = trimmed.replace(/^\d+\.\s+/, '');
@@ -307,7 +301,6 @@ export default function AIStudyGuideViewer({
     return elements;
   };
 
-  // Check if we have multi-turn messages or fallback single content
   const displayMessages: StudyChatMessage[] =
     messages.length > 0
       ? messages
@@ -343,9 +336,11 @@ export default function AIStudyGuideViewer({
     }
   };
 
+  const isAIConnected = aiStatus?.is_connected ?? true;
+
   return (
     <div className="theme-soft-panel rounded-2xl border border-border/70 shadow-md transition-all duration-200 overflow-hidden">
-      {/* 1. Header Bar with Connection Health & Controls */}
+      {/* 1. Header Bar: Clean Academic Title, Status & Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 bg-background/60 p-4">
         <div className="flex items-center gap-3">
           <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-inner">
@@ -356,84 +351,45 @@ export default function AIStudyGuideViewer({
               <h4 className="text-sm font-bold text-foreground">
                 UR AI Study Assistant
               </h4>
-              <span className="text-[10px] font-medium text-primary/80 bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+              <span className="text-[10px] font-medium text-primary/90 bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
                 Academic Copilot
               </span>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Intelligent past paper tutor, formula reference & exam strategist
+              Instant revision guides, question breakdowns, and step-by-step exam solutions
             </p>
           </div>
         </div>
 
-        {/* Live AI Status Pill & Tool Buttons */}
+        {/* Status indicator & Reset Button */}
         <div className="flex items-center gap-2">
-          {/* AI Connection Pill */}
-          <button
-            type="button"
-            onClick={() => setShowDiagnostics(!showDiagnostics)}
-            className="flex items-center gap-1.5 rounded-full border border-border bg-card/80 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition hover:border-primary/50"
-            title="Click to view AI engine connection details"
-          >
-            {statusChecking ? (
-              <>
-                <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
-                <span className="text-[11px] text-muted-foreground">Checking AI...</span>
-              </>
-            ) : aiStatus?.is_connected ? (
-              <>
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-                  AI Online
-                </span>
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  ({aiStatus.provider} • {aiStatus.latency_ms}ms)
-                </span>
-              </>
-            ) : aiStatus?.status === 'quota_exhausted' ? (
-              <>
-                <span className="h-2 w-2 rounded-full bg-amber-500" />
-                <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                  Quota Limit (Local Mode)
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="h-2 w-2 rounded-full bg-slate-400" />
-                <span className="text-[11px] font-semibold text-muted-foreground">
-                  {aiStatus ? 'Local Paper Mode' : 'AI Ready'}
-                </span>
-              </>
-            )}
-            {showDiagnostics ? (
-              <ChevronUp className="h-3 w-3 text-muted-foreground ml-0.5" />
-            ) : (
-              <ChevronDown className="h-3 w-3 text-muted-foreground ml-0.5" />
-            )}
-          </button>
+          {isAIConnected ? (
+            <Badge
+              variant="outline"
+              className="gap-1.5 py-1 px-2.5 text-[11px] font-medium border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>AI Assistant Active</span>
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              className="gap-1.5 py-1 px-2.5 text-[11px] font-medium border-border/70 bg-card text-muted-foreground"
+            >
+              <span className="h-2 w-2 rounded-full bg-amber-500" />
+              <span>Paper Study Mode</span>
+            </Badge>
+          )}
 
-          {/* Refresh Health Ping Button */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-            onClick={checkStatus}
-            disabled={statusChecking}
-            title="Ping AI provider to test live connectivity"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${statusChecking ? 'animate-spin' : ''}`} />
-          </Button>
-
-          {/* Clear Chat Button */}
+          {/* Clear Conversation Button */}
           {displayMessages.length > 0 && onClearMessages && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 gap-1 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
               onClick={onClearMessages}
-              title="Clear study conversation"
+              title="Reset study conversation"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               <span>Reset</span>
@@ -442,60 +398,43 @@ export default function AIStudyGuideViewer({
         </div>
       </div>
 
-      {/* 2. Expandable Diagnostics Banner */}
-      {showDiagnostics && aiStatus && (
-        <div className="border-b border-border/50 bg-muted/40 p-3.5 text-xs text-muted-foreground">
-          <div className="flex items-start gap-2.5">
-            <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-            <div className="space-y-1.5 w-full">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-foreground">
-                  AI Engine Connection Diagnostic
-                </span>
-                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-background border border-border">
-                  Status: {aiStatus.status}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-[11px]">
-                <div className="bg-background/80 p-1.5 rounded border border-border/60">
-                  <p className="text-[10px] text-muted-foreground">Provider</p>
-                  <p className="font-semibold text-foreground">{aiStatus.provider || 'none'}</p>
-                </div>
-                <div className="bg-background/80 p-1.5 rounded border border-border/60">
-                  <p className="text-[10px] text-muted-foreground">Model</p>
-                  <p className="font-semibold text-foreground">{aiStatus.model || 'none'}</p>
-                </div>
-                <div className="bg-background/80 p-1.5 rounded border border-border/60">
-                  <p className="text-[10px] text-muted-foreground">Ping Latency</p>
-                  <p className="font-semibold text-foreground">
-                    {aiStatus.latency_ms !== null ? `${aiStatus.latency_ms} ms` : 'N/A'}
-                  </p>
-                </div>
-                <div className="bg-background/80 p-1.5 rounded border border-border/60">
-                  <p className="text-[10px] text-muted-foreground">Engine State</p>
-                  <p
-                    className={`font-semibold ${
-                      aiStatus.is_connected ? 'text-emerald-500' : 'text-amber-500'
-                    }`}
-                  >
-                    {aiStatus.is_connected ? 'Cloud Active' : 'Local Fallback'}
-                  </p>
-                </div>
-              </div>
-              <p className="text-[11px] leading-relaxed pt-1 text-muted-foreground">
-                {aiStatus.message}
-              </p>
-              {aiStatus.status === 'quota_exhausted' && (
-                <div className="rounded bg-warning/10 p-2 border border-warning/20 text-warning-foreground text-[11px] mt-1">
-                  💡 <strong>Free High-Speed Alternative:</strong> OpenAI account credits are currently exhausted (429). You can configure a free Groq key (<code className="bg-background/80 px-1 rounded">gsk_...</code>) or Gemini key (<code className="bg-background/80 px-1 rounded">AIzaSy...</code>) in <code className="bg-background/80 px-1 rounded">backend/.env.local</code> for instant unlimited cloud AI tutoring!
-                </div>
-              )}
+      {/* Unauthenticated Alert Banner */}
+      {!isAuthenticated && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-primary/20 bg-primary/5 px-4 py-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <Sparkles className="h-4 w-4" />
             </div>
+            <div>
+              <p className="font-semibold text-foreground">Sign in to access AI Study Assistant</p>
+              <p className="text-[11px] text-muted-foreground">
+                Log in or create a free account to generate step-by-step revision guides, practice quizzes, and formula sheets.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+            <Button
+              type="button"
+              size="sm"
+              onClick={onRequireAuth}
+              className="h-7 text-xs px-3 font-medium theme-accent-bg"
+            >
+              Sign In
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onRequireAuth}
+              className="h-7 text-xs px-3 font-medium border-border/80"
+            >
+              Create Account
+            </Button>
           </div>
         </div>
       )}
 
-      {/* 3. One-Click Quick Study Actions Ribbon */}
+      {/* 2. One-Click Quick Study Actions Ribbon */}
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-card/40 p-2.5 overflow-x-auto">
         <span className="text-[11px] font-semibold text-muted-foreground mr-1 hidden sm:inline-flex items-center gap-1">
           <GraduationCap className="h-3.5 w-3.5" />
@@ -548,7 +487,7 @@ export default function AIStudyGuideViewer({
         </button>
       </div>
 
-      {/* 4. Conversational Message Stream */}
+      {/* 3. Conversational Message Stream */}
       <div className="max-h-[560px] overflow-y-auto p-4 space-y-4 divide-y divide-border/30">
         {displayMessages.length === 0 && !loading ? (
           <div className="py-10 text-center space-y-3">
@@ -560,7 +499,7 @@ export default function AIStudyGuideViewer({
                 Start Your Paper Revision Session
               </p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Click any study preset above (such as <strong>Full Study Guide</strong> or <strong>Practice Quiz</strong>), or type a specific question about exam problems, formulas, or derivations below.
+                Click any study preset above or type a specific question about exam problems, formulas, or derivations below.
               </p>
             </div>
             {/* Quick starter chips */}
@@ -592,10 +531,6 @@ export default function AIStudyGuideViewer({
           displayMessages.map((msg, index) => {
             const isAssistant = msg.role === 'assistant';
             const isLocal = msg.model === 'local-study-guide' || !msg.model;
-            const isExhausted =
-              msg.fallbackReason?.toLowerCase().includes('quota') ||
-              msg.fallbackReason?.toLowerCase().includes('credit') ||
-              msg.fallbackReason?.toLowerCase().includes('balance');
 
             return (
               <div
@@ -621,7 +556,7 @@ export default function AIStudyGuideViewer({
                 ) : (
                   /* Assistant Message Card */
                   <div className="rounded-xl border border-border/60 bg-card/60 p-4 shadow-sm space-y-3">
-                    {/* Header with Role, Model Badge & Copy Button */}
+                    {/* Header with Role, Assistant Badge & Copy Button */}
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2.5">
                       <div className="flex items-center gap-2">
                         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
@@ -644,17 +579,17 @@ export default function AIStudyGuideViewer({
                       <div className="flex items-center gap-1.5">
                         <Badge
                           variant={isLocal ? 'outline' : 'success'}
-                          className="text-[10px] font-mono tracking-tight px-2 py-0.5"
+                          className="text-[10px] tracking-tight px-2 py-0.5"
                         >
                           {isLocal ? (
                             <span className="flex items-center gap-1">
                               <BookOpen className="h-3 w-3" />
-                              Local Paper Context
+                              Paper Context
                             </span>
                           ) : (
                             <span className="flex items-center gap-1">
-                              <Zap className="h-3 w-3" />
-                              AI Powered ({msg.model})
+                              <Sparkles className="h-3 w-3 text-primary" />
+                              AI Study Guide
                             </span>
                           )}
                         </Badge>
@@ -681,24 +616,12 @@ export default function AIStudyGuideViewer({
                       </div>
                     </div>
 
-                    {/* Quota Exhaustion Diagnostic Banner */}
-                    {isLocal && msg.fallbackReason && (
-                      <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-warning-foreground">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="h-4 w-4 shrink-0 text-warning mt-0.5" />
-                          <div className="space-y-1">
-                            <p className="font-semibold text-foreground">
-                              {isExhausted
-                                ? 'OpenAI Account Quota Exhausted (429)'
-                                : 'Cloud AI Rate Limited (Offline Mode Active)'}
-                            </p>
-                            <p className="text-muted-foreground leading-relaxed text-[11px]">
-                              {isExhausted
-                                ? 'The guide below was generated directly from the uploaded paper text, syllabus taxonomy, and verified community solutions.'
-                                : msg.fallbackReason}
-                            </p>
-                          </div>
-                        </div>
+                    {/* Clean Paper-Context Note if fallback */}
+                    {isLocal && (
+                      <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                        <p className="leading-relaxed text-[11px]">
+                          💡 Generated from uploaded exam paper text, course curriculum syllabus, and community solutions.
+                        </p>
                       </div>
                     )}
 
@@ -714,27 +637,21 @@ export default function AIStudyGuideViewer({
                       </span>
                       <button
                         type="button"
-                        onClick={() =>
-                          handleTriggerAction('formulas')
-                        }
+                        onClick={() => handleTriggerAction('formulas')}
                         className="rounded-full border border-border bg-background/90 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-primary transition"
                       >
                         📐 Show formulas & theorems
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          handleTriggerAction('quiz')
-                        }
+                        onClick={() => handleTriggerAction('quiz')}
                         className="rounded-full border border-border bg-background/90 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-primary transition"
                       >
                         ❓ Generate 3 quiz questions
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          handleTriggerAction('pitfalls')
-                        }
+                        onClick={() => handleTriggerAction('pitfalls')}
                         className="rounded-full border border-border bg-background/90 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-primary transition"
                       >
                         ⚠️ Common exam traps
@@ -747,7 +664,7 @@ export default function AIStudyGuideViewer({
           })
         )}
 
-        {/* 5. Live Synthesis Loading State */}
+        {/* 4. Live Synthesis Loading State */}
         {loading && (
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3.5">
             <div className="flex items-center gap-3">
@@ -762,7 +679,7 @@ export default function AIStudyGuideViewer({
                   {loadingSteps[loadingStep]}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  Synthesizing exam context, formulas, and academic revision strategies...
+                  Analyzing document text & synthesizing revision notes...
                 </p>
               </div>
             </div>
@@ -779,7 +696,7 @@ export default function AIStudyGuideViewer({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 6. Interactive Chat Input Box */}
+      {/* 5. Interactive Chat Input Box */}
       <div className="border-t border-border/50 bg-background/70 p-3.5 space-y-2">
         <div className="relative">
           <Textarea
@@ -791,7 +708,7 @@ export default function AIStudyGuideViewer({
                 handleSendInput();
               }
             }}
-            placeholder="Ask anything about this exam paper, specific questions, or derivations (Enter to send, Shift+Enter for newline)..."
+            placeholder="Ask anything about this exam paper, specific questions, or derivations..."
             rows={2}
             className="theme-form-input pr-12 text-xs sm:text-sm resize-none"
             disabled={loading}
@@ -809,7 +726,9 @@ export default function AIStudyGuideViewer({
         </div>
         <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
           <span>Press <strong>Enter ↵</strong> to send, <strong>Shift+Enter</strong> for newline</span>
-          <span className="font-mono text-[10px]">University of Rwanda Academic AI</span>
+          <span className="text-[10px] text-muted-foreground/80">
+            Powered by UR Academic Copilot
+          </span>
         </div>
       </div>
     </div>

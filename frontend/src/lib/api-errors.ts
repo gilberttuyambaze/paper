@@ -46,7 +46,12 @@ export function normalizeApiError(error: unknown): NormalizedApiError {
     const detail = responseDetail(payload);
 
     if (status === 401) {
-      return { title: 'Session expired', message: detail.message || 'Your session has expired. Please sign in again.', type: 'warning', status };
+      return {
+        title: 'Sign in required',
+        message: detail.message || 'You need to be signed in to access this feature. Please sign in or create an account.',
+        type: 'info',
+        status,
+      };
     }
     if (status === 403) {
       return { title: 'Access denied', message: detail.message || 'You do not have permission to perform this action.', type: 'error', status };

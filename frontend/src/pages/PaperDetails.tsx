@@ -64,7 +64,7 @@ import {
   LoaderCircle,
   Copy,
 } from 'lucide-react';
-import { toast } from '@/lib/messages';
+import { showMessage, toast } from '@/lib/messages';
 import { normalizeApiError } from '@/lib/api-errors';
 import AvatarFallback from '../components/AvatarFallback';
 import DocumentPreview from '../components/DocumentPreview';
@@ -465,8 +465,43 @@ export default function PaperDetails() {
       .filter((comment) => comment.parent_id === parentId)
       .sort((a, b) => (new Date(a.created_at || 0).getTime() || 0) - (new Date(b.created_at || 0).getTime() || 0));
 
-  const handleAIAction = async (action: AIStudyAction, questionOverride?: string) => {
+  const promptSignInForAI = () => {
+    const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
+    showMessage({
+      type: 'info',
+      title: 'Sign in to use AI Study Assistant',
+      message: 'To use the AI Study Assistant, practice quizzes, step-by-step revision, and formula guides, please sign in to your account or create a free account.',
+      actions: [
+        {
+          label: 'Sign In',
+          variant: 'default',
+          onClick: () => {
+            navigate(`/login?returnTo=${returnUrl}`);
+          },
+        },
+        {
+          label: 'Create Account',
+          variant: 'outline',
+          onClick: () => {
+            navigate(`/register?returnTo=${returnUrl}`);
+          },
+        },
+        {
+          label: 'Cancel',
+          variant: 'outline',
+          onClick: () => undefined,
+        },
+      ],
+    });
+  };
+
+  const handleAIAction = async (action: AIStudyAction, questionOverride?: string, preferredProvider?: string) => {
     if (!paper) return;
+    if (!user) {
+      promptSignInForAI();
+      return;
+    }
+
     const targetQuestion = (questionOverride !== undefined ? questionOverride : aiQuestion).trim();
     if (action === 'question' && !targetQuestion) {
       toast.error('Write a question about this paper first.');
@@ -502,7 +537,8 @@ export default function PaperDetails() {
         paper.id,
         action,
         action === 'question' ? targetQuestion : undefined,
-        historyPayload
+        historyPayload,
+        preferredProvider
       );
 
       const assistantMessage: StudyChatMessage = {
@@ -511,7 +547,9 @@ export default function PaperDetails() {
         content: response.content,
         action,
         model: response.model,
+        provider: response.provider,
         fallbackReason: response.fallback_reason || null,
+        duration_ms: response.duration_ms,
         usage: response.usage,
         timestamp: new Date(),
       };
@@ -520,7 +558,12 @@ export default function PaperDetails() {
       setAiResult(response.content);
       setAiSource(response.model);
       setAiFallbackReason(response.fallback_reason || null);
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.response?.status === 401) {
+        setChatMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+        promptSignInForAI();
+        return;
+      }
       toast.error(normalizeApiError(error).message || 'AI assistant is unavailable right now');
     } finally {
       setAiLoading(false);
@@ -731,7 +774,9 @@ export default function PaperDetails() {
               loading={aiLoading}
               fallbackReason={aiFallbackReason}
               messages={chatMessages}
-              onSendMessage={(action, question) => void handleAIAction(action, question)}
+              isAuthenticated={Boolean(user)}
+              onRequireAuth={promptSignInForAI}
+              onSendMessage={(action, question, provider) => void handleAIAction(action, question, provider)}
               onClearMessages={handleClearChat}
               onQuickAction={(promptText) => void handleAIAction('question', promptText)}
             />

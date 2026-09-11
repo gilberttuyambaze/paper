@@ -1,6 +1,8 @@
 import logging
 import re
 import asyncio
+from time import monotonic
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -26,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/study-ai", tags=["study-ai"])
 
+# In-memory fast cache for extracted text to prevent slow redundant network downloads
+_paper_text_cache: dict[int, str] = {}
+
 
 class ChatHistoryMessage(BaseModel):
     role: str
@@ -36,6 +41,7 @@ class AIActionRequest(BaseModel):
     action: str  # explain, summarize, question, quiz, formulas, pitfalls
     question: str | None = None
     chat_history: list[ChatHistoryMessage] | None = None
+    preferred_provider: str | None = None
 
 
 def _keywords(value: str) -> set[str]:
@@ -192,71 +198,126 @@ def _build_fallback_response(
     return {
         "content": content,
         "model": "local-study-guide",
+        "provider": "local",
         "usage": None,
         "sources": sources or [],
         "fallback_reason": fallback_reason,
     }
 
 
+async def _ping_provider(name: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """Fast healthcheck for an individual provider."""
+    if not spec.get("is_configured"):
+        return {
+            "name": name,
+            "label": spec["label"],
+            "model": spec["model"],
+            "is_configured": False,
+            "is_connected": False,
+            "latency_ms": None,
+            "status": "not_configured",
+            "message": "API key not configured",
+        }
+
+    started = monotonic()
+    try:
+        prov = AIProviderFactory.create(name)
+        test_req = AIGenerationRequest(
+            messages=[AIMessage(role="user", content="Ping healthcheck")],
+            max_output_tokens=5,
+            temperature=0.0,
+            user_id="healthcheck",
+        )
+        await asyncio.wait_for(prov.generate(test_req), timeout=3.5)
+        elapsed_ms = round((monotonic() - started) * 1000)
+        return {
+            "name": name,
+            "label": spec["label"],
+            "model": spec["model"],
+            "is_configured": True,
+            "is_connected": True,
+            "latency_ms": elapsed_ms,
+            "status": "online",
+            "message": f"Online and responding ({elapsed_ms}ms)",
+        }
+    except Exception as exc:
+        elapsed_ms = round((monotonic() - started) * 1000)
+        raw_msg = str(exc)
+        is_quota = "quota" in raw_msg.lower() or "credit" in raw_msg.lower() or "429" in raw_msg
+        return {
+            "name": name,
+            "label": spec["label"],
+            "model": spec["model"],
+            "is_configured": True,
+            "is_connected": False,
+            "latency_ms": elapsed_ms if is_quota else None,
+            "status": "quota_exhausted" if is_quota else "error",
+            "message": raw_msg if raw_msg else "Could not connect",
+        }
+
+
 @router.get("/status")
 async def get_ai_status(
     _current_user: UserResponse = Depends(get_current_user),
 ):
-    """Return live connectivity, provider name, and diagnostic status."""
+    """Return live connectivity, multi-provider statuses, and diagnostic details."""
     if not settings.ai_enabled:
         return {
             "enabled": False,
-            "provider": settings.ai_provider,
-            "model": settings.openai_model,
+            "active_provider": settings.ai_provider,
+            "active_model": settings.openai_model,
             "is_connected": False,
             "latency_ms": None,
             "status": "disabled",
             "message": "AI assistant is disabled in server configuration (AI_ENABLED=false).",
+            "providers": [],
         }
 
-    provider_name, api_key, base_url, model = AIProviderFactory.detect_provider()
-    if not AIProviderFactory.is_configured():
-        return {
-            "enabled": True,
-            "provider": provider_name,
-            "model": model,
-            "is_connected": False,
-            "latency_ms": None,
-            "status": "not_configured",
-            "message": f"API key is not configured for provider '{provider_name}'.",
-        }
+    all_specs = AIProviderFactory.get_all_provider_specs()
+    # Ping only configured providers concurrently (max 3.5s total)
+    tasks = [_ping_provider(item["name"], item) for item in all_specs]
+    provider_results = await asyncio.gather(*tasks)
 
-    started = asyncio.get_event_loop().time()
-    try:
-        service = AIService()
-        test_request = AIGenerationRequest(
-            messages=[AIMessage(role="user", content="Ping healthcheck")],
-            max_output_tokens=5,
-            temperature=0.0,
-            user_id="status-check",
-        )
-        response = await asyncio.wait_for(service.generate(test_request), timeout=8.0)
-        elapsed_ms = round((asyncio.get_event_loop().time() - started) * 1000)
+    # Find the fastest online provider
+    online_providers = [p for p in provider_results if p["is_connected"]]
+    quota_exhausted = [p for p in provider_results if p["status"] == "quota_exhausted"]
+
+    if online_providers:
+        # Sort by latency
+        best = min(online_providers, key=lambda x: x["latency_ms"] or 9999)
         return {
             "enabled": True,
-            "provider": response.provider or provider_name,
-            "model": response.model or model,
+            "active_provider": best["name"],
+            "active_model": best["model"],
             "is_connected": True,
-            "latency_ms": elapsed_ms,
+            "latency_ms": best["latency_ms"],
             "status": "online",
-            "message": f"AI provider '{response.provider or provider_name}' is online and responding ({elapsed_ms}ms).",
+            "message": f"AI provider '{best['label']}' is online and responding ({best['latency_ms']}ms).",
+            "providers": provider_results,
         }
-    except Exception as exc:
-        raw_msg = str(exc)
-        is_quota = "quota" in raw_msg.lower() or "credit" in raw_msg.lower() or "429" in raw_msg
+    elif quota_exhausted:
+        first_q = quota_exhausted[0]
         return {
             "enabled": True,
-            "provider": provider_name,
-            "model": model,
+            "active_provider": first_q["name"],
+            "active_model": first_q["model"],
             "is_connected": False,
             "latency_ms": None,
-            "status": "quota_exhausted" if is_quota else "error",
-            "message": raw_msg if raw_msg else "Could not connect to AI provider.",
+            "status": "quota_exhausted",
+            "message": f"Provider '{first_q['label']}' exhausted API quota (429). Local Paper Mode active.",
+            "providers": provider_results,
+        }
+    else:
+        configured_any = any(p["is_configured"] for p in provider_results)
+        return {
+            "enabled": True,
+            "active_provider": settings.ai_provider,
+            "active_model": settings.openai_model,
+            "is_connected": False,
+            "latency_ms": None,
+            "status": "not_configured" if not configured_any else "error",
+            "message": "No AI API keys configured" if not configured_any else "Could not reach any configured AI providers.",
+            "providers": provider_results,
         }
 
 
@@ -337,31 +398,36 @@ async def study_paper(
     else:
         raise HTTPException(status_code=400, detail="Unsupported AI action")
 
-    retrieval_query = payload.question.strip() if action == "question" and payload.question else f"{paper.course_code} {paper.course_name} {action}"
-    retrieval = HybridRetrievalService(db)
-    retrieved = await retrieval.retrieve(retrieval_query, paper_id=paper.id, course_code=paper.course_code, limit=settings.rag_context_limit)
-    if not retrieved and paper.file_key:
-        # Backfill legacy papers on first use, then reuse their stored passages.
-        try:
-            await asyncio.wait_for(PassageIndexService(db).index_paper(paper), timeout=8)
-            retrieved = await retrieval.retrieve(retrieval_query, paper_id=paper.id, course_code=paper.course_code, limit=settings.rag_context_limit)
-        except Exception as exc:
-            logger.info("Could not index legacy paper_id=%s: %s", paper_id, exc)
+    # Fast retrieval & text extraction with in-memory caching
+    source_items = []
+    extracted_text = _paper_text_cache.get(paper.id)
 
-    source_items = [{"paper_id": paper.id, "paper_title": paper.title, "page_number": item.passage.page_number, "passage": item.passage.text, "score": round(item.score, 3)} for item in retrieved]
-    extracted_text = "\n\n".join(f"[Page {item.passage.page_number}] {item.passage.text}" for item in retrieved)
-
-    # Robust fallback: if RAG passages are not yet ready or empty, extract text directly from PDF
-    if not extracted_text and paper.file_key:
+    if not extracted_text:
+        retrieval_query = payload.question.strip() if action == "question" and payload.question else f"{paper.course_code} {paper.course_name} {action}"
         try:
-            pdf_bytes = await StorageService().download_file("papers", paper.file_key)
-            direct_text = extract_pdf_text(pdf_bytes, max_pages=15, max_chars=32_000)
-            if direct_text:
-                extracted_text = direct_text
-                if not source_items:
-                    source_items = [{"paper_id": paper.id, "paper_title": paper.title, "page_number": 1, "passage": direct_text[:300] + "...", "score": 1.0}]
+            retrieval = HybridRetrievalService(db)
+            retrieved = await asyncio.wait_for(
+                retrieval.retrieve(retrieval_query, paper_id=paper.id, course_code=paper.course_code, limit=settings.rag_context_limit),
+                timeout=1.5,
+            )
+            if retrieved:
+                source_items = [{"paper_id": paper.id, "paper_title": paper.title, "page_number": item.passage.page_number, "passage": item.passage.text, "score": round(item.score, 3)} for item in retrieved]
+                extracted_text = "\n\n".join(f"[Page {item.passage.page_number}] {item.passage.text}" for item in retrieved)
         except Exception as exc:
-            logger.warning("Could not extract direct PDF text for paper_id=%s: %s", paper_id, exc)
+            logger.info("Fast passage retrieval skipped for paper_id=%s: %s", paper_id, exc)
+
+        # If passages were not yet stored, extract text directly from PDF with strict 2.5s timeout
+        if not extracted_text and paper.file_key:
+            try:
+                pdf_bytes = await asyncio.wait_for(StorageService().download_file("papers", paper.file_key), timeout=2.5)
+                direct_text = extract_pdf_text(pdf_bytes, max_pages=12, max_chars=24_000)
+                if direct_text:
+                    extracted_text = direct_text
+                    _paper_text_cache[paper.id] = direct_text
+                    if not source_items:
+                        source_items = [{"paper_id": paper.id, "paper_title": paper.title, "page_number": 1, "passage": direct_text[:300] + "...", "score": 1.0}]
+            except Exception as exc:
+                logger.warning("Could not extract direct PDF text for paper_id=%s: %s", paper_id, exc)
 
     context = build_paper_context(
         paper=paper,
@@ -371,7 +437,7 @@ async def study_paper(
         extracted_text=extracted_text,
     )
 
-    # Check if server-side AI provider is enabled and configured
+    # Check if any server-side AI provider is enabled and configured
     if not AIService.is_configured():
         return _build_fallback_response(action, paper, comments, solutions, payload.question, extracted_text, source_items, "cloud_ai_not_configured")
 
@@ -388,7 +454,6 @@ async def study_paper(
             "6. Maintain an encouraging, scholarly, and professional academic tone."
         )
 
-        timeout_sec = max(25.0, float(settings.ai_timeout_seconds))
         max_tokens = min(settings.ai_max_output_tokens, 2048)
 
         messages = [
@@ -408,24 +473,26 @@ async def study_paper(
 
         messages.append(AIMessage(role="user", content=prompt))
 
-        response = await asyncio.wait_for(
-            AIService().analyze_paper(
-                AIGenerationRequest(
-                    temperature=0.4,
-                    max_output_tokens=max_tokens,
-                    user_id=str(_current_user.id),
-                    messages=messages,
-                )
+        # Use fast multi-provider waterfall (fails over in milliseconds if preferred/primary fails)
+        response = await AIService().generate_with_waterfall(
+            AIGenerationRequest(
+                temperature=0.4,
+                max_output_tokens=max_tokens,
+                user_id=str(_current_user.id),
+                messages=messages,
             ),
-            timeout=timeout_sec,
+            preferred_provider=payload.preferred_provider,
+            per_provider_timeout=8.0,
         )
         return {
             "content": response.content,
             "model": response.model,
+            "provider": response.provider,
             "usage": response.usage.__dict__ if response.usage else None,
+            "duration_ms": response.duration_ms,
             "sources": source_items,
         }
     except Exception as exc:
-        logger.warning("Study AI request failed, using fallback summary: %s", exc)
+        logger.warning("Study AI request failed across providers, using fallback summary: %s", exc)
         raw_reason = str(exc) if str(exc) else getattr(exc, "code", "cloud_ai_unavailable")
         return _build_fallback_response(action, paper, comments, solutions, payload.question, extracted_text, source_items, raw_reason)

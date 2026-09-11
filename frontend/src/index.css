@@ -1119,19 +1119,17 @@ select:disabled {
 }
 
 .resource-highlight-viewport {
-  height: 22rem;
+  min-height: auto;
   overflow: hidden;
 }
 
 .resource-highlight-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
 .resource-highlight-tile {
   min-width: 0;
-  height: 7rem;
   overflow: hidden;
   animation: resource-highlight-switch 420ms ease both;
 }

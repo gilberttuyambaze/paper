@@ -290,7 +290,9 @@ export interface AdminOverview {
 export interface AIStudyResponse {
   content: string;
   model: string;
+  provider?: string;
   fallback_reason?: string | null;
+  duration_ms?: number | null;
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -298,14 +300,28 @@ export interface AIStudyResponse {
   };
 }
 
+export interface AIProviderStatus {
+  name: string;
+  label: string;
+  model: string;
+  is_configured: boolean;
+  is_connected: boolean;
+  latency_ms: number | null;
+  status: 'online' | 'quota_exhausted' | 'not_configured' | 'error';
+  message: string;
+}
+
 export interface AIStatusResponse {
   enabled: boolean;
-  provider: string;
-  model: string;
+  active_provider?: string;
+  active_model?: string;
+  provider?: string;
+  model?: string;
   is_connected: boolean;
   latency_ms: number | null;
   status: 'online' | 'quota_exhausted' | 'not_configured' | 'disabled' | 'error';
   message: string;
+  providers?: AIProviderStatus[];
 }
 
 export interface PersonalizedRecommendationsResponse {
@@ -1121,12 +1137,14 @@ export async function runStudyAI(
   paperId: number,
   action: 'explain' | 'summarize' | 'question' | 'quiz' | 'formulas' | 'pitfalls',
   question?: string,
-  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  preferredProvider?: string
 ): Promise<AIStudyResponse> {
   const response = await apiClient.post(apiUrl(`/api/v1/study-ai/papers/${paperId}`), {
     action,
     question,
     chat_history: chatHistory,
+    preferred_provider: preferredProvider,
   });
   return response.data as AIStudyResponse;
 }
