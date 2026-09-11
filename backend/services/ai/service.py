@@ -30,27 +30,63 @@ logger = logging.getLogger(__name__)
 
 class AIProviderFactory:
     @staticmethod
+    def detect_provider(provider_name: str | None = None) -> tuple[str, str, str, str]:
+        """Returns (provider_name, api_key, base_url, model)."""
+        name = (provider_name or settings.ai_provider or "openai").strip().lower()
+        api_key = (settings.ai_compatible_api_key or settings.openai_api_key or "").strip()
+        custom_base_url = (settings.ai_compatible_base_url or "").strip()
+        custom_compatible_model = (settings.ai_compatible_model or "").strip()
+
+        # Auto-detect from key prefix if no custom base_url is specified
+        if not custom_base_url:
+            if api_key.startswith("gsk_"):
+                return ("groq", api_key, "https://api.groq.com/openai/v1", custom_compatible_model or "llama-3.3-70b-versatile")
+            elif api_key.startswith("AIzaSy"):
+                return ("gemini", api_key, "https://generativelanguage.googleapis.com/v1beta/openai/", custom_compatible_model or "gemini-2.0-flash")
+            elif api_key.startswith("sk-or-"):
+                return ("openrouter", api_key, "https://openrouter.ai/api/v1", custom_compatible_model or "meta-llama/llama-3.3-70b-instruct")
+
+        if name == "groq":
+            return ("groq", api_key, custom_base_url or "https://api.groq.com/openai/v1", custom_compatible_model or "llama-3.3-70b-versatile")
+        if name == "deepseek":
+            return ("deepseek", api_key, custom_base_url or "https://api.deepseek.com/v1", custom_compatible_model or "deepseek-chat")
+        if name == "gemini":
+            return ("gemini", api_key, custom_base_url or "https://generativelanguage.googleapis.com/v1beta/openai/", custom_compatible_model or "gemini-2.0-flash")
+        if name == "openrouter":
+            return ("openrouter", api_key, custom_base_url or "https://openrouter.ai/api/v1", custom_compatible_model or "meta-llama/llama-3.3-70b-instruct")
+        if name == "ollama":
+            return ("ollama", api_key or "ollama", custom_base_url or "http://localhost:11434/v1", custom_compatible_model or "llama3.2")
+        if name == "openai_compatible":
+            return ("openai_compatible", api_key or "not-needed", custom_base_url or "http://localhost:11434/v1", custom_compatible_model or settings.openai_model or "gpt-4o-mini")
+
+        return ("openai", api_key, custom_base_url or "", settings.openai_model or "gpt-4o-mini")
+
+    @staticmethod
+    def is_configured(provider_name: str | None = None) -> bool:
+        if not settings.ai_enabled:
+            return False
+        p_name, api_key, base_url, _ = AIProviderFactory.detect_provider(provider_name)
+        if p_name == "ollama":
+            return True
+        return bool(api_key or base_url)
+
+    @staticmethod
     def create(provider_name: str | None = None) -> AIProvider:
-        provider_name = (provider_name or settings.ai_provider).strip().lower()
-        if provider_name == "openai":
-            return OpenAIProvider(
-                api_key=settings.openai_api_key or "",
-                default_model=settings.openai_model,
-                embedding_model=settings.openai_embedding_model,
-                timeout_seconds=settings.ai_timeout_seconds,
-            )
-        if provider_name == "openai_compatible":
-            if not settings.ai_compatible_base_url:
-                raise AIProviderUnavailableError("AI_COMPATIBLE_BASE_URL is required for the compatible provider")
-            return OpenAIProvider(
-                api_key=settings.ai_compatible_api_key or "",
-                default_model=settings.ai_compatible_model or settings.openai_model,
-                embedding_model=settings.ai_compatible_embedding_model or settings.openai_embedding_model,
-                timeout_seconds=settings.ai_timeout_seconds,
-                base_url=settings.ai_compatible_base_url,
-                name="openai_compatible",
-            )
-        raise AIProviderUnavailableError(f"Unsupported AI provider: {provider_name}")
+        raw_name = (provider_name or settings.ai_provider or "").strip().lower()
+        known = {"openai", "openai_compatible", "groq", "deepseek", "gemini", "openrouter", "ollama"}
+        if provider_name and raw_name not in known:
+            raise AIProviderUnavailableError(f"Unsupported AI provider: {provider_name}")
+        p_name, api_key, base_url, model = AIProviderFactory.detect_provider(provider_name)
+        if p_name == "openai" and not api_key:
+            raise AIProviderUnavailableError("OpenAI API key is not configured")
+        return OpenAIProvider(
+            api_key=api_key or "not-needed",
+            default_model=model,
+            embedding_model=settings.openai_embedding_model,
+            timeout_seconds=settings.ai_timeout_seconds,
+            base_url=base_url or None,
+            name=p_name,
+        )
 
 
 class _UserRequestLimiter:
@@ -76,6 +112,10 @@ _limiter = _UserRequestLimiter()
 
 class AIService:
     """Provider-neutral service used by routers and paper workflows."""
+
+    @classmethod
+    def is_configured(cls, provider_name: str | None = None) -> bool:
+        return AIProviderFactory.is_configured(provider_name)
 
     def __init__(self, provider: AIProvider | None = None, fallback_provider: AIProvider | None = None):
         if not settings.ai_enabled and provider is None:

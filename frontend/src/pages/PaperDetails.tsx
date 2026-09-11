@@ -62,13 +62,14 @@ import {
   WifiOff,
   Save,
   LoaderCircle,
+  Copy,
 } from 'lucide-react';
 import { toast } from '@/lib/messages';
 import { normalizeApiError } from '@/lib/api-errors';
 import AvatarFallback from '../components/AvatarFallback';
 import DocumentPreview from '../components/DocumentPreview';
 import DocumentLoadingProgress from '../components/DocumentLoadingProgress';
-import AcademicAiMark from '../components/AcademicAiMark';
+import AIStudyGuideViewer, { StudyChatMessage, AIStudyAction } from '../components/AIStudyGuideViewer';
 
 function VerificationBadge({ status }: { status: string }) {
   if (status === 'verified') {
@@ -118,10 +119,11 @@ export default function PaperDetails() {
   const [pdfZoom, setPdfZoom] = useState(1);
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiMode, setAiMode] = useState<'explain' | 'summarize' | 'question' | null>(null);
+  const [aiMode, setAiMode] = useState<AIStudyAction | null>(null);
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiSource, setAiSource] = useState<string | null>(null);
   const [aiFallbackReason, setAiFallbackReason] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<StudyChatMessage[]>([]);
   const [offlinePaperUrl, setOfflinePaperUrl] = useState<string | null>(null);
   const [offlineSolutionUrl, setOfflineSolutionUrl] = useState<string | null>(null);
   const [uploaderImageUrl, setUploaderImageUrl] = useState<string | null>(null);
@@ -463,16 +465,58 @@ export default function PaperDetails() {
       .filter((comment) => comment.parent_id === parentId)
       .sort((a, b) => (new Date(a.created_at || 0).getTime() || 0) - (new Date(b.created_at || 0).getTime() || 0));
 
-  const handleAIAction = async (action: 'explain' | 'summarize' | 'question') => {
+  const handleAIAction = async (action: AIStudyAction, questionOverride?: string) => {
     if (!paper) return;
-    if (action === 'question' && !aiQuestion.trim()) {
+    const targetQuestion = (questionOverride !== undefined ? questionOverride : aiQuestion).trim();
+    if (action === 'question' && !targetQuestion) {
       toast.error('Write a question about this paper first.');
       return;
     }
+
+    let promptDisplay = targetQuestion;
+    if (action === 'explain') promptDisplay = 'Generate a comprehensive study breakdown and revision strategy for this exam paper.';
+    else if (action === 'summarize') promptDisplay = 'Summarize key themes, verified solutions, and community discussions for this paper.';
+    else if (action === 'formulas') promptDisplay = 'What are the essential formulas, equations, definitions, and theorems required for this exam?';
+    else if (action === 'pitfalls') promptDisplay = 'What are the most common student pitfalls, traps, and grading mistakes to avoid?';
+    else if (action === 'quiz') promptDisplay = 'Generate a 3-question practice quiz with step-by-step solutions for this paper.';
+
+    const userMessage: StudyChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: promptDisplay,
+      action,
+      timestamp: new Date(),
+    };
+
+    setChatMessages((prev) => [...prev, userMessage]);
+    setAiLoading(true);
+    setAiMode(action);
+
+    const historyPayload = chatMessages.slice(-6).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
     try {
-      setAiLoading(true);
-      setAiMode(action);
-      const response = await runStudyAI(paper.id, action, action === 'question' ? aiQuestion.trim() : undefined);
+      const response = await runStudyAI(
+        paper.id,
+        action,
+        action === 'question' ? targetQuestion : undefined,
+        historyPayload
+      );
+
+      const assistantMessage: StudyChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: response.content,
+        action,
+        model: response.model,
+        fallbackReason: response.fallback_reason || null,
+        usage: response.usage,
+        timestamp: new Date(),
+      };
+
+      setChatMessages((prev) => [...prev, assistantMessage]);
       setAiResult(response.content);
       setAiSource(response.model);
       setAiFallbackReason(response.fallback_reason || null);
@@ -481,6 +525,15 @@ export default function PaperDetails() {
     } finally {
       setAiLoading(false);
     }
+  };
+
+  const handleClearChat = () => {
+    setChatMessages([]);
+    setAiResult('');
+    setAiSource(null);
+    setAiFallbackReason(null);
+    setAiMode(null);
+    toast.info('Study conversation reset');
   };
 
   const handleSaveOffline = async (kind: 'paper' | 'solution') => {
@@ -670,55 +723,19 @@ export default function PaperDetails() {
             <div className="mt-6"><DocumentPreview title={`${paper.title} paper preview`} unavailableMessage="Paper preview is not available. Use the download button to view the full document." /></div>
           )}
 
-          <Card className="theme-panel mt-6">
-            <CardHeader>
-              <CardTitle className="theme-title flex items-center gap-2">
-                <Sparkles className="theme-section-icon h-5 w-5" />
-                AI Study Assistant
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="theme-muted text-sm">
-                Ask for a practical study explanation or a compact brief of what the paper discussion already uncovered.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => handleAIAction('explain')} disabled={aiLoading}>
-                  Explain This Paper
-                </Button>
-                <Button type="button" variant="outline" onClick={() => handleAIAction('summarize')} disabled={aiLoading}>
-                  Summarize Discussion
-                </Button>
-              </div>
-              <div className="space-y-2">
-                <Textarea
-                  value={aiQuestion}
-                  onChange={(event) => setAiQuestion(event.target.value)}
-                  onKeyDown={(event) => {
-                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                      event.preventDefault();
-                      void handleAIAction('question');
-                    }
-                  }}
-                  placeholder="Ask a question about this paper, its discussion, or available solutions..."
-                  rows={2}
-                  className="theme-form-input"
-                />
-                <Button type="button" variant="outline" onClick={() => handleAIAction('question')} disabled={aiLoading || !aiQuestion.trim()}>
-                  <Send className="mr-2 h-4 w-4" />
-                  Send question
-                </Button>
-              </div>
-              <div className="theme-soft-panel p-4 text-sm">
-                <p className="theme-link-accent mb-3 text-xs font-semibold uppercase tracking-[0.2em]">
-                  {aiMode === 'summarize' ? 'Discussion Brief' : aiMode === 'explain' ? 'Study Guide' : aiMode === 'question' ? 'Paper Answer' : 'AI Study Assistant'}
-                </p>
-                {aiLoading ? <div className="whitespace-pre-wrap leading-6">Thinking...</div> : aiResult ? <div className="whitespace-pre-wrap leading-6">{aiResult}</div> : (
-                  <div className="flex items-center gap-3 leading-6"><AcademicAiMark className="h-11 w-11 shrink-0" /><span>Use the AI assistant to get a study explanation or a summary of the current discussion and solutions.</span></div>
-                )}
-                {aiResult && aiSource === 'local-study-guide' && <p className="theme-muted mt-3 text-xs">{aiFallbackReason === 'rate_limited' ? 'Cloud AI is temporarily rate-limited. This answer uses the retrieved paper material instead.' : 'Using retrieved paper details, discussion, and available solutions because cloud AI is unavailable.'}</p>}
-              </div>
-            </CardContent>
-          </Card>
+          <div className="mt-6">
+            <AIStudyGuideViewer
+              content={aiResult}
+              model={aiSource}
+              mode={aiMode}
+              loading={aiLoading}
+              fallbackReason={aiFallbackReason}
+              messages={chatMessages}
+              onSendMessage={(action, question) => void handleAIAction(action, question)}
+              onClearMessages={handleClearChat}
+              onQuickAction={(promptText) => void handleAIAction('question', promptText)}
+            />
+          </div>
 
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-3 mt-6">

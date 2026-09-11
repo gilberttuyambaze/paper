@@ -119,6 +119,28 @@ class OpenAIProvider(AIProvider):
             raise self._normalize_error(exc) from exc
 
     @staticmethod
+    def _chat_messages(messages: list) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for message in messages:
+            if isinstance(message.content, str):
+                items.append({"role": message.role, "content": message.content})
+            elif isinstance(message.content, list):
+                content: list[dict[str, Any]] = []
+                for part in message.content:
+                    if part.get("type") in ("text", "input_text"):
+                        content.append({"type": "text", "text": part.get("text", "")})
+                    elif part.get("type") in ("image_url", "input_image"):
+                        image_url = part.get("image_url", {})
+                        url_str = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url or "")
+                        content.append({"type": "image_url", "image_url": {"url": url_str}})
+                    else:
+                        content.append(part)
+                items.append({"role": message.role, "content": content})
+            else:
+                items.append({"role": message.role, "content": str(message.content)})
+        return items
+
+    @staticmethod
     def _input(messages: list) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for message in messages:
@@ -127,11 +149,12 @@ class OpenAIProvider(AIProvider):
             else:
                 content = []
                 for part in message.content:
-                    if part.get("type") == "text":
+                    if part.get("type") in ("text", "input_text"):
                         content.append({"type": "input_text", "text": part.get("text", "")})
-                    elif part.get("type") == "image_url":
+                    elif part.get("type") in ("image_url", "input_image"):
                         image_url = part.get("image_url", {})
-                        content.append({"type": "input_image", "image_url": image_url.get("url", "")})
+                        url_str = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url or "")
+                        content.append({"type": "input_image", "image_url": url_str})
                     else:
                         raise AIInvalidRequestError("Unsupported multimodal content part")
             items.append({"role": message.role, "content": content})
@@ -141,10 +164,13 @@ class OpenAIProvider(AIProvider):
     def _usage(usage: Any) -> AIUsage | None:
         if not usage:
             return None
+        input_tokens = getattr(usage, "prompt_tokens", None) if hasattr(usage, "prompt_tokens") else getattr(usage, "input_tokens", None)
+        output_tokens = getattr(usage, "completion_tokens", None) if hasattr(usage, "completion_tokens") else getattr(usage, "output_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
         return AIUsage(
-            input_tokens=getattr(usage, "input_tokens", None),
-            output_tokens=getattr(usage, "output_tokens", None),
-            total_tokens=getattr(usage, "total_tokens", None),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
         )
 
     def _params(self, request: AIGenerationRequest) -> dict[str, Any]:
@@ -166,32 +192,112 @@ class OpenAIProvider(AIProvider):
             }
         return {key: value for key, value in params.items() if value is not None}
 
+    @staticmethod
+    def _normalize_model_name(model_name: str) -> str:
+        name = model_name.strip()
+        aliases = {
+            "gpt-4.1-mini": "gpt-4o-mini",
+            "gpt-4-mini": "gpt-4o-mini",
+            "gpt-4.1": "gpt-4o",
+            "gpt-4.5": "gpt-4o",
+            "gpt-4": "gpt-4o",
+            "gpt-3.5": "gpt-3.5-turbo",
+        }
+        return aliases.get(name.lower(), name)
+
+    def _chat_params(self, request: AIGenerationRequest) -> dict[str, Any]:
+        raw_model = request.model or self.default_model
+        params: dict[str, Any] = {
+            "model": request.model or self.default_model,
+            "model": self._normalize_model_name(raw_model),
+            "messages": self._chat_messages(request.messages),
+            "temperature": request.temperature,
+        }
+        if request.max_output_tokens is not None:
+            params["max_tokens"] = request.max_output_tokens
+        if request.response_schema:
+            try:
+                params["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": request.response_schema_name or "response",
+                        "schema": request.response_schema,
+                        "strict": True,
+                    },
+                }
+            except Exception:
+                params["response_format"] = {"type": "json_object"}
+        return {key: value for key, value in params.items() if value is not None}
+
     async def generate(self, request: AIGenerationRequest) -> AIGeneration:
         started = monotonic()
         try:
-            response = await self.client.responses.create(**self._params(request))
-            content = getattr(response, "output_text", None)
-            if not isinstance(content, str) or not content.strip():
-                raise AIMalformedResponseError("OpenAI response did not contain text output")
-            return AIGeneration(
-                content=content,
-                model=str(getattr(response, "model", request.model or self.default_model)),
-                provider=self.name,
-                request_id=getattr(response, "_request_id", None) or getattr(response, "id", None),
-                usage=self._usage(getattr(response, "usage", None)),
-                duration_ms=round((monotonic() - started) * 1000),
-            )
+            # Check if standard Chat Completions is available on the client
+            if hasattr(self.client, "chat") and hasattr(self.client.chat, "completions"):
+                response = await self.client.chat.completions.create(**self._chat_params(request))
+                content = ""
+                if hasattr(response, "choices") and response.choices:
+                    choice = response.choices[0]
+                    content = choice.message.content if hasattr(choice, "message") and hasattr(choice.message, "content") else getattr(choice, "text", "")
+                elif hasattr(response, "output_text"):
+                    content = response.output_text
+
+                if not isinstance(content, str) or not content.strip():
+                    raise AIMalformedResponseError("AI response did not contain text output")
+
+                return AIGeneration(
+                    content=content,
+                    model=str(getattr(response, "model", request.model or self.default_model)),
+                    provider=self.name,
+                    request_id=getattr(response, "_request_id", None) or getattr(response, "id", None),
+                    usage=self._usage(getattr(response, "usage", None)),
+                    duration_ms=round((monotonic() - started) * 1000),
+                )
+            elif hasattr(self.client, "responses"):
+                response = await self.client.responses.create(**self._params(request))
+                content = getattr(response, "output_text", None)
+                if not isinstance(content, str) or not content.strip():
+                    raise AIMalformedResponseError("OpenAI response did not contain text output")
+                return AIGeneration(
+                    content=content,
+                    model=str(getattr(response, "model", request.model or self.default_model)),
+                    provider=self.name,
+                    request_id=getattr(response, "_request_id", None) or getattr(response, "id", None),
+                    usage=self._usage(getattr(response, "usage", None)),
+                    duration_ms=round((monotonic() - started) * 1000),
+                )
+            else:
+                raise AIProviderUnavailableError("OpenAI client does not support chat or responses")
         except Exception as exc:
             raise self._normalize_error(exc) from exc
 
     async def stream(self, request: AIGenerationRequest) -> AsyncIterator[str]:
         try:
-            stream = await self.client.responses.create(**self._params(request), stream=True)
-            async for event in stream:
-                if getattr(event, "type", "") == "response.output_text.delta":
-                    delta = getattr(event, "delta", "")
-                    if delta:
-                        yield delta
+            if hasattr(self.client, "chat") and hasattr(self.client.chat, "completions"):
+                stream_or_coro = self.client.chat.completions.create(**self._chat_params(request), stream=True)
+                if asyncio.iscoroutine(stream_or_coro) or hasattr(stream_or_coro, "__await__"):
+                    stream = await stream_or_coro
+                else:
+                    stream = stream_or_coro
+                async for chunk in stream:
+                    if hasattr(chunk, "choices") and chunk.choices:
+                        delta = chunk.choices[0].delta
+                        content = getattr(delta, "content", None) or ""
+                        if content:
+                            yield content
+            elif hasattr(self.client, "responses"):
+                stream_or_coro = self.client.responses.create(**self._params(request), stream=True)
+                if asyncio.iscoroutine(stream_or_coro) or hasattr(stream_or_coro, "__await__"):
+                    stream = await stream_or_coro
+                else:
+                    stream = stream_or_coro
+                async for event in stream:
+                    if getattr(event, "type", "") == "response.output_text.delta":
+                        delta = getattr(event, "delta", "")
+                        if delta:
+                            yield delta
+            else:
+                raise AIProviderUnavailableError("OpenAI client does not support chat or responses streaming")
         except Exception as exc:
             raise self._normalize_error(exc) from exc
 
@@ -217,19 +323,23 @@ class OpenAIProvider(AIProvider):
     def _normalize_error(exc: Exception) -> AIError:
         if isinstance(exc, AIError):
             return exc
-        if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
-            return AIAuthenticationError()
+        raw_msg = str(exc)
         if isinstance(exc, RateLimitError):
-            return AIRateLimitError()
+            msg_lower = raw_msg.lower()
+            if "quota" in msg_lower or "credit" in msg_lower or "billing" in msg_lower or "balance" in msg_lower:
+                return AIRateLimitError("OpenAI account balance is exhausted (429 Insufficient Quota). Add credits at platform.openai.com or switch AI_PROVIDER in backend/.env.local.")
+            return AIRateLimitError("AI provider is temporarily rate limited. Please try again shortly.")
+        if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
+            return AIAuthenticationError(f"AI authentication failed: {raw_msg}")
         if isinstance(exc, (APITimeoutError, asyncio.TimeoutError, httpx.TimeoutException)):
-            return AITimeoutError()
+            return AITimeoutError("AI request timed out. Please try again.")
         if isinstance(exc, NotFoundError):
-            return AIModelUnavailableError()
+            return AIModelUnavailableError(f"AI model not found: {raw_msg}")
         if isinstance(exc, BadRequestError):
-            message = str(exc).lower()
-            if "policy" in message or "safety" in message:
+            msg_lower = raw_msg.lower()
+            if "policy" in msg_lower or "safety" in msg_lower:
                 return AIContentPolicyError()
-            return AIInvalidRequestError()
+            return AIInvalidRequestError(f"Invalid AI request: {raw_msg}")
         if isinstance(exc, (APIConnectionError, APIStatusError, httpx.HTTPError)):
-            return AIProviderUnavailableError()
-        return AIProviderUnavailableError()
+            return AIProviderUnavailableError(f"AI connection failed: {raw_msg}")
+        return AIProviderUnavailableError(f"AI provider unavailable: {raw_msg}")

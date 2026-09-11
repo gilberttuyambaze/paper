@@ -298,6 +298,16 @@ export interface AIStudyResponse {
   };
 }
 
+export interface AIStatusResponse {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  is_connected: boolean;
+  latency_ms: number | null;
+  status: 'online' | 'quota_exhausted' | 'not_configured' | 'disabled' | 'error';
+  message: string;
+}
+
 export interface PersonalizedRecommendationsResponse {
   recently_viewed: Paper[];
   recommended: Paper[];
@@ -1107,9 +1117,23 @@ export async function markAllNotificationsRead(): Promise<{ updated: number }> {
   return response.data as { updated: number };
 }
 
-export async function runStudyAI(paperId: number, action: 'explain' | 'summarize' | 'question', question?: string): Promise<AIStudyResponse> {
-  const response = await apiClient.post(apiUrl(`/api/v1/study-ai/papers/${paperId}`), { action, question });
+export async function runStudyAI(
+  paperId: number,
+  action: 'explain' | 'summarize' | 'question' | 'quiz' | 'formulas' | 'pitfalls',
+  question?: string,
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+): Promise<AIStudyResponse> {
+  const response = await apiClient.post(apiUrl(`/api/v1/study-ai/papers/${paperId}`), {
+    action,
+    question,
+    chat_history: chatHistory,
+  });
   return response.data as AIStudyResponse;
+}
+
+export async function fetchStudyAIStatus(): Promise<AIStatusResponse> {
+  const response = await apiClient.get(apiUrl('/api/v1/study-ai/status'));
+  return response.data as AIStatusResponse;
 }
 
 export async function saveDocumentOffline(sourceUrl: string, kind: 'paper' | 'solution', id: number): Promise<string> {
