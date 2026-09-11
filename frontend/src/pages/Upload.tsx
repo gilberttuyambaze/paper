@@ -22,6 +22,7 @@ import { normalizeApiError } from '@/lib/api-errors';
 import AcademicContextFields, { type AcademicContextValue } from '@/components/AcademicContextFields';
 import InlineFieldMessage from '@/components/InlineFieldMessage';
 import { createBook, createCourse, createModule, fetchModules, searchCourses, type Book, type Course, type Module } from '@/lib/books';
+import { useUploadAccess, type UploadResourceType } from '@/hooks/useUploadAccess';
 
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
 
@@ -207,7 +208,8 @@ function buildDetectedHints(file: File, previewText: string, courseOptions: Pape
 
 export default function UploadPage() {
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { canAccessUploadArea, allowedResourceTypes, loading: siteAccessLoading, error: siteAccessError } = useUploadAccess();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [uploadKind, setUploadKind] = useState<'paper' | 'book'>('paper');
   const [submitting, setSubmitting] = useState(false);
@@ -268,6 +270,12 @@ export default function UploadPage() {
   const [bookCover, setBookCover] = useState<File | null>(null);
   const [bookFileDragActive, setBookFileDragActive] = useState(false);
   const [bookCoverDragActive, setBookCoverDragActive] = useState(false);
+  const enabledUploadKinds = allowedResourceTypes as UploadResourceType[];
+
+  useEffect(() => {
+    if (siteAccessLoading || enabledUploadKinds.length === 0) return;
+    setUploadKind((current) => enabledUploadKinds.includes(current) ? current : enabledUploadKinds[0]);
+  }, [siteAccessLoading, enabledUploadKinds.join(',')]);
 
   const handleDragOver = (
     event: DragEvent<HTMLDivElement>,
@@ -690,7 +698,7 @@ export default function UploadPage() {
     } finally { setSubmitting(false); setUploadStage(null); }
   };
 
-  if (loading) {
+  if (authLoading || siteAccessLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="theme-spinner h-8 w-8 animate-spin rounded-full border-b-2 border-current" />
@@ -716,6 +724,30 @@ export default function UploadPage() {
         >
           Sign In to Upload
         </Button>
+      </div>
+    );
+  }
+
+  if (siteAccessError) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-16 text-center">
+        <h2 className="theme-title mb-4 text-2xl font-bold">Upload access unavailable</h2>
+        <p className="theme-muted mb-6">
+          Unable to load upload access settings. Please try again.
+        </p>
+        <Button onClick={() => window.location.reload()} className="theme-accent-bg">Try Again</Button>
+      </div>
+    );
+  }
+
+  if (!canAccessUploadArea) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-16 text-center">
+        <h2 className="theme-title mb-4 text-2xl font-bold">Uploads unavailable</h2>
+        <p className="theme-muted mb-6">
+          Upload access is currently disabled for your account or no upload resource types are enabled.
+        </p>
+        <Button onClick={() => navigate('/')} className="theme-accent-bg">Return Home</Button>
       </div>
     );
   }
@@ -748,7 +780,7 @@ export default function UploadPage() {
   if (uploadKind === 'book') {
     return <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="theme-muted mb-6 hover:bg-transparent hover:text-primary"><ArrowLeft className="h-4 w-4 mr-2" />Back</Button>
-      <Card className="theme-panel"><CardHeader><CardTitle className="theme-title flex items-center gap-2"><UploadIcon className="theme-section-icon h-6 w-6" />Upload</CardTitle><div className="mt-4 grid grid-cols-2 rounded-lg border p-1"><Button type="button" variant="ghost" onClick={() => setUploadKind('paper')}>📄 Paper</Button><Button type="button" className="theme-accent-bg" onClick={() => setUploadKind('book')}>📚 Book</Button></div></CardHeader><CardContent>
+      <Card className="theme-panel"><CardHeader><CardTitle className="theme-title flex items-center gap-2"><UploadIcon className="theme-section-icon h-6 w-6" />Upload</CardTitle><div className="mt-4 grid grid-cols-2 rounded-lg border p-1">{enabledUploadKinds.includes('paper') ? <Button type="button" variant={uploadKind === 'paper' ? 'default' : 'ghost'} className={uploadKind === 'paper' ? 'theme-accent-bg' : ''} onClick={() => setUploadKind('paper')}>📄 Paper</Button> : <div />}{enabledUploadKinds.includes('book') ? <Button type="button" variant={uploadKind === 'book' ? 'default' : 'ghost'} className={uploadKind === 'book' ? 'theme-accent-bg' : ''} onClick={() => setUploadKind('book')}>📚 Book</Button> : <div />}</div></CardHeader><CardContent>
         <form onSubmit={handleBookUpload} className="space-y-6">
           <div className="theme-soft-panel rounded-lg p-4 text-sm"><p className="theme-title flex items-center gap-2 font-medium"><Sparkles className="h-4 w-4" />Book upload</p><p className="theme-muted mt-2">Add the book file, cover, and catalogue details. Your account is automatically recorded as the uploader.</p></div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -788,7 +820,7 @@ export default function UploadPage() {
             <UploadIcon className="theme-section-icon h-6 w-6" />
             Upload
           </CardTitle>
-          <div className="mt-4 grid grid-cols-2 rounded-lg border p-1"><Button type="button" className="theme-accent-bg" onClick={() => setUploadKind('paper')}>📄 Paper</Button><Button type="button" variant="ghost" onClick={() => setUploadKind('book')}>📚 Book</Button></div>
+          <div className="mt-4 grid grid-cols-2 rounded-lg border p-1">{enabledUploadKinds.includes('paper') ? <Button type="button" variant={uploadKind === 'paper' ? 'default' : 'ghost'} className={uploadKind === 'paper' ? 'theme-accent-bg' : ''} onClick={() => setUploadKind('paper')}>📄 Paper</Button> : <div />}{enabledUploadKinds.includes('book') ? <Button type="button" variant={uploadKind === 'book' ? 'default' : 'ghost'} className={uploadKind === 'book' ? 'theme-accent-bg' : ''} onClick={() => setUploadKind('book')}>📚 Book</Button> : <div />}</div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleUpload} className="space-y-6">

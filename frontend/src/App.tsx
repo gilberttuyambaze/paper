@@ -71,11 +71,7 @@ const App = () => (
             <Route path="/book/:id" element={<Layout><BookDetails /></Layout>} />
             <Route
               path="/upload"
-              element={
-                <ProtectedAdminRoute requiredPermission="books.create" title="upload">
-                  <Layout><Upload /></Layout>
-                </ProtectedAdminRoute>
-              }
+              element={<Layout><Upload /></Layout>}
             />
             <Route path="/dashboard" element={<Layout><Dashboard /></Layout>} />
             <Route path="/profile" element={<Layout><Profile /></Layout>} />

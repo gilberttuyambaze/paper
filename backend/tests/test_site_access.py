@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -48,12 +49,19 @@ class FakeDb:
 @pytest.mark.parametrize("mode,role,expected", [
     ("nobody", "admin", False),
     ("authenticated", "normal", True),
+    ("authenticated", "admin", True),
     ("selected_roles", "admin", True),
+    ("selected_roles", "normal", False),
     ("selected_roles", "cp", False),
 ])
 def test_upload_policy_matrix(mode, role, expected):
     settings = SimpleNamespace(maintenance_mode=False, upload_access_mode=mode, upload_roles='["admin"]', allowed_resource_types='["book"]', maintenance_message='maintenance')
     assert asyncio.run(can_upload_resource(FakeDb(settings), SimpleNamespace(role=role), "book")) is expected
+
+
+def test_selected_role_upload_does_not_require_upload_permission():
+    settings = SimpleNamespace(maintenance_mode=False, upload_access_mode="selected_roles", upload_roles='["normal"]', allowed_resource_types='["book"]', maintenance_message='maintenance')
+    assert asyncio.run(can_upload_resource(FakeDb(settings), SimpleNamespace(role="normal"), "book"))
 
 
 def test_resource_types_are_independent_and_maintenance_blocks_normal_users():
@@ -71,6 +79,17 @@ def test_super_admin_identity_and_serialization():
     assert data["allowed_resource_types"] == ["paper"]
 
 
+@pytest.mark.parametrize("allowed,resource,expected", [
+    (["book"], "book", True),
+    (["book"], "paper", False),
+    (["paper"], "paper", True),
+    (["paper"], "book", False),
+])
+def test_upload_resource_types_are_independent(allowed, resource, expected):
+    settings = SimpleNamespace(maintenance_mode=False, upload_access_mode="authenticated", upload_roles="[]", allowed_resource_types=json.dumps(allowed), maintenance_message="maintenance")
+    assert asyncio.run(can_upload_resource(FakeDb(settings), SimpleNamespace(role="normal"), resource)) is expected
+
+
 def test_maintenance_technical_allowlist_is_conservative():
     assert is_maintenance_technical_exemption("/api/v1/auth/login")
     assert is_maintenance_technical_exemption("/health/database")
@@ -81,7 +100,14 @@ def test_maintenance_technical_allowlist_is_conservative():
 
 def test_health_status_is_public_while_maintenance_is_on():
     client = TestClient(main_module.app)
-    settings = SimpleNamespace(maintenance_mode=True, maintenance_message="Maintenance in progress")
+    settings = SimpleNamespace(
+        maintenance_mode=True,
+        maintenance_message="Maintenance in progress",
+        upload_access_mode="authenticated",
+        upload_roles='["admin", "cp"]',
+        allowed_resource_types='["book", "paper"]',
+        heartbeat_enabled=True,
+    )
 
     with patch.object(main_module.db_manager, "async_session_maker", return_value=FakeAsyncSession()), \
          patch.object(health_module, "get_site_settings", AsyncMock(return_value=settings)):
@@ -90,7 +116,11 @@ def test_health_status_is_public_while_maintenance_is_on():
     assert response.status_code == 200
     payload = response.json()
     assert payload["maintenance_mode"] is True
-    assert "maintenance_message" in payload
+    assert payload["maintenance_message"] == settings.maintenance_message
+    assert payload["upload_access_mode"] == settings.upload_access_mode
+    assert payload["upload_roles"] == ["admin", "cp"]
+    assert payload["allowed_resource_types"] == ["book", "paper"]
+    assert "heartbeat_enabled" not in payload
 
 
 def test_maintenance_blocked_get_has_cors_headers():

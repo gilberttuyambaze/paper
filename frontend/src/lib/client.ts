@@ -970,11 +970,24 @@ export interface SiteAccessSettings {
   heartbeat?: HeartbeatStatus;
 }
 
+export interface PublicSiteAccessSettings {
+  maintenance_mode: boolean;
+  maintenance_message: string;
+  upload_access_mode: 'nobody' | 'authenticated' | 'selected_roles';
+  upload_roles: string[];
+  allowed_resource_types: string[];
+}
+
 export interface HeartbeatStatus { enabled: boolean; scheduler_running: boolean; last_attempt_at?: string; last_success_at?: string; last_failure_at?: string; next_scheduled_at?: string; next_retry_at?: string; total_attempts: number; total_successes: number; total_failures: number; consecutive_failures: number; retry_attempts: number; status: string; activity_message?: string; }
 
 export async function fetchSiteAccessSettings(): Promise<SiteAccessSettings> {
   const response = await apiClient.get(apiUrl('/api/v1/admin/settings/site-access'));
   return response.data as SiteAccessSettings;
+}
+
+export async function fetchPublicSiteAccessSettings(): Promise<PublicSiteAccessSettings> {
+  const response = await apiClient.get(apiUrl('/health/site-access'));
+  return response.data as PublicSiteAccessSettings;
 }
 
 export async function saveSiteAccessSettings(settings: Partial<SiteAccessSettings>): Promise<SiteAccessSettings> {

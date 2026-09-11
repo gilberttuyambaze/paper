@@ -7,6 +7,7 @@ import SeoMeta from '@/components/SeoMeta';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchNotifications } from '@/lib/client';
 import { fetchUserProfile, getStorageDownloadUrl } from '@/lib/client';
+import { useUploadAccess } from '@/hooks/useUploadAccess';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const { user, login, logout, hasPermission } = useAuth();
+  const { canAccessUploadArea } = useUploadAccess();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -108,10 +110,9 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/', label: 'Home', icon: BookOpen },
     { path: '/resources', label: 'Browse Resources', icon: Search },
-    { path: '/upload', label: 'Upload', icon: Upload, auth: true, permission: 'books.create' },
+    { path: '/upload', label: 'Upload', icon: Upload, auth: true },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, auth: true },
   ];
-  const canUpload = hasPermission('books.create');
   const canAccessManagement = hasPermission('admin.dashboard.view');
   const managementPath = user?.role === 'content_manager' ? '/content-manager' : '/admin';
   const managementLabel = user?.role === 'content_manager' ? 'Content Manager' : 'Admin';
@@ -245,6 +246,7 @@ export default function Layout({ children }: LayoutProps) {
             <nav className="hidden items-center gap-1 md:flex">
               {navItems.map((item) => {
                 if (item.auth && !user) return null;
+                if (item.path === '/upload' && !canAccessUploadArea) return null;
                 if (item.permission && !hasPermission(item.permission)) return null;
                 const Icon = item.icon;
 
@@ -378,6 +380,7 @@ export default function Layout({ children }: LayoutProps) {
                     )}
                     {navItems.map((item) => {
                       if (item.auth && !user) return null;
+                      if (item.path === '/upload' && !canAccessUploadArea) return null;
                       if (item.permission && !hasPermission(item.permission)) return null;
                       const Icon = item.icon;
 
@@ -433,7 +436,7 @@ export default function Layout({ children }: LayoutProps) {
               <div className="theme-muted flex flex-col gap-2 text-sm">
                 <Link to="/" className="transition-colors hover:text-primary">Home</Link>
                 <Link to="/resources" className="transition-colors hover:text-primary">Browse Resources</Link>
-                {canUpload && <Link to="/upload" className="transition-colors hover:text-primary">Upload</Link>}
+                {canAccessUploadArea && <Link to="/upload" className="transition-colors hover:text-primary">Upload</Link>}
                 <Link to="/student-stories" className="transition-colors hover:text-primary">Story Behind This Website</Link>
               </div>
             </div>

@@ -67,6 +67,16 @@ def serialize_site_settings(settings: SiteSettings) -> dict:
     }
 
 
+def serialize_public_site_access(settings: SiteSettings) -> dict:
+    return {
+        "maintenance_mode": bool(settings.maintenance_mode),
+        "maintenance_message": settings.maintenance_message,
+        "upload_access_mode": settings.upload_access_mode,
+        "upload_roles": _json_list(settings.upload_roles, DEFAULT_UPLOAD_ROLES),
+        "allowed_resource_types": _json_list(settings.allowed_resource_types, DEFAULT_RESOURCE_TYPES),
+    }
+
+
 def _set_json_list(values: Iterable[str], allowed: set[str]) -> str:
     normalized = sorted({str(value).strip().lower() for value in values if str(value).strip()} & allowed)
     return json.dumps(normalized)
@@ -85,7 +95,7 @@ async def can_upload_resource(db: AsyncSession, user, resource_type: str) -> boo
         return False
     if mode == "authenticated":
         return True
-    return has_permission(user, f"uploads.{resource_type}") and user.role in _json_list(settings.upload_roles, DEFAULT_UPLOAD_ROLES)
+    return str(getattr(user, "role", "")).strip().lower() in _json_list(settings.upload_roles, DEFAULT_UPLOAD_ROLES)
 
 
 async def require_resource_upload(db: AsyncSession, user, resource_type: str):
