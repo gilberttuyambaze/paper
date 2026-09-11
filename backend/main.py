@@ -19,7 +19,7 @@ from sqlalchemy import select
 from models.auth import User
 from models.user_profiles import User_profiles
 from schemas.auth import UserResponse
-from services.site_access import get_site_settings
+from services.site_access import get_site_settings, user_can_bypass_maintenance
 from services.authorization import has_permission
 from services.heartbeat import scheduler_loop
 
@@ -31,7 +31,7 @@ MAINTENANCE_TECHNICAL_EXEMPTIONS = frozenset({
 
 
 def is_maintenance_technical_exemption(path: str) -> bool:
-    return path in MAINTENANCE_TECHNICAL_EXEMPTIONS or path.startswith("/health")
+    return path in MAINTENANCE_TECHNICAL_EXEMPTIONS or path.startswith("/health") or path.startswith("/api/v1/health")
 
 # MODULE_IMPORTS_START
 from services.database import initialize_database, close_database
@@ -243,21 +243,33 @@ async def enforce_maintenance_mode(request: Request, call_next):
             async with db_manager.async_session_maker() as db:
                 site_settings = await get_site_settings(db)
                 if site_settings.maintenance_mode:
-                    role = None
+                    user = None
                     user_id = None
                     authorization = request.headers.get("Authorization", "")
                     if authorization.lower().startswith("bearer "):
                         try:
                             payload = decode_access_token(authorization[7:].strip())
                             user_id = payload.get("sub")
-                            user = await db.get(User, user_id) if user_id else None
-                            role = user.role if user else None
+                            db_user = await db.get(User, user_id) if user_id else None
                             profile = await db.scalar(select(User_profiles).where(User_profiles.user_id == user_id)) if user_id else None
-                            if not has_permission(UserResponse(id=user_id, email="", role=role or "user"), "site.maintenance.bypass") and profile:
-                                role = profile.role
+
+                            effective_role = (payload.get("role") or "user")
+                            if db_user and db_user.role and (db_user.role == "super_admin" or has_permission(db_user, "users.transfer_super_admin")):
+                                effective_role = db_user.role
+                            elif profile and profile.role and not (db_user and db_user.role == "super_admin"):
+                                effective_role = profile.role
+
+                            user = UserResponse(
+                                id=user_id or "",
+                                email=payload.get("email", ""),
+                                name=payload.get("name"),
+                                role=effective_role or "user",
+                            )
+                            user.is_super_admin = has_permission(user, "users.transfer_super_admin")
                         except (AccessTokenError, ValueError):
-                            role = None
-                    if not has_permission(UserResponse(id=user_id or "", email="", role=role or "user"), "site.maintenance.bypass"):
+                            user = None
+
+                    if not user_can_bypass_maintenance(user):
                         return JSONResponse(status_code=503, content={"detail": site_settings.maintenance_message, "code": "SITE_MAINTENANCE", "maintenance": True})
         except Exception:
             logger.exception("Maintenance access check failed")

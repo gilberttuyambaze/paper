@@ -3,7 +3,7 @@ import pytest
 from types import SimpleNamespace
 
 from services.site_access import can_upload_resource, is_super_admin, serialize_site_settings
-from main import is_maintenance_technical_exemption
+from main import is_maintenance_technical_exemption, user_can_bypass_maintenance
 
 
 class FakeDb:

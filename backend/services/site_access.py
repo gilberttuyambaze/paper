@@ -12,6 +12,12 @@ from models.auth import User
 from models.site_settings import SiteSettings
 from services.authorization import has_permission, is_super_admin
 
+
+def user_can_bypass_maintenance(user) -> bool:
+    if user is None:
+        return False
+    return bool(is_super_admin(user) or has_permission(user, "site.maintenance.bypass"))
+
 UPLOAD_MODES = {"nobody", "authenticated", "selected_roles"}
 RESOURCE_TYPES = {"book", "paper"}
 DEFAULT_UPLOAD_ROLES = ["admin", "cp"]
