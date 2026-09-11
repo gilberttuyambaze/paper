@@ -277,6 +277,13 @@ async def enforce_maintenance_mode(request: Request, call_next):
     return await call_next(request)
 
 
+# FastAPI's add_middleware() prepends each new middleware, so the final stack order
+# needs to be explicitly reversed to keep CORS as the outermost layer. This ensures
+# short-circuit maintenance responses still carry the configured CORS headers while
+# the maintenance gate remains in force for the underlying request.
+app.user_middleware = list(reversed(app.user_middleware))
+
+
 def safe_error_message(status_code: int) -> str:
     messages = {
         400: "The request could not be processed.",

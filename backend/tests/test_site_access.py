@@ -1,9 +1,34 @@
 import asyncio
 import pytest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
 
 from services.site_access import can_upload_resource, is_super_admin, serialize_site_settings
 from main import is_maintenance_technical_exemption, user_can_bypass_maintenance
+import main as main_module
+import routers.health as health_module
+
+
+class FakeAsyncSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def add(self, *args, **kwargs):
+        return None
+
+    async def flush(self, *args, **kwargs):
+        return None
+
+    async def get(self, *args, **kwargs):
+        return None
+
+    async def scalar(self, *args, **kwargs):
+        return None
 
 
 class FakeDb:
@@ -52,3 +77,75 @@ def test_maintenance_technical_allowlist_is_conservative():
     assert not is_maintenance_technical_exemption("/api/v1/auth/register")
     assert not is_maintenance_technical_exemption("/api/v1/admin/settings/site-access")
     assert not is_maintenance_technical_exemption("/api/v1/books")
+
+
+def test_health_status_is_public_while_maintenance_is_on():
+    client = TestClient(main_module.app)
+    settings = SimpleNamespace(maintenance_mode=True, maintenance_message="Maintenance in progress")
+
+    with patch.object(main_module.db_manager, "async_session_maker", return_value=FakeAsyncSession()), \
+         patch.object(health_module, "get_site_settings", AsyncMock(return_value=settings)):
+        response = client.get("/health/site-access", headers={"Origin": "https://paperhubur.vercel.app"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["maintenance_mode"] is True
+    assert "maintenance_message" in payload
+
+
+def test_maintenance_blocked_get_has_cors_headers():
+    client = TestClient(main_module.app)
+    settings = SimpleNamespace(maintenance_mode=True, maintenance_message="Maintenance in progress")
+    origin = "https://paperhubur.vercel.app"
+
+    with patch.object(main_module.db_manager, "async_session_maker", return_value=FakeAsyncSession()), \
+         patch("main.get_site_settings", AsyncMock(return_value=settings)):
+        response = client.get(
+            "/api/v1/notifications",
+            headers={"Origin": origin},
+        )
+
+    assert response.status_code == 503
+    assert response.headers.get("access-control-allow-origin") == origin
+    assert response.headers.get("access-control-allow-credentials", "").lower() == "true"
+
+
+def test_maintenance_preflight_from_frontend_origin_has_cors_headers():
+    client = TestClient(main_module.app)
+    settings = SimpleNamespace(maintenance_mode=True, maintenance_message="Maintenance in progress")
+    origin = "https://paperhubur.vercel.app"
+
+    with patch.object(main_module.db_manager, "async_session_maker", return_value=FakeAsyncSession()), \
+         patch("main.get_site_settings", AsyncMock(return_value=settings)):
+        response = client.options(
+            "/api/v1/notifications",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == origin
+    assert response.headers.get("access-control-allow-credentials", "").lower() == "true"
+    assert "GET" in response.headers.get("access-control-allow-methods", "")
+
+
+def test_unapproved_origin_still_rejected_on_maintenance_preflight():
+    client = TestClient(main_module.app)
+    settings = SimpleNamespace(maintenance_mode=True, maintenance_message="Maintenance in progress")
+
+    with patch.object(main_module.db_manager, "async_session_maker", return_value=FakeAsyncSession()), \
+         patch("main.get_site_settings", AsyncMock(return_value=settings)):
+        response = client.options(
+            "/api/v1/notifications",
+            headers={
+                "Origin": "https://evil.example",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.headers.get("access-control-allow-origin") is None
