@@ -11,6 +11,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
+from models.auth import User
 from models.user_profiles import User_profiles
 from services.papers import PapersService
 from services.passage_indexing import PassageIndexService
@@ -47,6 +48,9 @@ class PapersData(BaseModel):
     department: str
     year: int
     paper_type: str
+    year_of_study: Optional[str] = None
+    semester: Optional[str] = None
+    examination_session: Optional[str] = None
     lecturer: str = None
     description: str = None
     file_key: str = None
@@ -68,6 +72,9 @@ class PapersUpdateData(BaseModel):
     department: Optional[str] = None
     year: Optional[int] = None
     paper_type: Optional[str] = None
+    year_of_study: Optional[str] = None
+    semester: Optional[str] = None
+    examination_session: Optional[str] = None
     lecturer: Optional[str] = None
     description: Optional[str] = None
     file_key: Optional[str] = None
@@ -113,6 +120,9 @@ class PapersResponse(BaseModel):
     department: str
     year: int
     paper_type: str
+    year_of_study: Optional[str] = None
+    semester: Optional[str] = None
+    examination_session: Optional[str] = None
     lecturer: Optional[str] = None
     description: Optional[str] = None
     file_key: Optional[str] = None
@@ -125,6 +135,12 @@ class PapersResponse(BaseModel):
     created_at: Optional[datetime] = None
     uploader_display_name: Optional[str] = None
     uploader_profile_picture_key: Optional[str] = None
+    extraction_status: Optional[str] = None
+    extraction_method: Optional[str] = None
+    extraction_quality: Optional[float] = None
+    ocr_used: Optional[bool] = None
+    failed_pages: Optional[str] = None
+    extraction_version: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -163,19 +179,37 @@ async def _attach_uploader_info(db: AsyncSession, papers):
     if not papers:
         return []
 
-    user_ids = {paper.user_id for paper in papers if getattr(paper, 'user_id', None)}
+    user_ids = {str(getattr(paper, 'user_id', None)) for paper in papers if getattr(paper, 'user_id', None) is not None}
     if not user_ids:
-        return [dict({k: v for k, v in paper.__dict__.items() if not k.startswith('_')}, uploader_display_name=None, uploader_profile_picture_key=None) for paper in papers]
+        return [dict({k: v for k, v in (paper if isinstance(paper, dict) else paper.__dict__).items() if not k.startswith('_')}, uploader_display_name=None, uploader_profile_picture_key=None) for paper in papers]
 
-    result = await db.execute(select(User_profiles).where(User_profiles.user_id.in_(user_ids)))
-    profiles = result.scalars().all()
-    profile_map = {profile.user_id: profile for profile in profiles}
+    profile_result = await db.execute(select(User_profiles).where(User_profiles.user_id.in_(user_ids)))
+    profiles = profile_result.scalars().all()
+    profile_map = {str(profile.user_id): profile for profile in profiles}
+
+    user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    users = user_result.scalars().all()
+    user_map = {str(u.id): u for u in users}
 
     serialized = []
     for paper in papers:
-        paper_data = {k: v for k, v in paper.__dict__.items() if not k.startswith('_')}
-        profile = profile_map.get(paper.user_id)
-        paper_data['uploader_display_name'] = profile.display_name if profile else None
+        paper_dict = paper if isinstance(paper, dict) else {k: v for k, v in paper.__dict__.items() if not k.startswith('_')}
+        paper_data = {**paper_dict}
+        uid = str(paper_data.get('user_id')) if paper_data.get('user_id') is not None else None
+        profile = profile_map.get(uid) if uid else None
+        user = user_map.get(uid) if uid else None
+
+        display_name = None
+        if profile and profile.display_name:
+            display_name = profile.display_name
+        elif user and user.name:
+            display_name = user.name
+        elif user and user.email:
+            display_name = user.email.split('@')[0]
+        elif uid:
+            display_name = f"Student {uid}"
+
+        paper_data['uploader_display_name'] = display_name
         paper_data['uploader_profile_picture_key'] = profile.profile_picture_key if profile else None
         serialized.append(paper_data)
     return serialized
@@ -348,7 +382,8 @@ async def get_papers(
             logger.warning(f"Papers with id {id} not found")
             raise HTTPException(status_code=404, detail="Papers not found")
 
-        return result
+        attached = await _attach_uploader_info(db, [result])
+        return attached[0] if attached else result
     except HTTPException:
         raise
     except Exception as e:

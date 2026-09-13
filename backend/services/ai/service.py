@@ -172,8 +172,10 @@ class AIProviderFactory:
         chain_order = [p.strip().lower() for p in order_raw.split(",") if p.strip()]
 
         primary = (settings.ai_provider or "").strip().lower()
-        if primary and primary in AIProviderFactory.PROVIDERS_CATALOG and primary not in chain_order:
-            chain_order.insert(0, primary)
+        # A request always starts with the configured primary.  The chain is a
+        # sequential failure order, never a latency race or model consensus.
+        if primary and primary in AIProviderFactory.PROVIDERS_CATALOG:
+            chain_order = [primary, *[name for name in chain_order if name != primary]]
 
         configured = []
         for name in chain_order:
@@ -259,7 +261,15 @@ class AIService:
     def __init__(self, provider: AIProvider | None = None, fallback_provider: AIProvider | None = None):
         if not settings.ai_enabled and provider is None:
             raise AIProviderUnavailableError("Paper Hub AI is disabled")
-        self.provider = provider or AIProviderFactory.create()
+        if provider is not None:
+            self.provider = provider
+        else:
+            # The configured primary is preferred, but an absent/invalid primary
+            # must not prevent the sequential chain from serving a request.
+            configured = AIProviderFactory.get_configured_providers()
+            if not configured:
+                raise AIProviderUnavailableError("No AI providers configured on the server.")
+            self.provider = AIProviderFactory.create(configured[0])
         self.fallback_provider = fallback_provider
         if self.fallback_provider is None and settings.ai_fallback_provider:
             try:
@@ -301,11 +311,6 @@ class AIService:
 
         configured = AIProviderFactory.get_configured_providers()
         candidates: list[str] = []
-        if preferred_provider and preferred_provider.strip().lower() in AIProviderFactory.PROVIDERS_CATALOG:
-            p_clean = preferred_provider.strip().lower()
-            if AIProviderFactory.is_configured(p_clean):
-                candidates.append(p_clean)
-
         for name in configured:
             if name not in candidates:
                 candidates.append(name)

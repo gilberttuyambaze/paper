@@ -18,6 +18,8 @@ class Book(Base):
     publisher = Column(String(255), nullable=True)
     category = Column(String(120), nullable=True, index=True)
     subject = Column(String(120), nullable=True, index=True)
+    year_of_study = Column(String(50), nullable=True, index=True)
+    semester = Column(String(50), nullable=True, index=True)
     status = Column(String(20), nullable=False, default="draft", index=True)
     visibility = Column(String(20), nullable=False, default="public", index=True)
     uploaded_by = Column(String(255), nullable=False, index=True)

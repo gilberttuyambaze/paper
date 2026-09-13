@@ -166,12 +166,21 @@ class PapersService:
             if not obj:
                 logger.warning(f"Papers {obj_id} not found for update")
                 return None
+            old_file_key = getattr(obj, "file_key", None)
             for key, value in update_data.items():
                 if hasattr(obj, key) and key != 'user_id':
                     setattr(obj, key, value)
 
             await self.db.commit()
             await self.db.refresh(obj)
+
+            # If file was replaced or newly provided, re-index passages
+            if obj.file_key and (obj.file_key != old_file_key or update_data.get("extraction_status") == "pending"):
+                try:
+                    await PassageIndexService(self.db).index_paper(obj)
+                except Exception as index_error:
+                    logger.warning("Passage re-indexing failed for updated paper_id=%s: %s", obj.id, index_error)
+
             logger.info(f"Updated papers {obj_id}")
             return obj
         except Exception as e:

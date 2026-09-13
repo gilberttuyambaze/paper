@@ -571,6 +571,11 @@ class DatabaseManager:
                         sql += " DEFAULT false"
                     else:
                         sql += " DEFAULT ''"
+            elif str(default).strip().lower() in ["now()", "current_timestamp", "current_timestamp()"]:
+                if self.engine and getattr(self.engine, "dialect", None) and self.engine.dialect.name == "sqlite":
+                    sql += " DEFAULT '1970-01-01 00:00:00'"
+                else:
+                    sql += " DEFAULT CURRENT_TIMESTAMP"
             else:
                 # Quote string values for text types
                 if column_type.upper() in ["TEXT", "VARCHAR", "STRING"] and not default.isdigit():

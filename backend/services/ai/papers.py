@@ -1,13 +1,14 @@
-"""Bounded, provider-neutral academic-paper context preparation.
+"""Canonical, provider-neutral Paper Intelligence Context preparation.
 
-The current data model stores paper metadata and file pointers, not extracted PDF
-text.  This module therefore uses available authorized metadata/discussion/solution
-text and is ready to accept extracted text when a storage-safe extractor is added.
+This module does not classify a student's intent. It faithfully represents the
+authorised paper, leaving natural-language interpretation to the model.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -15,42 +16,120 @@ class PaperContext:
     text: str
     estimated_tokens: int
     truncated: bool
+    selection_mode: str = "complete"
+    source_ids: list[int] = field(default_factory=list)
 
 
-def _clip(value: str, remaining_chars: int) -> tuple[str, bool]:
-    if len(value) <= remaining_chars:
-        return value, False
-    return value[: max(0, remaining_chars)].rstrip() + "…", True
+def clean_ocr_artifacts(text: str) -> str:
+    """Removes stray scanner footers without mutating valid exam text."""
+    cleaned = re.sub(r"\b(?:CS\s*)?Cam\s*Scanner\b", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*CS\s*$", "", cleaned, flags=re.MULTILINE)
+    return cleaned.strip()
 
 
-def build_paper_context(
+def _terms(value: str) -> set[str]:
+    return set(re.findall(r"[a-zA-Z0-9]{3,}", value.lower()))
+
+
+def _source_label(p: object) -> str:
+    bits = [f"Page {getattr(p, 'page_number', '?')}"]
+    if getattr(p, "section_title", None):
+        bits.append(str(getattr(p, "section_title")))
+    if getattr(p, "question_number", None):
+        bits.append(f"Question {getattr(p, 'question_number')}")
+    return " • ".join(bits)
+
+
+def _render_unit(p: object) -> str:
+    confidence = getattr(p, "extraction_confidence", None)
+    method = getattr(p, "extraction_method", None) or "unknown"
+    quality = f"; confidence={float(confidence):.2f}" if isinstance(confidence, (int, float)) else ""
+    return f"[SOURCE id={getattr(p, 'id', '?')}; {_source_label(p)}; method={method}{quality}]\n{clean_ocr_artifacts(str(getattr(p, 'text', '') or ''))}"
+
+
+def _build_manifest(paper: object, passages: list[object]) -> str:
+    sections: dict[str, dict] = {}
+    pages: dict[int, list[object]] = {}
+    questions: list[object] = []
+    for p in passages:
+        page = int(getattr(p, "page_number", 0) or 0)
+        pages.setdefault(page, []).append(p)
+        section = str(getattr(p, "section_title", None) or "Unsectioned content")
+        data = sections.setdefault(section, {"pages": set(), "questions": []})
+        data["pages"].add(page)
+        if getattr(p, "question_number", None):
+            data["questions"].append(p)
+            questions.append(p)
+    lines = [
+        "=== 1. PAPER METADATA ===",
+        "=== PAPER IDENTITY & EXTRACTION STATUS ===",
+        f"Title: {getattr(paper, 'title', '')}",
+        f"Course: {getattr(paper, 'course_code', '')} - {getattr(paper, 'course_name', '')}",
+        f"Paper: {getattr(paper, 'paper_type', '')}; academic year: {getattr(paper, 'year', '')}",
+        f"Extraction: status={getattr(paper, 'extraction_status', 'unknown')}; method={getattr(paper, 'extraction_method', 'unknown')}; quality={getattr(paper, 'extraction_quality', 'unknown')}; failed_pages={getattr(paper, 'failed_pages', '[]')}",
+        "", "=== 2. DOCUMENT STRUCTURE & SECTIONS ===",
+        "=== NAVIGATION MANIFEST (complete, ordered) ===",
+    ]
+    for title, data in sections.items():
+        qs = [str(getattr(p, "question_number")) for p in data["questions"]]
+        lines.append(f"- Section: {title} | pages: {', '.join(str(n) for n in sorted(data['pages']))} | questions detected: {', '.join(qs) or 'none / not confidently parsed'}")
+    lines += ["", "=== 4. QUESTION PROVENANCE INDEX ===", "=== QUESTION LOCATION INDEX (derived, not authoritative) ==="]
+    if questions:
+        lines.extend(f"- Question {getattr(p, 'question_number')} → {getattr(p, 'section_title', None) or 'General'} (Page {getattr(p, 'page_number', '?')}) | {_source_label(p)} [source id={getattr(p, 'id', '?')}]" for p in questions)
+    else:
+        lines.append("- No question boundaries were confidently extracted. Inspect page units before asserting an inventory.")
+    lines += ["", "=== PAGE INVENTORY ==="]
+    lines.extend(f"- Page {page}: {len(units)} source units; methods: {', '.join(sorted({str(getattr(p, 'extraction_method', None) or 'unknown') for p in units}))}" for page, units in pages.items())
+    return "\n".join(lines)
+
+
+def _select_units(passages: list[object], query: str, budget_chars: int) -> list[object]:
+    """Cost control only: keep matching units, neighbours, and every section."""
+    terms = _terms(query)
+    chosen: set[int] = set()
+    seen_sections: set[str] = set()
+    for i, p in enumerate(passages):
+        section = str(getattr(p, "section_title", None) or "Unsectioned content")
+        if section not in seen_sections:
+            chosen.add(i)
+            seen_sections.add(section)
+    ranked = sorted(range(len(passages)), key=lambda i: len(terms & _terms(str(getattr(passages[i], "text", "")))), reverse=True)
+    for i in ranked:
+        chosen.update(range(max(0, i - 1), min(len(passages), i + 2)))
+        if sum(len(_render_unit(passages[n])) for n in chosen) >= budget_chars:
+            break
+    selected, used = [], 0
+    for i in sorted(chosen):
+        size = len(_render_unit(passages[i]))
+        if selected and used + size > budget_chars:
+            continue
+        selected.append(passages[i])
+        used += size
+    return selected
+
+
+def build_paper_intelligence_context(
     *,
     paper: object,
-    comments: list[object],
-    solutions: list[object],
-    max_tokens: int,
+    comments: list[object] | None = None,
+    solutions: list[object] | None = None,
+    max_tokens: int = 8000,
     extracted_text: str | None = None,
+    passages: Iterable[object] | None = None,
+    query: str = "",
 ) -> PaperContext:
-    """Create bounded context without blindly transmitting an entire PDF."""
+    ordered = sorted((getattr(item, "passage", item) for item in (passages or [])), key=lambda p: (int(getattr(p, "page_number", 0) or 0), int(getattr(p, "passage_index", 0) or 0)))
     max_chars = max(1, max_tokens) * 4
-    fields = [
-        ("Paper title", getattr(paper, "title", "")),
-        ("Course", f"{getattr(paper, 'course_code', '')} - {getattr(paper, 'course_name', '')}"),
-        ("College", getattr(paper, "college", "")),
-        ("Department", getattr(paper, "department", "")),
-        ("Year", str(getattr(paper, "year", ""))),
-        ("Paper type", getattr(paper, "paper_type", "")),
-        ("Lecturer", getattr(paper, "lecturer", "") or "Unknown"),
-        ("Description", getattr(paper, "description", "") or "None"),
-    ]
-    parts = [f"{name}: {value}" for name, value in fields]
-    if extracted_text:
-        parts.append("Extracted paper text:\n" + extracted_text)
-    if comments:
-        parts.append("Recent discussion:\n" + "\n".join(f"- {getattr(item, 'content', '')}" for item in comments if getattr(item, "content", None)))
-    if solutions:
-        parts.append("Top solutions:\n" + "\n".join(f"- {getattr(item, 'content', '')}" for item in solutions if getattr(item, "content", None)))
+    prefix = _build_manifest(paper, ordered) + "\n\n=== 3. STRUCTURED QUESTION & SECTION CONTENT ===\n=== SOURCE UNITS IN DOCUMENT ORDER ===\n"
+    all_units = "\n\n".join(_render_unit(p) for p in ordered)
+    if len(prefix) + len(all_units) <= max_chars:
+        text = prefix + (all_units or clean_ocr_artifacts(extracted_text or "No readable source units are indexed."))
+        return PaperContext(text=text, estimated_tokens=max(1, len(text) // 4), truncated=False, source_ids=[int(getattr(p, "id", 0) or 0) for p in ordered])
+    selected = _select_units(ordered, query, max(800, max_chars - len(prefix)))
+    text = prefix + "The full paper exceeds this request budget. The complete manifest above remains authoritative; these are relevant ordered evidence units and local neighbours. Do not claim omitted text was inspected.\n\n" + "\n\n".join(_render_unit(p) for p in selected)
+    clipped = text[:max_chars]
+    return PaperContext(text=clipped, estimated_tokens=max(1, len(clipped) // 4), truncated=True, selection_mode="structure_preserving_selection", source_ids=[int(getattr(p, "id", 0) or 0) for p in selected])
 
-    assembled = "\n\n".join(parts)
-    clipped, truncated = _clip(assembled, max_chars)
-    return PaperContext(text=clipped, estimated_tokens=max(1, len(clipped) // 4), truncated=truncated)
+
+# Backward compatibility
+build_paper_context = build_paper_intelligence_context

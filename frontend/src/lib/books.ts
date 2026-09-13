@@ -5,7 +5,7 @@ export type BookStatus = 'draft' | 'active' | 'inactive' | 'archived';
 export type BookFile = { key: string; original_filename?: string | null; mime_type?: string | null; size?: number | null };
 export type Book = {
   id: number; title: string; description?: string | null; isbn?: string | null; edition?: string | null;
-  publication_year?: number | null; language?: string | null; publisher?: string | null; category?: string | null; subject?: string | null;
+  publication_year?: number | null; year_of_study?: string | null; semester?: string | null; language?: string | null; publisher?: string | null; category?: string | null; subject?: string | null;
   status: BookStatus; visibility: 'public' | 'private'; uploaded_by: string; uploader_name?: string | null; uploader_role?: string | null;
   download_count?: number | null;
   created_at: string; updated_at: string; management_deadline: string; can_manage: boolean;

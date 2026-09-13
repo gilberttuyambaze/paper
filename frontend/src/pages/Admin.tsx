@@ -206,7 +206,7 @@ export default function AdminPage() {
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
   const [paperEditing, setPaperEditing] = useState(false);
   const [paperSaving, setPaperSaving] = useState(false);
-  const [paperDraft, setPaperDraft] = useState<{ title: string; description: string }>({ title: '', description: '' });
+  const [paperDraft, setPaperDraft] = useState<{ title: string; description: string; year_of_study?: string; semester?: string }>({ title: '', description: '', year_of_study: '', semester: '' });
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [roleRequests, setRoleRequests] = useState<UserProfile[]>([]);
@@ -469,7 +469,16 @@ export default function AdminPage() {
     }
   };
 
-  const openPaper = (paper: Paper) => { setSelectedPaper(paper); setPaperDraft({ title: paper.title, description: paper.description || '' }); setPaperEditing(false); };
+  const openPaper = (paper: Paper) => {
+    setSelectedPaper(paper);
+    setPaperDraft({
+      title: paper.title,
+      description: paper.description || '',
+      year_of_study: paper.year_of_study || '',
+      semester: paper.semester || '',
+    });
+    setPaperEditing(false);
+  };
   const savePaperMetadata = async () => {
     if (!selectedPaper) return;
     if (paperSaving) return;
@@ -949,7 +958,7 @@ export default function AdminPage() {
                 <div className="flex flex-wrap gap-2"><PaperVerificationBadge status={paper.verification_status} />{paper.is_hidden && <Badge className="theme-error-note border-0">hidden</Badge>}</div>
                 <h4 className="theme-title mt-3 line-clamp-2 font-medium">{paper.title}</h4>
                 <p className="theme-muted mt-2 text-sm">{paper.course_code} · {paper.course_name}</p>
-                <p className="theme-muted mt-1 text-xs">{paper.year} · {paper.paper_type} · {uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Unknown uploader'}</p>
+                <p className="theme-muted mt-1 text-xs">{paper.year} · {paper.paper_type} · {uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || (paper.user_id ? `Contributor ${paper.user_id}` : 'Contributor')}</p>
                 <div className="theme-muted mt-3 flex gap-3 text-xs"><span>{paper.download_count || 0} downloads</span>{(paper.report_count || 0) > 0 && <span className="text-error">{paper.report_count} reports</span>}</div>
                 <Button className="mt-auto pt-4" variant="outline" onClick={() => openPaper(paper)}><Eye className="mr-1 h-4 w-4" />View Full Paper</Button>
               </CardContent></Card>
@@ -986,8 +995,31 @@ export default function AdminPage() {
             <p><span className="theme-muted">Academic information</span><br />{selectedPaper.college || 'Not provided'} · {selectedPaper.department || 'Not provided'}</p>
             <p><span className="theme-muted">Programme</span><br />{selectedPaper.programme_name_other || selectedPaper.programme_id || 'Not provided'}</p>
             <p><span className="theme-muted">Year / type</span><br />{selectedPaper.year} · {selectedPaper.paper_type}</p>
+            <p><span className="theme-muted">Study Year & Semester</span><br />{[selectedPaper.year_of_study, selectedPaper.semester].filter(Boolean).join(' · ') || 'Not specified'}</p>
             <p><span className="theme-muted">Uploader</span><br />{uploaderProfiles[selectedPaper.user_id]?.profile?.display_name || selectedPaper.uploader_display_name || selectedPaper.user_id}</p>
             <p><span className="theme-muted">Uploaded</span><br />{formatDate(selectedPaper.created_at)}</p>
+            {paperEditing && (
+              <>
+                <div>
+                  <Label htmlFor="paper-admin-study-year">Study Year</Label>
+                  <Input
+                    id="paper-admin-study-year"
+                    value={paperDraft.year_of_study || ''}
+                    placeholder="e.g. Year 1, Year 2..."
+                    onChange={(event) => setPaperDraft((draft) => ({ ...draft, year_of_study: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="paper-admin-semester">Semester</Label>
+                  <Input
+                    id="paper-admin-semester"
+                    value={paperDraft.semester || ''}
+                    placeholder="e.g. Semester 1, Semester 2..."
+                    onChange={(event) => setPaperDraft((draft) => ({ ...draft, semester: event.target.value }))}
+                  />
+                </div>
+              </>
+            )}
             <div className="sm:col-span-2"><span className="theme-muted">Description</span><br />{paperEditing ? <Textarea value={paperDraft.description} onChange={(event) => setPaperDraft((draft) => ({ ...draft, description: event.target.value }))} /> : selectedPaper.description || 'Not provided'}</div>
           </div>
           <div className="flex flex-wrap gap-2">

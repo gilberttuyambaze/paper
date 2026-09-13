@@ -25,6 +25,8 @@ import { createBook, createCourse, createModule, fetchModules, searchCourses, ty
 import { useUploadAccess, type UploadResourceType } from '@/hooks/useUploadAccess';
 
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
+const STUDY_YEARS = ['Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Postgraduate'];
+const SEMESTERS = ['Semester 1', 'Semester 2', 'Trimester 1', 'Trimester 2', 'Trimester 3', 'Annual'];
 
 const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018];
 const CUSTOM_COURSE_OPTION = '__custom__';
@@ -44,10 +46,34 @@ type DetectedUploadHints = {
   college?: string;
   department?: string;
   year?: string;
+  yearOfStudy?: string;
+  semester?: string;
   paperType?: string;
   lecturer?: string;
   evidence: string[];
 };
+
+function detectYearOfStudy(corpus: string): string | undefined {
+  const lower = corpus.toLowerCase();
+  if (/\b(?:year\s*1|1st\s*year|first\s*year|level\s*1|l1|y1)\b/i.test(lower)) return 'Year 1';
+  if (/\b(?:year\s*2|2nd\s*year|second\s*year|level\s*2|l2|y2)\b/i.test(lower)) return 'Year 2';
+  if (/\b(?:year\s*3|3rd\s*year|third\s*year|level\s*3|l3|y3)\b/i.test(lower)) return 'Year 3';
+  if (/\b(?:year\s*4|4th\s*year|fourth\s*year|level\s*4|l4|y4)\b/i.test(lower)) return 'Year 4';
+  if (/\b(?:year\s*5|5th\s*year|fifth\s*year|level\s*5|l5|y5)\b/i.test(lower)) return 'Year 5';
+  if (/\b(?:postgraduate|masters|master|phd|post-graduate)\b/i.test(lower)) return 'Postgraduate';
+  return undefined;
+}
+
+function detectSemester(corpus: string): string | undefined {
+  const lower = corpus.toLowerCase();
+  if (/\b(?:semester\s*1|sem\s*1|s1|term\s*1)\b/i.test(lower)) return 'Semester 1';
+  if (/\b(?:semester\s*2|sem\s*2|s2|term\s*2)\b/i.test(lower)) return 'Semester 2';
+  if (/\b(?:trimester\s*1|tri\s*1|t1)\b/i.test(lower)) return 'Trimester 1';
+  if (/\b(?:trimester\s*2|tri\s*2|t2)\b/i.test(lower)) return 'Trimester 2';
+  if (/\b(?:trimester\s*3|tri\s*3|t3)\b/i.test(lower)) return 'Trimester 3';
+  if (/\b(?:annual|full\s*year)\b/i.test(lower)) return 'Annual';
+  return undefined;
+}
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -188,6 +214,18 @@ function buildDetectedHints(file: File, previewText: string, courseOptions: Pape
     evidence.push(`Detected paper type ${detectedPaperType}.`);
   }
 
+  const detectedYearOfStudy = detectYearOfStudy(combinedText);
+  if (detectedYearOfStudy) {
+    hints.yearOfStudy = detectedYearOfStudy;
+    evidence.push(`Detected study year ${detectedYearOfStudy}.`);
+  }
+
+  const detectedSem = detectSemester(combinedText);
+  if (detectedSem) {
+    hints.semester = detectedSem;
+    evidence.push(`Detected semester ${detectedSem}.`);
+  }
+
   const lecturer = detectLecturer(previewText);
   if (lecturer) {
     hints.lecturer = lecturer;
@@ -238,6 +276,8 @@ export default function UploadPage() {
   const [academic, setAcademic] = useState<AcademicContextValue>({ institution_id: 'ur', campus_id: '', college_id: '', school_id: '', programme_id: '' });
   const [programmeNameOther, setProgrammeNameOther] = useState('');
   const [year, setYear] = useState('');
+  const [yearOfStudy, setYearOfStudy] = useState('');
+  const [semester, setSemester] = useState('');
   const [paperType, setPaperType] = useState('');
   const [lecturer, setLecturer] = useState('');
   const [description, setDescription] = useState('');
@@ -250,6 +290,8 @@ export default function UploadPage() {
   const [bookIsbn, setBookIsbn] = useState('');
   const [bookEdition, setBookEdition] = useState('');
   const [bookYear, setBookYear] = useState('');
+  const [bookYearOfStudy, setBookYearOfStudy] = useState('');
+  const [bookSemester, setBookSemester] = useState('');
   const [bookLanguage, setBookLanguage] = useState('');
   const [bookPublisher, setBookPublisher] = useState('');
   const [bookCategory, setBookCategory] = useState('');
@@ -379,6 +421,8 @@ export default function UploadPage() {
     setCollege(paper.college);
     setDepartment(paper.department);
     setPaperType(paper.paper_type);
+    if (paper.year_of_study) setYearOfStudy(paper.year_of_study);
+    if (paper.semester) setSemester(paper.semester);
     setLecturer(paper.lecturer || '');
   };
 
@@ -408,6 +452,12 @@ export default function UploadPage() {
     }
     if (hints.year) {
       setYear((current) => (overwrite || !current ? hints.year || current : current));
+    }
+    if (hints.yearOfStudy) {
+      setYearOfStudy((current) => (overwrite || !current ? hints.yearOfStudy || current : current));
+    }
+    if (hints.semester) {
+      setSemester((current) => (overwrite || !current ? hints.semester || current : current));
     }
     if (hints.paperType) {
       setPaperType((current) => (overwrite || !current ? hints.paperType || current : current));
@@ -566,12 +616,14 @@ export default function UploadPage() {
     setCollege('');
     setDepartment('');
     setYear('');
+    setYearOfStudy('');
+    setSemester('');
     setPaperType('');
     setLecturer('');
     setDescription('');
     setPaperFile(null);
     setSolutionFile(null);
-    setBookTitle(''); setBookDescription(''); setBookIsbn(''); setBookEdition(''); setBookYear(''); setBookLanguage(''); setBookPublisher(''); setBookCategory(''); setBookSubject(''); setBookAuthors([]); setAuthorInput(''); setBookCourses([]); setCourseQuery(''); setBookModules([]); setModuleQuery(''); setBookFile(null); setBookCover(null);
+    setBookTitle(''); setBookDescription(''); setBookIsbn(''); setBookEdition(''); setBookYear(''); setBookYearOfStudy(''); setBookSemester(''); setBookLanguage(''); setBookPublisher(''); setBookCategory(''); setBookSubject(''); setBookAuthors([]); setAuthorInput(''); setBookCourses([]); setCourseQuery(''); setBookModules([]); setModuleQuery(''); setBookFile(null); setBookCover(null);
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -640,6 +692,8 @@ export default function UploadPage() {
         college: normalizeUserText(college) || college,
         department: normalizeUserText(department) || department,
         year: parseInt(year),
+        year_of_study: yearOfStudy || undefined,
+        semester: semester || undefined,
         paper_type: paperType,
         lecturer: normalizeUserText(lecturer) || lecturer || undefined,
         description: normalizeUserText(description),
@@ -686,7 +740,10 @@ export default function UploadPage() {
       setUploadStage('publishing'); setUploadProgress(96);
       const created = await createBook({
         title: normalizeUserText(bookTitle) || bookTitle, description: normalizeUserText(bookDescription), isbn: normalizeIsbn(bookIsbn), edition: normalizeUserText(bookEdition),
-        publication_year: bookYear ? Number(bookYear) : undefined, language: bookLanguage || undefined, publisher: bookPublisher || undefined,
+        publication_year: bookYear ? Number(bookYear) : undefined,
+        year_of_study: bookYearOfStudy || undefined,
+        semester: bookSemester || undefined,
+        language: bookLanguage || undefined, publisher: bookPublisher || undefined,
         // CP/Admin uploads are published as public academic resources. The
         // public catalogue deliberately returns only active + public Books.
         category: normalizeUserText(bookCategory), subject: normalizeUserText(bookSubject), status: 'active', visibility: 'public', authors: normalizeUnique(authors), course_ids: normalizeUnique(courseIds), module_ids: normalizeUnique(bookModules.map((module) => module.id)),
@@ -788,6 +845,34 @@ export default function UploadPage() {
             <div className="sm:col-span-2"><Label className="theme-form-label">Book title *</Label><Input className="theme-form-input mt-1" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="e.g., Database System Concepts" required aria-invalid={!bookTitle.trim()} /> <InlineFieldMessage message={!bookTitle.trim() ? 'Title is required.' : undefined} /></div>
             <div><Label className="theme-form-label">ISBN</Label><Input className="theme-form-input mt-1" value={bookIsbn} onChange={(e) => setBookIsbn(e.target.value)} /><InlineFieldMessage message={bookIsbn.trim() && !normalizeIsbn(bookIsbn) ? 'Enter a valid ISBN or leave this optional field blank.' : undefined} /></div><div><Label className="theme-form-label">Edition</Label><Input className="theme-form-input mt-1" value={bookEdition} onChange={(e) => setBookEdition(e.target.value)} /></div>
             <div><Label className="theme-form-label">Publication year</Label><Input className="theme-form-input mt-1" type="number" value={bookYear} onChange={(e) => setBookYear(e.target.value)} /></div><div><Label className="theme-form-label">Language *</Label><Select value={bookLanguage} onValueChange={setBookLanguage}><SelectTrigger className="theme-form-input mt-1"><SelectValue placeholder="Select language" /></SelectTrigger><SelectContent>{[['en','English'],['fr','French'],['rw','Kinyarwanda'],['sw','Swahili'],['ar','Arabic'],['zh','Chinese'],['es','Spanish'],['pt','Portuguese'],['de','German'],['it','Italian'],['ja','Japanese'],['ko','Korean'],['hi','Hindi'],['ru','Russian'],['other','Other']].map(([value,label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+            <div>
+              <Label className="theme-form-label">Target Study Year (Optional)</Label>
+              <Select value={bookYearOfStudy} onValueChange={setBookYearOfStudy}>
+                <SelectTrigger className="theme-form-input mt-1">
+                  <SelectValue placeholder="Select Study Year" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not specified</SelectItem>
+                  {STUDY_YEARS.map((y) => (
+                    <SelectItem key={y} value={y}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="theme-form-label">Semester (Optional)</Label>
+              <Select value={bookSemester} onValueChange={setBookSemester}>
+                <SelectTrigger className="theme-form-input mt-1">
+                  <SelectValue placeholder="Select Semester" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not specified</SelectItem>
+                  {SEMESTERS.map((s) => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div><Label className="theme-form-label">Publisher</Label><Input className="theme-form-input mt-1" value={bookPublisher} onChange={(e) => setBookPublisher(e.target.value)} /></div><div><Label className="theme-form-label">Category</Label><Input className="theme-form-input mt-1" value={bookCategory} onChange={(e) => setBookCategory(e.target.value)} /></div>
             <div className="sm:col-span-2"><Label className="theme-form-label">Subject</Label><Input className="theme-form-input mt-1" value={bookSubject} onChange={(e) => setBookSubject(e.target.value)} /></div>
           </div>
@@ -800,7 +885,7 @@ export default function UploadPage() {
             <div><Label className="theme-form-label">Book cover *</Label><div className={`theme-dropzone mt-1 rounded-lg p-4 text-center transition-colors ${submitting && uploadStage === 'solution' ? 'file-upload-card--transferring' : ''} ${bookCoverDragActive ? 'theme-dropzone--active' : ''}`} onClick={() => document.getElementById('bookCover')?.click()} onDragOver={(e) => handleDragOver(e, setBookCoverDragActive)} onDragEnter={(e) => handleDragOver(e, setBookCoverDragActive)} onDragLeave={(e) => handleDragLeave(e, setBookCoverDragActive)} onDrop={(e) => { e.preventDefault(); setBookCoverDragActive(false); setBookCover(e.dataTransfer.files?.[0] || null); }}><input id="bookCover" className="hidden" type="file" accept="image/*" onChange={(e) => setBookCover(e.target.files?.[0] || null)} /><label htmlFor="bookCover" className="cursor-pointer">{bookCover?.type.startsWith('image/') ? <img className="mx-auto mb-2 h-16 w-12 rounded object-cover" src={URL.createObjectURL(bookCover)} alt="Book cover preview" /> : <UploadIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />}<p className="theme-muted text-sm">{bookCover ? bookCover.name : 'Click to choose cover image'}</p><p className="theme-muted mt-1 text-xs">Image file</p></label></div></div>
           </div>
           {submitting && <div className="upload-progress-panel rounded-2xl border p-5"><div className="flex items-start gap-4"><div className="upload-progress-orb flex h-12 w-12 shrink-0 items-center justify-center rounded-full" style={{ '--upload-progress': `${uploadProgress}%` } as React.CSSProperties}><span className="rounded-full bg-background px-1 text-xs font-bold">{uploadProgress}%</span></div><div><p className="theme-title flex items-center gap-2 font-semibold"><LoaderCircle className="h-4 w-4 animate-spin text-primary" />{uploadStage === 'solution' ? 'Uploading book cover' : uploadStage === 'publishing' ? 'Saving book details' : 'Uploading book file'}</p><p className="theme-muted mt-1 text-sm">Please keep this page open while we securely transfer your book.</p></div></div></div>}
-          <div className="theme-accent-soft-border rounded-lg border-dashed p-4 text-sm"><p className="theme-title font-medium">Review Book</p><div className="theme-muted mt-2 grid gap-1 sm:grid-cols-2"><p>Title: <span className="text-foreground">{bookTitle || '—'}</span></p><p>Language: <span className="text-foreground">{bookLanguage || '—'}</span></p><p>Authors: <span className="text-foreground">{bookAuthors.map((author) => author.name).join(', ') || '—'}</span></p><p>Courses: <span className="text-foreground">{bookCourses.map((course) => `${course.code || '—'} — ${course.name}`).join(', ') || '—'}</span></p><p>Modules: <span className="text-foreground">{bookModules.map((module) => module.name).join(', ') || '—'}</span></p><p>File: <span className="text-foreground">{bookFile?.name || '—'}</span></p><p>Cover: <span className="text-foreground">{bookCover ? 'Selected' : '—'}</span></p><p>Uploaded by: <span className="text-foreground">{user.name || user.email}</span></p></div><p className="theme-muted mt-2">The server assigns ownership and the 48-hour CP management deadline.</p></div>
+          <div className="theme-accent-soft-border rounded-lg border-dashed p-4 text-sm"><p className="theme-title font-medium">Review Book</p><div className="theme-muted mt-2 grid gap-1 sm:grid-cols-2"><p>Title: <span className="text-foreground">{bookTitle || '—'}</span></p><p>Language: <span className="text-foreground">{bookLanguage || '—'}</span></p><p>Study Year: <span className="text-foreground">{bookYearOfStudy && bookYearOfStudy !== 'none' ? bookYearOfStudy : '—'}</span></p><p>Semester: <span className="text-foreground">{bookSemester && bookSemester !== 'none' ? bookSemester : '—'}</span></p><p>Authors: <span className="text-foreground">{bookAuthors.map((author) => author.name).join(', ') || '—'}</span></p><p>Courses: <span className="text-foreground">{bookCourses.map((course) => `${course.code || '—'} — ${course.name}`).join(', ') || '—'}</span></p><p>Modules: <span className="text-foreground">{bookModules.map((module) => module.name).join(', ') || '—'}</span></p><p>File: <span className="text-foreground">{bookFile?.name || '—'}</span></p><p>Cover: <span className="text-foreground">{bookCover ? 'Selected' : '—'}</span></p><p>Uploaded by: <span className="text-foreground">{user.name || user.email}</span></p></div><p className="theme-muted mt-2">The server assigns ownership and the 48-hour CP management deadline.</p></div>
           <InlineFieldMessage message={!bookLanguage ? 'Select a language.' : !bookCourses.length ? 'Select at least one course.' : !bookFile ? 'Choose the book file.' : !bookCover ? 'Choose a cover image.' : undefined} />
           <Button type="submit" disabled={submitting} className="theme-accent-bg h-12 w-full text-lg">{submitting ? <><LoaderCircle className="mr-2 h-5 w-5 animate-spin" />Uploading...</> : <><UploadIcon className="mr-2 h-5 w-5" />Upload Book</>}</Button>
         </form>
@@ -934,6 +1019,8 @@ export default function UploadPage() {
                   {detectedHints.courseCode && <p>Course code: <span className="font-medium text-foreground">{detectedHints.courseCode}</span></p>}
                   {detectedHints.courseName && <p>Course name: <span className="font-medium text-foreground">{detectedHints.courseName}</span></p>}
                   {detectedHints.year && <p>Year: <span className="font-medium text-foreground">{detectedHints.year}</span></p>}
+                  {detectedHints.yearOfStudy && <p>Study Year: <span className="font-medium text-foreground">{detectedHints.yearOfStudy}</span></p>}
+                  {detectedHints.semester && <p>Semester: <span className="font-medium text-foreground">{detectedHints.semester}</span></p>}
                   {detectedHints.paperType && <p>Paper type: <span className="font-medium text-foreground">{detectedHints.paperType}</span></p>}
                   {detectedHints.lecturer && <p>Lecturer: <span className="font-medium text-foreground">{detectedHints.lecturer}</span></p>}
                 </div>
@@ -1057,6 +1144,40 @@ export default function UploadPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            {/* Study Year & Semester */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label className="theme-form-label">Study Year (Optional)</Label>
+                <Select value={yearOfStudy} onValueChange={setYearOfStudy}>
+                  <SelectTrigger className="theme-form-input mt-1">
+                    <SelectValue placeholder="Select Study Year (e.g. Year 1, Year 2)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not specified</SelectItem>
+                    {STUDY_YEARS.map((y) => (
+                      <SelectItem key={y} value={y}>{y}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="theme-muted mt-1.5 text-xs">The curriculum year for which this assessment was set.</p>
+              </div>
+              <div>
+                <Label className="theme-form-label">Semester (Optional)</Label>
+                <Select value={semester} onValueChange={setSemester}>
+                  <SelectTrigger className="theme-form-input mt-1">
+                    <SelectValue placeholder="Select Semester (e.g. Semester 1, Semester 2)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not specified</SelectItem>
+                    {SEMESTERS.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="theme-muted mt-1.5 text-xs">Semester or term period of the exam paper.</p>
               </div>
             </div>
 

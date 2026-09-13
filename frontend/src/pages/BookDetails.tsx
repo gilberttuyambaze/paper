@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import AvatarFallback from '../components/AvatarFallback';
 import DocumentPreview from '../components/DocumentPreview';
 import DocumentLoadingProgress from '../components/DocumentLoadingProgress';
+import DocumentCoverPreview from '../components/DocumentCoverPreview';
 import { downloadStorageObject, fetchBookComments, createComment, getStorageDownloadUrl, resolvePublicUserProfiles, upvoteComment, type Comment } from '../lib/client';
 import { fetchBookById, recordBookDownload, type Book } from '../lib/books';
 
@@ -105,16 +106,60 @@ export default function BookDetails() {
 
   const roots = comments.filter((comment) => !comment.parent_id).sort((a, b) => (b.upvotes || 0) - (a.upvotes || 0));
   const replies = (parentId: number) => comments.filter((comment) => comment.parent_id === parentId).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
-  const displayName = viewBook ? profiles[viewBook.uploaded_by]?.display_name || viewBook.uploader_name || 'Unknown uploader' : 'Loading uploader';
+  const displayName = viewBook ? profiles[viewBook.uploaded_by]?.display_name || viewBook.uploader_name || (viewBook.uploaded_by ? `Contributor ${viewBook.uploaded_by}` : 'Academic Contributor') : 'Loading uploader';
 
   return <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
     <Button variant="ghost" onClick={() => navigate(-1)} className="theme-muted mb-6"><ArrowLeft className="mr-2 h-4 w-4" />Back</Button>
     <Card className="theme-panel mb-6"><CardContent className="p-6">
-      <div className="mb-4 flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-primary text-primary"><BookOpen className="mr-1 h-3 w-3" />BOOK</Badge><Badge variant="outline">{viewBook?.language || 'Opening Book...'}</Badge>{viewBook?.edition && <Badge variant="outline">{viewBook.edition}</Badge>}</div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Badge variant="outline" className="border-primary text-primary"><BookOpen className="mr-1 h-3 w-3" />BOOK</Badge>
+        <Badge variant="outline">{viewBook?.language || 'Opening Book...'}</Badge>
+        {viewBook?.edition && <Badge variant="outline">{viewBook.edition}</Badge>}
+        {viewBook?.year_of_study && (
+          <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
+            {viewBook.year_of_study}
+          </Badge>
+        )}
+        {viewBook?.semester && (
+          <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
+            {viewBook.semester}
+          </Badge>
+        )}
+      </div>
       <div className="flex flex-col gap-6 sm:flex-row">
-        {coverUrl ? <img src={coverUrl} onError={() => setCoverFailed(true)} alt={`${viewBook?.title || 'Book'} cover`} className="h-56 w-40 rounded-lg object-cover shadow-md" /> : <div className="theme-soft-panel flex h-56 w-40 items-center justify-center rounded-lg shadow-md">{coverFailed ? <BookOpen className="h-12 w-12 text-muted-foreground" aria-label="Book cover unavailable" /> : <div className="h-full w-full animate-pulse rounded-lg bg-muted" />}</div>}
+        {coverUrl && !coverFailed ? (
+          <img src={coverUrl} onError={() => setCoverFailed(true)} alt={`${viewBook?.title || 'Book'} cover`} className="h-56 w-40 rounded-lg object-cover shadow-md" />
+        ) : (
+          <div className="h-56 w-40 shrink-0">
+            <DocumentCoverPreview
+              type="book"
+              title={viewBook?.title || 'Academic Book'}
+              code={viewBook?.isbn || viewBook?.category || 'BOOK'}
+              yearOfStudy={viewBook?.year_of_study || undefined}
+              semester={viewBook?.semester || undefined}
+              coverKey={viewBook?.cover_key}
+              className="h-56 w-40 rounded-lg shadow-md"
+            />
+          </div>
+        )}
         <div className="min-w-0 flex-1"><h1 className="theme-title mb-4 text-2xl font-bold md:text-3xl">{viewBook?.title || <span className="inline-block h-8 w-3/4 animate-pulse rounded bg-muted" />}</h1>
-          <div className="theme-muted grid gap-2 text-sm sm:grid-cols-2">{viewBook ? <><p><strong>Authors:</strong> {viewBook.authors.join(', ') || 'Not specified'}</p><p><strong>Publisher:</strong> {viewBook.publisher || 'Not specified'}</p><p><strong>ISBN:</strong> {viewBook.isbn || 'Not specified'}</p><p><Clock className="mr-1 inline h-4 w-4" />{viewBook.publication_year || new Date(viewBook.created_at).getFullYear()}</p><p><strong>Category:</strong> {viewBook.category || viewBook.subject || 'Academic book'}</p><p><Download className="mr-1 inline h-4 w-4" />{viewBook.download_count || 0} downloads</p></> : [1,2,3,4,5,6].map((item) => <span key={item} className="h-4 animate-pulse rounded bg-muted" />)}</div>
+          <div className="theme-muted grid gap-2 text-sm sm:grid-cols-2">
+            {viewBook ? (
+              <>
+                <p><strong>Authors:</strong> {viewBook.authors.join(', ') || 'Not specified'}</p>
+                <p><strong>Publisher:</strong> {viewBook.publisher || 'Not specified'}</p>
+                <p><strong>ISBN:</strong> {viewBook.isbn || 'Not specified'}</p>
+                <p><Clock className="mr-1 inline h-4 w-4" />{viewBook.publication_year || new Date(viewBook.created_at).getFullYear()}</p>
+                {(viewBook.year_of_study || viewBook.semester) && (
+                  <p><strong>Level:</strong> {[viewBook.year_of_study, viewBook.semester].filter(Boolean).join(' • ')}</p>
+                )}
+                <p><strong>Category:</strong> {viewBook.category || viewBook.subject || 'Academic book'}</p>
+                <p><Download className="mr-1 inline h-4 w-4" />{viewBook.download_count || 0} downloads</p>
+              </>
+            ) : (
+              [1, 2, 3, 4, 5, 6].map((item) => <span key={item} className="h-4 animate-pulse rounded bg-muted" />)
+            )}
+          </div>
           {viewBook && <button type="button" onClick={() => navigate(`/profile/${viewBook.uploaded_by}`)} className="theme-soft-panel mt-4 flex items-center gap-3 rounded-xl p-3 text-left"><div className="h-10 w-10 overflow-hidden rounded-full"><AvatarFallback name={displayName} imageUrl={profiles[viewBook.uploaded_by]?.imageUrl || undefined} imageAlt={`${displayName} avatar`} /></div><span><span className="theme-muted block text-xs">Uploaded by</span><span className="theme-title text-sm font-medium">{displayName}</span></span></button>}
         </div>
       </div>

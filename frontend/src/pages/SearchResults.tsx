@@ -5,6 +5,7 @@ import { fetchBooks, type Book } from '../lib/books';
 import AvatarFallback from '../components/AvatarFallback';
 import OfflineDataBanner from '../components/OfflineDataBanner';
 import ExpandableContentSection from '../components/ExpandableContentSection';
+import DocumentCoverPreview from '../components/DocumentCoverPreview';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -26,9 +27,13 @@ import {
   Star,
   Filter,
   X,
+  Sparkles,
+  GraduationCap,
 } from 'lucide-react';
 
 const PAPER_TYPES = ['Exam', 'CAT', 'Assignment', 'GroupWork'];
+const STUDY_YEARS = ['Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Postgraduate'];
+const SEMESTERS = ['Semester 1', 'Semester 2', 'Trimester 1', 'Trimester 2', 'Trimester 3', 'Annual'];
 const BOOK_LANGUAGES = ['en', 'fr', 'rw', 'sw', 'ar', 'zh', 'es', 'pt', 'de', 'it', 'ja', 'ko', 'hi', 'ru', 'other'];
 const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
 
@@ -70,6 +75,8 @@ export default function SearchResults() {
   const [module, setModule] = useState(searchParams.get('module') || '');
   const [paperType, setPaperType] = useState(searchParams.get('type') || '');
   const [year, setYear] = useState(searchParams.get('year') || '');
+  const [studyYear, setStudyYear] = useState(searchParams.get('study_year') || '');
+  const [semester, setSemester] = useState(searchParams.get('semester') || '');
   const [uploader, setUploader] = useState(searchParams.get('uploader') || '');
   const [language, setLanguage] = useState(searchParams.get('language') || '');
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || '-download_count');
@@ -96,6 +103,8 @@ export default function SearchResults() {
     setModule(searchParams.get('module') || '');
     setPaperType(searchParams.get('type') || '');
     setYear(searchParams.get('year') || '');
+    setStudyYear(searchParams.get('study_year') || '');
+    setSemester(searchParams.get('semester') || '');
     setUploader(searchParams.get('uploader') || '');
     setLanguage(searchParams.get('language') || '');
     setSortBy(searchParams.get('sort') || '-download_count');
@@ -152,9 +161,9 @@ export default function SearchResults() {
   const uploaderDisplayMap = useMemo(() => {
     const map = new Map<string, string>();
     papers.forEach((paper) => {
-      map.set(paper.user_id, paper.uploader_display_name || 'Unknown uploader');
+      map.set(paper.user_id, paper.uploader_display_name || (paper.user_id ? `Contributor ${paper.user_id}` : 'Academic Contributor'));
     });
-    books.forEach((book) => map.set(book.uploaded_by, book.uploader_name || 'Unknown uploader'));
+    books.forEach((book) => map.set(book.uploaded_by, book.uploader_name || (book.uploaded_by ? `Contributor ${book.uploaded_by}` : 'Academic Contributor')));
     return map;
   }, [papers, books]);
 
@@ -183,6 +192,8 @@ export default function SearchResults() {
     if (course) result = result.filter((paper) => paper.course_code === course);
     if (paperType) result = result.filter((paper) => paper.paper_type === paperType);
     if (year) result = result.filter((paper) => paper.year === parseInt(year, 10));
+    if (studyYear) result = result.filter((paper) => paper.year_of_study === studyYear);
+    if (semester) result = result.filter((paper) => paper.semester === semester);
     if (uploader) result = result.filter((paper) => paper.user_id === uploader);
 
     if (sortBy === '-download_count') {
@@ -196,18 +207,20 @@ export default function SearchResults() {
     }
 
     return result;
-  }, [papers, searchQuery, college, department, course, paperType, year, uploader, sortBy]);
+  }, [papers, searchQuery, college, department, course, paperType, year, studyYear, semester, uploader, sortBy]);
 
   const filteredBooks = useMemo(() => books.filter((book) => {
     const q = searchQuery.trim().toLowerCase();
     if (q && ![book.title, book.description, book.isbn, book.publisher, book.authors.join(' '), book.uploader_name, book.course_ids.join(' '), ...(book.courses || []).flatMap((item) => [item.code, item.name]), ...(book.modules || []).map((item) => item.name)].filter(Boolean).some((value) => String(value).toLowerCase().includes(q))) return false;
     if (year && book.publication_year !== Number(year)) return false;
+    if (studyYear && book.year_of_study !== studyYear) return false;
+    if (semester && book.semester !== semester) return false;
     if (language && book.language !== language) return false;
     if (course && !(book.courses || []).some((item) => item.code === course || String(item.id) === course)) return false;
     if (module && !(book.modules || []).some((item) => String(item.id) === module)) return false;
     if (uploader && book.uploaded_by !== uploader) return false;
     return true;
-  }), [books, searchQuery, year, language, course, module, uploader]);
+  }), [books, searchQuery, year, studyYear, semester, language, course, module, uploader]);
   const sortedBooks = useMemo(() => [...filteredBooks].sort((a, b) => {
     if (sortBy === 'title') return a.title.localeCompare(b.title);
     if (sortBy === '-year') return (b.publication_year || 0) - (a.publication_year || 0);
@@ -247,6 +260,8 @@ export default function SearchResults() {
     setModule('');
     setPaperType('');
     setYear('');
+    setStudyYear('');
+    setSemester('');
     setUploader('');
     setLanguage('');
     setSortBy('-download_count');
@@ -259,6 +274,8 @@ export default function SearchResults() {
     course,
     module ? modules.find(([id]) => id === module)?.[1] || module : '',
     year,
+    studyYear,
+    semester,
     paperType,
     uploader ? uploaderDisplayMap.get(uploader) || uploader : '',
     language,
@@ -414,6 +431,34 @@ export default function SearchResults() {
                 </Select>
               </div>
               <div>
+                <label className="theme-muted mb-1 block text-sm font-medium">Study Year</label>
+                <Select value={studyYear || 'all'} onValueChange={(value) => setStudyYear(value === 'all' ? '' : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Study Years" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Study Years</SelectItem>
+                    {STUDY_YEARS.map((item) => (
+                      <SelectItem key={item} value={item}>{item}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="theme-muted mb-1 block text-sm font-medium">Semester</label>
+                <Select value={semester || 'all'} onValueChange={(value) => setSemester(value === 'all' ? '' : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Semesters" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Semesters</SelectItem>
+                    {SEMESTERS.map((item) => (
+                      <SelectItem key={item} value={item}>{item}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <label className="theme-muted mb-1 block text-sm font-medium">Sort By</label>
                 <Select value={sortBy} onValueChange={setSortBy}>
                   <SelectTrigger>
@@ -453,6 +498,7 @@ export default function SearchResults() {
           {[1, 2, 3, 4, 5, 6].map((item) => (
             <Card key={item} className="theme-panel animate-pulse">
               <CardContent className="space-y-3 p-5">
+                <div className="h-44 w-full rounded-xl bg-muted" />
                 <div className="h-4 w-1/3 rounded bg-muted" />
                 <div className="h-5 w-full rounded bg-muted" />
                 <div className="h-4 w-2/3 rounded bg-muted" />
@@ -474,66 +520,166 @@ export default function SearchResults() {
           </Button>
         </div>
       ) : (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {visiblePaperResults.map((paper) => (
-              <Link key={paper.id} to={`/paper/${paper.id}`} className="block">
-                <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
-                  <CardContent className="p-5">
-                    <div className="mb-3 flex items-start justify-between">
-                      <Badge variant="outline" className="border-primary text-xs font-medium text-primary">
-                        📄 PAPER · {paper.paper_type}
-                      </Badge>
-                      <VerificationBadge status={paper.verification_status} />
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {visiblePaperResults.map((paper) => {
+              const uploaderName = uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || (paper.user_id ? `Contributor ${paper.user_id}` : 'Academic Contributor');
+              const uploaderAvatar = uploaderProfiles[paper.user_id]?.imageUrl ?? (paper.uploader_profile_picture_key || undefined);
+              return (
+                <Link key={paper.id} to={`/paper/${paper.id}`} className="block group">
+                  <Card className="theme-panel h-full overflow-hidden border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
+                    <div className="p-2.5 pb-0 sm:p-3 sm:pb-0">
+                      <DocumentCoverPreview
+                        title={paper.title}
+                        courseCode={paper.course_code}
+                        courseName={paper.course_name}
+                        year={paper.year}
+                        yearOfStudy={paper.year_of_study}
+                        semester={paper.semester}
+                        paperType={paper.paper_type}
+                        department={paper.department}
+                        verificationStatus={paper.verification_status}
+                        hasSolution={Boolean(paper.solution_key)}
+                        isBook={false}
+                        size="md"
+                        className="group-hover:scale-[1.01] transition-transform"
+                      />
                     </div>
-                    <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">
-                      {paper.title}
-                    </h3>
-                    <div className="flex items-center gap-3 mt-2">
-                      <div className="h-8 w-8 overflow-hidden rounded-full">
-                        <AvatarFallback
-                          name={uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}
-                          imageUrl={uploaderProfiles[paper.user_id]?.imageUrl ?? undefined}
-                          imageAlt={`${uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Uploader'} avatar`}
-                        />
+                    <CardContent className="p-2.5 pt-2 sm:p-3 sm:pt-2 flex flex-col justify-between flex-1 gap-1.5">
+                      <div>
+                        <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge variant="outline" className="border-primary text-[10px] sm:text-xs font-semibold text-primary px-1.5 py-0">
+                              📄 {paper.paper_type}
+                            </Badge>
+                            {(paper.year_of_study || paper.semester) && (
+                              <Badge variant="secondary" className="text-[10px] sm:text-xs font-medium px-1.5 py-0">
+                                {[paper.year_of_study, paper.semester].filter(Boolean).join(' · ')}
+                              </Badge>
+                            )}
+                          </div>
+                          <VerificationBadge status={paper.verification_status} />
+                        </div>
+                        <h3 className="theme-title mb-1 line-clamp-1 font-bold transition-colors group-hover:text-primary text-sm sm:text-base" title={paper.title}>
+                          {paper.title}
+                        </h3>
+                        <div className="theme-muted space-y-0.5 text-xs">
+                          <p className="flex items-center gap-1 font-medium text-foreground/85 truncate">
+                            <BookOpen className="h-3 w-3 shrink-0 text-primary" />
+                            <span className="truncate">{paper.course_code} - {paper.course_name}</span>
+                          </p>
+                          <p className="flex items-center gap-1 truncate text-muted-foreground">
+                            <Clock className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{paper.year} · {paper.department}</span>
+                          </p>
+                          {paper.lecturer && <p className="truncate text-muted-foreground">By {paper.lecturer}</p>}
+                        </div>
                       </div>
-                      <div className="text-xs theme-muted">
-                        <div className="font-medium text-sm">{uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || `Uploader ${paper.user_id}`}</div>
-                        <div>{paper.course_code} · {paper.year}</div>
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mt-1 pt-2 border-t border-border/40 text-xs">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                            <div className="h-5 w-5 sm:h-6 sm:w-6 overflow-hidden rounded-full shrink-0">
+                              <AvatarFallback
+                                name={uploaderName}
+                                imageUrl={uploaderAvatar}
+                                imageAlt={`${uploaderName} avatar`}
+                              />
+                            </div>
+                            <span className="font-medium text-foreground truncate text-xs">{uploaderName}</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="theme-muted flex items-center gap-1 text-[11px]">
+                              <Download className="h-3 w-3" />
+                              {paper.download_count || 0}
+                            </span>
+                            {paper.solution_key && (
+                              <Badge className="theme-status-badge--solution text-[9px] px-1.5 py-0 hover:bg-inherit">
+                                <Star className="mr-0.5 h-2.5 w-2.5" />
+                                Solution
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
                       </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              );
+            })}
+            {visibleBookResults.map((book) => {
+              const uploaderName = uploaderProfiles[book.uploaded_by]?.profile?.display_name || book.uploader_name || (book.uploaded_by ? `Contributor ${book.uploaded_by}` : 'Academic Contributor');
+              const uploaderAvatar = uploaderProfiles[book.uploaded_by]?.imageUrl ?? (book.uploader_profile_picture_key || undefined);
+              return (
+                <Link key={`book-${book.id}`} to={`/book/${book.id}`} className="block group">
+                  <Card className="theme-panel h-full overflow-hidden border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
+                    <div className="p-2.5 pb-0 sm:p-3 sm:pb-0">
+                      <DocumentCoverPreview
+                        title={book.title}
+                        courseCode={book.courses?.[0]?.code || undefined}
+                        courseName={book.courses?.[0]?.name || undefined}
+                        year={book.publication_year || new Date(book.created_at).getFullYear()}
+                        yearOfStudy={book.year_of_study}
+                        semester={book.semester}
+                        department={book.category || book.subject || 'Academic Reference'}
+                        isBook={true}
+                        size="md"
+                        className="group-hover:scale-[1.01] transition-transform"
+                      />
                     </div>
-                    <div className="theme-muted space-y-1 text-sm">
-                      <p className="flex items-center gap-1">
-                        <BookOpen className="h-3.5 w-3.5" />
-                        {paper.course_code} - {paper.course_name}
-                      </p>
-                      <p className="flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5" />
-                        {paper.year} - {paper.department}
-                      </p>
-                      {paper.lecturer && <p className="theme-muted text-xs">By {paper.lecturer}</p>}
-                      <p className="theme-muted text-xs">
-                        Uploader {paper.uploader_display_name || paper.user_id}
-                      </p>
-                    </div>
-                    <div className="mt-4 flex items-center justify-between border-t pt-3">
-                      <span className="theme-muted flex items-center gap-1 text-xs">
-                        <Download className="h-3.5 w-3.5" />
-                        {paper.download_count || 0}
-                      </span>
-                      {paper.solution_key && (
-                        <Badge className="theme-status-badge--solution text-xs hover:bg-inherit">
-                          <Star className="mr-1 h-3 w-3" />
-                          Solution
-                        </Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-            {visibleBookResults.map((book) => (
-              <Link key={`book-${book.id}`} to={`/book/${book.id}`} className="block"><Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"><CardContent className="p-5"><div className="mb-3 flex items-start justify-between"><Badge variant="outline" className="border-primary text-xs font-medium text-primary">📚 BOOK</Badge>{book.cover_key && <BookOpen className="h-5 w-5 text-muted-foreground" />}</div><h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">{book.title}</h3><div className="theme-muted space-y-1 text-sm"><p>{book.authors.join(', ') || 'Author not specified'}</p><p>{book.courses?.map((item) => item.code || item.name).join(' · ') || 'No related course'}</p><p>{book.modules?.map((module) => module.name).join(' · ')}</p><p>{book.language} {book.edition ? `· ${book.edition}` : ''}</p><p>Uploaded by {book.uploader_name || book.uploaded_by}</p></div><div className="mt-4 border-t pt-3 text-sm font-medium text-primary">Open Book</div></CardContent></Card></Link>
-            ))}
+                    <CardContent className="p-2.5 pt-2 sm:p-3 sm:pt-2 flex flex-col justify-between flex-1 gap-1.5">
+                      <div>
+                        <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge variant="outline" className="border-primary text-[10px] sm:text-xs font-semibold text-primary px-1.5 py-0">
+                              📚 BOOK
+                            </Badge>
+                            {(book.year_of_study || book.semester) && (
+                              <Badge variant="secondary" className="text-[10px] sm:text-xs font-medium px-1.5 py-0">
+                                {[book.year_of_study, book.semester].filter(Boolean).join(' · ')}
+                              </Badge>
+                            )}
+                          </div>
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            {book.language?.toUpperCase() || 'REF'}
+                          </Badge>
+                        </div>
+                        <h3 className="theme-title mb-1 line-clamp-1 font-bold transition-colors group-hover:text-primary text-sm sm:text-base" title={book.title}>
+                          {book.title}
+                        </h3>
+                        <div className="theme-muted space-y-0.5 text-xs">
+                          <p className="truncate font-medium text-foreground/85">
+                            {book.authors.join(', ') || 'Author not specified'}
+                          </p>
+                          <p className="truncate text-muted-foreground">
+                            {book.courses?.map((item) => item.code || item.name).join(' · ') || book.category || 'Reference book'}
+                          </p>
+                          {book.modules && book.modules.length > 0 && (
+                            <p className="truncate text-muted-foreground">{book.modules.map((m) => m.name).join(' · ')}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mt-1 pt-2 border-t border-border/40 text-xs">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                            <div className="h-5 w-5 sm:h-6 sm:w-6 overflow-hidden rounded-full shrink-0">
+                              <AvatarFallback
+                                name={uploaderName}
+                                imageUrl={uploaderAvatar}
+                                imageAlt={`${uploaderName} avatar`}
+                              />
+                            </div>
+                            <span className="font-medium text-foreground truncate text-xs">{uploaderName}</span>
+                          </div>
+                          <span className="theme-muted flex items-center gap-1 text-[11px] shrink-0">
+                            <Download className="h-3 w-3" />
+                            {book.download_count || 0}
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              );
+            })}
           </div>
       )}
 

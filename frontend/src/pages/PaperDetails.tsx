@@ -21,6 +21,7 @@ import {
   fetchAcademicTaxonomy,
   resolvePublicUserProfile,
   resolvePublicUserProfiles,
+  reprocessPaper,
   Paper,
   Comment,
   Solution,
@@ -63,6 +64,10 @@ import {
   Save,
   LoaderCircle,
   Copy,
+  Scan,
+  FileCheck,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { showMessage, toast } from '@/lib/messages';
 import { normalizeApiError } from '@/lib/api-errors';
@@ -95,10 +100,77 @@ function VerificationBadge({ status }: { status: string }) {
   );
 }
 
+function ExtractionBadge({
+  status,
+  method,
+  quality,
+  ocrUsed,
+}: {
+  status?: string | null;
+  method?: string | null;
+  quality?: number | null;
+  ocrUsed?: boolean | null;
+}) {
+  if (!status) return null;
+
+  if (status === 'completed') {
+    if (ocrUsed || method === 'ocr' || method === 'vision_fallback') {
+      return (
+        <Badge
+          variant="outline"
+          className="gap-1 bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30 font-medium text-xs"
+          title={`Extracted via OCR Engine (${Math.round((quality ?? 1) * 100)}% quality score)`}
+        >
+          <Scan className="h-3 w-3 text-purple-500" />
+          <span>OCR Scanned</span>
+        </Badge>
+      );
+    }
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-medium text-xs"
+        title={`Extracted native text (${Math.round((quality ?? 1) * 100)}% quality score)`}
+      >
+        <FileCheck className="h-3 w-3 text-emerald-500" />
+        <span>Verified Text</span>
+      </Badge>
+    );
+  }
+
+  if (status === 'partial') {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 font-medium text-xs"
+        title="Document partially read with mixed confidence"
+      >
+        <AlertCircle className="h-3 w-3 text-amber-500" />
+        <span>Partial OCR</span>
+      </Badge>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 font-medium text-xs"
+        title="Document extraction failed"
+      >
+        <AlertCircle className="h-3 w-3 text-rose-500" />
+        <span>Extraction Issue</span>
+      </Badge>
+    );
+  }
+
+  return null;
+}
+
 export default function PaperDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [paper, setPaper] = useState<Paper | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsError, setCommentsError] = useState(false);
@@ -130,6 +202,31 @@ export default function PaperDetails() {
   const [currentUserImageUrl, setCurrentUserImageUrl] = useState<string | null>(null);
   const [academicNames, setAcademicNames] = useState<Record<string, string>>({});
   const [authorProfiles, setAuthorProfiles] = useState<Record<string, { display_name?: string | null; imageUrl?: string | null }>>({});
+  const [isReprocessing, setIsReprocessing] = useState(false);
+
+  const handleReprocessPaper = async () => {
+    if (!paper || isReprocessing) return;
+    try {
+      setIsReprocessing(true);
+      const res = await reprocessPaper(paper.id);
+      setPaper((prev) =>
+        prev
+          ? {
+              ...prev,
+              extraction_status: res.extraction_status,
+              extraction_method: res.extraction_method,
+              extraction_quality: res.extraction_quality,
+              ocr_used: res.ocr_used,
+            }
+          : prev
+      );
+      toast.success(res.message || 'Paper reprocessed and indexed successfully!');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to reprocess document');
+    } finally {
+      setIsReprocessing(false);
+    }
+  };
 
   useEffect(() => {
     if (id) loadPaper(parseInt(id));
@@ -550,6 +647,7 @@ export default function PaperDetails() {
         provider: response.provider,
         fallbackReason: response.fallback_reason || null,
         duration_ms: response.duration_ms,
+        sources: response.sources,
         usage: response.usage,
         timestamp: new Date(),
       };
@@ -633,6 +731,16 @@ export default function PaperDetails() {
             <Badge variant="outline">
               {paper.year}
             </Badge>
+            {paper.year_of_study && (
+              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
+                {paper.year_of_study}
+              </Badge>
+            )}
+            {paper.semester && (
+              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
+                {paper.semester}
+              </Badge>
+            )}
             {paper.report_count && paper.report_count > 0 && (
               <Badge className="theme-error-note border-0 hover:bg-inherit">
                 <Flag className="h-3 w-3 mr-1" />
@@ -643,6 +751,26 @@ export default function PaperDetails() {
               <Badge className="theme-error-note border-0 hover:bg-inherit">
                 Hidden from public
               </Badge>
+            )}
+            <ExtractionBadge
+              status={paper.extraction_status}
+              method={paper.extraction_method}
+              quality={paper.extraction_quality}
+              ocrUsed={paper.ocr_used}
+            />
+            {(isAdmin || (user && user.id === paper.user_id) || paper.extraction_status === 'failed' || paper.extraction_status === 'partial') && Boolean(paper.file_key) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleReprocessPaper}
+                disabled={isReprocessing}
+                className="h-6 px-2 text-[11px] gap-1 border-border/80 hover:border-primary text-muted-foreground hover:text-foreground"
+                title="Reprocess document extraction and re-index questions"
+              >
+                <RefreshCw className={`h-3 w-3 ${isReprocessing ? 'animate-spin text-primary' : ''}`} />
+                <span>{isReprocessing ? 'Processing...' : 'Reprocess AI Index'}</span>
+              </Button>
             )}
           </div>
 
@@ -656,6 +784,12 @@ export default function PaperDetails() {
                 <BookOpen className="theme-section-icon h-4 w-4" />
                 <span className="font-medium">{paper.course_code}</span> - {paper.course_name}
               </p>
+              {(paper.year_of_study || paper.semester) && (
+                <p className="flex items-center gap-2">
+                  <GraduationCap className="theme-section-icon h-4 w-4" />
+                  <span>Academic Level: {[paper.year_of_study, paper.semester].filter(Boolean).join(' • ')}</span>
+                </p>
+              )}
               <p className="flex items-center gap-2">
                 <GraduationCap className="theme-section-icon h-4 w-4" />
                 {paper.college}
@@ -688,15 +822,15 @@ export default function PaperDetails() {
               >
                   <div className="theme-accent-soft h-11 w-11 overflow-hidden rounded-full text-sm">
                     <AvatarFallback
-                      name={authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Unknown uploader'}
+                      name={authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || (paper.user_id ? `Contributor ${paper.user_id}` : 'Academic Contributor')}
                       imageUrl={authorProfiles[paper.user_id]?.imageUrl ?? uploaderImageUrl ?? undefined}
-                      imageAlt={`${authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Uploader'} profile picture`}
+                      imageAlt={`${authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Contributor'} profile picture`}
                     />
                   </div>
                   <div className="min-w-0">
                     <p className="theme-muted text-xs uppercase tracking-[0.2em]">Uploaded by</p>
                     <p className="theme-title truncate text-sm font-medium">
-                      {authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || 'Unknown uploader'}
+                      {authorProfiles[paper.user_id]?.display_name || paper.uploader_display_name || (paper.user_id ? `Contributor ${paper.user_id}` : 'Academic Contributor')}
                     </p>
                     <p className="theme-link-accent text-xs">View uploader profile</p>
                   </div>

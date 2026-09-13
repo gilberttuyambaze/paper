@@ -81,6 +81,7 @@ class CommunityPaperCreate(BaseModel):
     school_id: Optional[str] = None
     academic_department_id: Optional[str] = None
     programme_id: Optional[str] = None
+    year_of_study: Optional[str] = None
     semester: Optional[str] = None
     examination_session: Optional[str] = None
     programme_name_other: Optional[str] = None
@@ -154,7 +155,9 @@ async def _resource_summary(db: AsyncSession, resource, kind: str) -> dict:
             "downloads": resource.download_count or 0, "visibility": "public" if not resource.is_hidden else "hidden",
             "verification_status": resource.verification_status,
             "metadata": {"course_code": resource.course_code, "course_name": resource.course_name,
-                         "year": resource.year, "paper_type": resource.paper_type, "lecturer": resource.lecturer},
+                         "year": resource.year, "year_of_study": getattr(resource, "year_of_study", None),
+                         "semester": getattr(resource, "semester", None), "examination_session": getattr(resource, "examination_session", None),
+                         "paper_type": resource.paper_type, "lecturer": resource.lecturer},
         }
     authors = (await db.execute(select(Author.name).join(BookAuthor, BookAuthor.author_id == Author.id).where(BookAuthor.book_id == resource.id))).scalars().all()
     courses = (await db.execute(select(Course).join(BookCourse, BookCourse.course_id == Course.id).where(BookCourse.book_id == resource.id))).scalars().all()
@@ -166,6 +169,7 @@ async def _resource_summary(db: AsyncSession, resource, kind: str) -> dict:
         # Books do not have the Paper verification model; expose their actual publication state.
         "verification_status": None,
         "metadata": {"authors": authors, "language": resource.language, "edition": resource.edition,
+                     "year_of_study": getattr(resource, "year_of_study", None), "semester": getattr(resource, "semester", None),
                      "status": resource.status, "file_name": resource.file_name,
                      "courses": [{"id": c.id, "code": c.code, "name": c.name} for c in courses],
                      "modules": [{"id": m.id, "code": m.code, "name": m.name} for m in modules]},
@@ -535,6 +539,26 @@ async def get_dashboard(
 async def get_public_profile(user_id: str, db: AsyncSession = Depends(get_db)):
     profile = await _get_profile(db, user_id)
     if not profile:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user:
+            display_name = user.name or (user.email.split('@')[0] if user.email else None) or f"Student {user_id}"
+            return PublicUserProfileResponse(
+                user_id=str(user.id),
+                display_name=display_name,
+                role=user.role or "user",
+                trust_score=100 if user.role == "admin" else 0,
+                upload_count=0,
+                download_count=0,
+                institution_type=None,
+                university_name=None,
+                ur_verification_status="not_requested",
+                profile_picture_key=None,
+                college_name=None,
+                department_name=None,
+                year_of_study=None,
+                bio=None,
+                created_at=user.created_at,
+            )
         raise HTTPException(status_code=404, detail="User profile not found")
 
     return PublicUserProfileResponse(
@@ -673,6 +697,7 @@ async def create_paper(
         college=names["college_name"] or payload.college,
         department=names["department_name"] or payload.department,
         institution_id=payload.institution_id, campus_id=payload.campus_id, college_id=payload.college_id, school_id=payload.school_id, academic_department_id=payload.academic_department_id, programme_id=payload.programme_id, programme_submission_id=submission.id if submission else None, programme_name_other=payload.programme_name_other, programme_name_normalized=submission.normalized_programme_name if submission else None, academic_programme_status=submission.status if submission else None, semester=payload.semester, examination_session=payload.examination_session,
+        year_of_study=payload.year_of_study,
         year=payload.year,
         paper_type=payload.paper_type,
         lecturer=payload.lecturer,

@@ -13,6 +13,7 @@ import { fetchBooks, type Book } from '../lib/books';
 import AvatarFallback from '../components/AvatarFallback';
 import OfflineDataBanner from '../components/OfflineDataBanner';
 import ExpandableContentSection from '../components/ExpandableContentSection';
+import DocumentCoverPreview from '../components/DocumentCoverPreview';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,52 +64,82 @@ function VerificationBadge({ status }: { status: string }) {
 }
 
 function PaperCard({ paper, uploaderProfiles }: { paper: Paper; uploaderProfiles?: Record<string, { profile?: any; imageUrl?: string | null }>; }) {
+  const uploaderName = uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || (paper.user_id ? `Contributor ${paper.user_id}` : 'Academic Contributor');
+  const uploaderAvatar = uploaderProfiles?.[paper.user_id]?.imageUrl ?? (paper.uploader_profile_picture_key || undefined);
+
   return (
-    <Link to={`/paper/${paper.id}`} className="block">
-      <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
-        <CardContent className="p-5">
-          <div className="flex items-start justify-between mb-3">
-            <Badge variant="outline" className="border-primary text-xs font-medium text-primary">
-              {paper.paper_type}
-            </Badge>
-            <VerificationBadge status={paper.verification_status} />
-          </div>
-          <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">
-            {paper.title}
-          </h3>
-          <div className="theme-muted space-y-1 text-sm">
-            <p className="flex items-center gap-1">
-              <BookOpen className="h-3.5 w-3.5" />
-              {paper.course_code} - {paper.course_name}
-            </p>
-            <p className="flex items-center gap-1">
-              <Clock className="h-3.5 w-3.5" />
-              {paper.year} - {paper.department}
-            </p>
-          </div>
-          <div className="mt-4 flex items-center justify-between border-t pt-3">
-            <span className="theme-muted flex items-center gap-1 text-xs">
-              <Download className="h-3.5 w-3.5" />
-              {paper.download_count || 0} downloads
-            </span>
-            {paper.solution_key && (
-              <Badge className="theme-status-badge--solution text-xs hover:bg-inherit">
-                <Star className="h-3 w-3 mr-1" />
-                Has Solution
-              </Badge>
-            )}
-          </div>
-          <div className="mt-3 flex items-center gap-3">
-            <div className="h-8 w-8 overflow-hidden rounded-full">
-              <AvatarFallback
-                name={uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Unknown uploader'}
-                imageUrl={uploaderProfiles?.[paper.user_id]?.imageUrl ?? undefined}
-                imageAlt={`${uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Uploader'} avatar`}
-              />
+    <Link to={`/paper/${paper.id}`} className="block group">
+      <Card className="theme-panel h-full overflow-hidden border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
+        <div className="p-2.5 pb-0 sm:p-3 sm:pb-0">
+          <DocumentCoverPreview
+            title={paper.title}
+            courseCode={paper.course_code}
+            courseName={paper.course_name}
+            year={paper.year}
+            yearOfStudy={paper.year_of_study}
+            semester={paper.semester}
+            paperType={paper.paper_type}
+            department={paper.department}
+            verificationStatus={paper.verification_status}
+            hasSolution={Boolean(paper.solution_key)}
+            isBook={false}
+            size="md"
+            className="group-hover:scale-[1.01] transition-transform"
+          />
+        </div>
+        <CardContent className="p-2.5 pt-2 sm:p-3 sm:pt-2 flex flex-col justify-between flex-1 gap-1.5">
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
+              <div className="flex flex-wrap items-center gap-1">
+                <Badge variant="outline" className="border-primary text-[10px] sm:text-xs font-semibold text-primary px-1.5 py-0">
+                  {paper.paper_type}
+                </Badge>
+                {(paper.year_of_study || paper.semester) && (
+                  <Badge variant="secondary" className="text-[10px] sm:text-xs font-medium px-1.5 py-0">
+                    {[paper.year_of_study, paper.semester].filter(Boolean).join(' · ')}
+                  </Badge>
+                )}
+              </div>
+              <VerificationBadge status={paper.verification_status} />
             </div>
-            <div className="text-xs theme-muted">
-              <div className="font-medium text-sm">{uploaderProfiles?.[paper.user_id]?.profile?.display_name || paper.uploader_display_name || 'Unknown uploader'}</div>
-              <div>{paper.course_code} · {paper.year}</div>
+            <h3 className="theme-title mb-1 line-clamp-1 font-bold transition-colors group-hover:text-primary text-sm sm:text-base" title={paper.title}>
+              {paper.title}
+            </h3>
+            <div className="theme-muted space-y-0.5 text-xs">
+              <p className="flex items-center gap-1 font-medium text-foreground/85 truncate">
+                <BookOpen className="h-3 w-3 shrink-0 text-primary" />
+                <span className="truncate">{paper.course_code} - {paper.course_name}</span>
+              </p>
+              <p className="flex items-center gap-1 truncate text-muted-foreground">
+                <Clock className="h-3 w-3 shrink-0" />
+                <span className="truncate">{paper.year} · {paper.department}</span>
+              </p>
+            </div>
+          </div>
+          <div>
+            <div className="mt-1 pt-2 border-t border-border/40 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <div className="h-5 w-5 sm:h-6 sm:w-6 overflow-hidden rounded-full shrink-0">
+                  <AvatarFallback
+                    name={uploaderName}
+                    imageUrl={uploaderAvatar}
+                    imageAlt={`${uploaderName} avatar`}
+                  />
+                </div>
+                <span className="font-medium text-foreground truncate text-xs">{uploaderName}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="theme-muted flex items-center gap-1 text-[11px]">
+                  <Download className="h-3 w-3" />
+                  {paper.download_count || 0}
+                </span>
+                {paper.solution_key && (
+                  <Badge className="theme-status-badge--solution text-[9px] px-1.5 py-0 hover:bg-inherit">
+                    <Star className="h-2.5 w-2.5 mr-0.5" />
+                    Solution
+                  </Badge>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>
@@ -128,65 +159,87 @@ function FeaturedSingleResourceCard({
 
   return (
     <div className="theme-highlight-card rounded-2xl p-5 shadow-lg border border-primary/25 bg-card/95 transition-all duration-300 hover:border-primary/50">
-      {/* Top badges bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div className="flex items-center gap-1.5">
-          <Badge className="theme-highlight-badge text-[11px] font-bold px-2.5 py-0.5 tracking-wide shadow-sm">
-            {paper ? '📄 PAST PAPER' : '📚 REFERENCE BOOK'}
-          </Badge>
-          {paper && <VerificationBadge status={paper.verification_status} />}
+      <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-4 items-center">
+        <div>
+          <DocumentCoverPreview
+            title={item.value.title}
+            courseCode={paper?.course_code || book?.courses?.[0]?.code}
+            courseName={paper?.course_name || book?.courses?.[0]?.name}
+            year={paper?.year || book?.publication_year}
+            yearOfStudy={paper?.year_of_study || book?.year_of_study}
+            semester={paper?.semester || book?.semester}
+            paperType={paper?.paper_type || 'Exam'}
+            department={paper?.department || book?.category || undefined}
+            verificationStatus={paper?.verification_status}
+            hasSolution={Boolean(paper?.solution_key)}
+            isBook={item.type === 'book'}
+            size="md"
+          />
         </div>
-        <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full border border-border/50">
-          {paper ? `${paper.paper_type} • ${paper.year}` : book?.language || 'Academic'}
-        </span>
-      </div>
+        <div className="flex flex-col justify-between h-full space-y-3">
+          <div>
+            {/* Top badges bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5">
+                <Badge className="theme-highlight-badge text-[11px] font-bold px-2.5 py-0.5 tracking-wide shadow-sm">
+                  {paper ? '📄 PAST PAPER' : '📚 REFERENCE BOOK'}
+                </Badge>
+                {paper && <VerificationBadge status={paper.verification_status} />}
+              </div>
+              {(paper?.year_of_study || paper?.semester || book?.year_of_study || book?.semester) && (
+                <span className="text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+                  {[paper?.year_of_study || book?.year_of_study, paper?.semester || book?.semester].filter(Boolean).join(' · ')}
+                </span>
+              )}
+            </div>
 
-      {/* Main Title */}
-      <div className="space-y-1.5">
-        <Link to={to} className="group block">
-          <h3 className="text-base sm:text-lg font-bold text-foreground group-hover:text-primary transition-colors line-clamp-2">
-            {item.value.title}
-          </h3>
-        </Link>
-        <div className="space-y-1 text-xs text-muted-foreground">
-          <p className="flex items-center gap-1.5 font-medium text-foreground/85">
-            <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />
-            <span className="line-clamp-1">
-              {paper ? `${paper.course_code} — ${paper.course_name}` : book?.authors.join(', ') || 'Academic reference book'}
-            </span>
-          </p>
-          {paper?.department && (
-            <p className="flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5 text-muted-foreground/80 shrink-0" />
-              <span className="line-clamp-1">
-                {paper.department} {paper.campus ? `• ${paper.campus}` : ''}
+            {/* Main Title */}
+            <Link to={to} className="group block">
+              <h3 className="text-base sm:text-lg font-bold text-foreground group-hover:text-primary transition-colors line-clamp-2">
+                {item.value.title}
+              </h3>
+            </Link>
+            <div className="space-y-1 text-xs text-muted-foreground mt-1.5">
+              <p className="flex items-center gap-1.5 font-medium text-foreground/85">
+                <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span className="line-clamp-1">
+                  {paper ? `${paper.course_code} — ${paper.course_name}` : book?.authors.join(', ') || 'Academic reference book'}
+                </span>
+              </p>
+              {paper?.department && (
+                <p className="flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground/80 shrink-0" />
+                  <span className="line-clamp-1">
+                    {paper.department}
+                  </span>
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Action and Download Stats Footer */}
+          <div className="pt-3 border-t border-border/40 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Download className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>{paper ? paper.download_count || 0 : book?.download_count || 0} downloads</span>
               </span>
-            </p>
-          )}
-        </div>
-      </div>
+              {paper?.solution_key && (
+                <Badge className="theme-status-badge--solution text-[10px] hover:bg-inherit">
+                  <Star className="h-3 w-3 mr-1" />
+                  Has Solution
+                </Badge>
+              )}
+            </div>
 
-      {/* Action and Download Stats Footer */}
-      <div className="mt-4 pt-3.5 border-t border-border/40 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Download className="h-3.5 w-3.5 text-muted-foreground" />
-            <span>{paper ? paper.download_count || 0 : book?.download_count || 0} downloads</span>
-          </span>
-          {paper?.solution_key && (
-            <Badge className="theme-status-badge--solution text-[10px] hover:bg-inherit">
-              <Star className="h-3 w-3 mr-1" />
-              Has Solution
-            </Badge>
-          )}
+            <Link to={to}>
+              <Button size="sm" className="theme-accent-bg text-xs h-8 px-3.5 gap-1.5 font-semibold shadow-sm hover:scale-[1.02] transition-transform">
+                <span>Open {paper ? 'Paper' : 'Book'}</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          </div>
         </div>
-
-        <Link to={to}>
-          <Button size="sm" className="theme-accent-bg text-xs h-8 px-3.5 gap-1.5 font-semibold shadow-sm hover:scale-[1.02] transition-transform">
-            <span>Open Paper</span>
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Button>
-        </Link>
       </div>
     </div>
   );
@@ -202,6 +255,8 @@ function HighlightResourceTile({
   const paper = item.type === 'paper' ? item.value : null;
   const book = item.type === 'book' ? item.value : null;
   const to = paper ? `/paper/${paper.id}` : `/book/${book?.id}`;
+  const studyMeta = [paper?.year_of_study || book?.year_of_study, paper?.semester || book?.semester].filter(Boolean).join(' · ');
+
   return (
     <Link to={to} className="block group h-full">
       <div
@@ -213,7 +268,11 @@ function HighlightResourceTile({
             <Badge className="theme-highlight-badge text-[9px] font-bold px-1.5 py-0.5">
               {paper ? '📄 PAPER' : '📚 BOOK'}
             </Badge>
-            {paper && <VerificationBadge status={paper.verification_status} />}
+            {studyMeta ? (
+              <span className="text-[9px] font-semibold text-primary">{studyMeta}</span>
+            ) : (
+              paper && <VerificationBadge status={paper.verification_status} />
+            )}
           </div>
           <h3 className="line-clamp-2 text-xs font-bold text-foreground group-hover:text-primary transition-colors">
             {item.value.title}
@@ -235,24 +294,76 @@ function HighlightResourceTile({
   );
 }
 
-function BookPickCard({ book }: { book: Book }) {
+function BookPickCard({ book, uploaderProfiles }: { book: Book; uploaderProfiles?: Record<string, { profile?: any; imageUrl?: string | null }>; }) {
+  const uploaderName = uploaderProfiles?.[book.uploaded_by]?.profile?.display_name || book.uploader_name || (book.uploaded_by ? `Contributor ${book.uploaded_by}` : 'Academic Contributor');
+  const uploaderAvatar = uploaderProfiles?.[book.uploaded_by]?.imageUrl ?? (book.uploader_profile_picture_key || undefined);
+
   return (
-    <Link to={`/book/${book.id}`} className="block">
-      <Card className="theme-panel group border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
-        <CardContent className="p-5">
-          <div className="mb-3 flex items-start justify-between">
-            <Badge variant="outline" className="border-primary text-xs font-medium text-primary">📚 BOOK</Badge>
-            <BookOpen className="theme-accent h-5 w-5" />
+    <Link to={`/book/${book.id}`} className="block group">
+      <Card className="theme-panel h-full overflow-hidden border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
+        <div className="p-2.5 pb-0 sm:p-3 sm:pb-0">
+          <DocumentCoverPreview
+            title={book.title}
+            courseCode={book.courses?.[0]?.code || undefined}
+            courseName={book.courses?.[0]?.name || undefined}
+            year={book.publication_year || new Date(book.created_at).getFullYear()}
+            yearOfStudy={book.year_of_study}
+            semester={book.semester}
+            department={book.category || book.subject || 'Academic Reference'}
+            isBook={true}
+            size="md"
+            className="group-hover:scale-[1.01] transition-transform"
+          />
+        </div>
+        <CardContent className="p-2.5 pt-2 sm:p-3 sm:pt-2 flex flex-col justify-between flex-1 gap-1.5">
+          <div>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
+              <div className="flex flex-wrap items-center gap-1">
+                <Badge variant="outline" className="border-primary text-[10px] sm:text-xs font-semibold text-primary px-1.5 py-0">
+                  📚 BOOK
+                </Badge>
+                {(book.year_of_study || book.semester) && (
+                  <Badge variant="secondary" className="text-[10px] sm:text-xs font-medium px-1.5 py-0">
+                    {[book.year_of_study, book.semester].filter(Boolean).join(' · ')}
+                  </Badge>
+                )}
+              </div>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                {book.language?.toUpperCase() || 'REF'}
+              </Badge>
+            </div>
+            <h3 className="theme-title mb-1 line-clamp-1 font-bold transition-colors group-hover:text-primary text-sm sm:text-base" title={book.title}>
+              {book.title}
+            </h3>
+            <div className="theme-muted space-y-0.5 text-xs">
+              <p className="truncate font-medium text-foreground/85">
+                {book.authors.join(', ') || 'Author not specified'}
+              </p>
+              <p className="truncate text-muted-foreground">
+                {book.courses?.map((item) => item.code || item.name).join(' · ') || book.category || 'Reference book'}
+              </p>
+              {book.modules && book.modules.length > 0 && (
+                <p className="truncate text-muted-foreground">{book.modules.map((m) => m.name).join(' · ')}</p>
+              )}
+            </div>
           </div>
-          <h3 className="theme-title mb-2 line-clamp-2 font-semibold transition-colors group-hover:text-primary">{book.title}</h3>
-          <div className="theme-muted space-y-1 text-sm">
-            <p className="line-clamp-1">{book.authors.join(', ') || 'Author not specified'}</p>
-            <p className="line-clamp-1">{book.language || 'Language not specified'}{book.edition ? ` · ${book.edition}` : ''}</p>
-            <p className="line-clamp-1">{book.modules?.map((module) => module.name).join(' · ') || 'Course reference book'}</p>
-          </div>
-          <div className="mt-4 flex items-center justify-between border-t pt-3">
-            <span className="theme-muted flex items-center gap-1 text-xs"><Download className="h-3.5 w-3.5" />{book.download_count || 0} downloads</span>
-            <span className="text-xs font-medium text-primary">Browse book</span>
+          <div>
+            <div className="mt-1 pt-2 border-t border-border/40 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <div className="h-5 w-5 sm:h-6 sm:w-6 overflow-hidden rounded-full shrink-0">
+                  <AvatarFallback
+                    name={uploaderName}
+                    imageUrl={uploaderAvatar}
+                    imageAlt={`${uploaderName} avatar`}
+                  />
+                </div>
+                <span className="font-medium text-foreground truncate text-xs">{uploaderName}</span>
+              </div>
+              <span className="theme-muted flex items-center gap-1 text-[11px] shrink-0">
+                <Download className="h-3 w-3" />
+                {book.download_count || 0}
+              </span>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -301,7 +412,12 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const ids = Array.from(new Set([...papers.slice(0, 4), ...trendingPapers, ...recentPapers].map((p) => p.user_id)));
+    const ids = Array.from(new Set([
+      ...papers.map((p) => p.user_id),
+      ...(personalized?.recommended || []).map((p) => p.user_id),
+      ...(personalized?.recently_viewed || []).map((p) => p.user_id),
+      ...books.map((b) => b.uploaded_by),
+    ].filter(Boolean)));
     if (ids.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -311,15 +427,17 @@ export default function HomePage() {
         const next: Record<string, { profile?: any; imageUrl?: string | null }> = {};
         for (const id of ids) {
           const r = resolved[id];
-          next[id] = { profile: r.profile || undefined, imageUrl: r.imageUrl || null };
+          if (r) {
+            next[id] = { profile: r.profile || undefined, imageUrl: r.imageUrl || null };
+          }
         }
-        setUploaderProfiles(next);
+        setUploaderProfiles((prev) => ({ ...prev, ...next }));
       } catch (e) {
         // ignore
       }
     })();
     return () => { cancelled = true; };
-  }, [papers]);
+  }, [papers, personalized, books]);
 
   useEffect(() => {
     if (!user) {
@@ -650,7 +768,7 @@ export default function HomePage() {
                   </div>
                   <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                     {personalized.recommended.slice(0, 6).map((paper) => (
-                      <PaperCard key={`recommended-${paper.id}`} paper={paper} />
+                      <PaperCard key={`recommended-${paper.id}`} paper={paper} uploaderProfiles={uploaderProfiles} />
                     ))}
                   </div>
                 </div>
@@ -664,7 +782,7 @@ export default function HomePage() {
                   </div>
                   <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                     {personalized.recently_viewed.slice(0, 6).map((paper) => (
-                      <PaperCard key={`recent-${paper.id}`} paper={paper} />
+                      <PaperCard key={`recent-${paper.id}`} paper={paper} uploaderProfiles={uploaderProfiles} />
                     ))}
                   </div>
                 </div>
@@ -760,7 +878,7 @@ export default function HomePage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {trendingPapers.map((paper) => (
-              <PaperCard key={paper.id} paper={paper} />
+              <PaperCard key={paper.id} paper={paper} uploaderProfiles={uploaderProfiles} />
             ))}
           </div>
         )}
@@ -781,7 +899,7 @@ export default function HomePage() {
             </Button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {trendingBooks.map((book) => <BookPickCard key={book.id} book={book} />)}
+            {trendingBooks.map((book) => <BookPickCard key={book.id} book={book} uploaderProfiles={uploaderProfiles} />)}
           </div>
         </section>
       )}
@@ -800,7 +918,7 @@ export default function HomePage() {
         {!loading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {recentPapers.map((paper) => (
-              <PaperCard key={paper.id} paper={paper} />
+              <PaperCard key={paper.id} paper={paper} uploaderProfiles={uploaderProfiles} />
             ))}
           </div>
         )}

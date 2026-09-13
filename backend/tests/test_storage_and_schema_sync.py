@@ -483,3 +483,71 @@ async def test_site_settings_heartbeat_notify_admin_schema_sync():
         settings = await session.get(SiteSettings, 1)
         assert settings is not None
         assert settings.heartbeat_notify_admin is True
+
+
+@pytest.mark.anyio
+async def test_papers_and_books_year_of_study_and_semester_schema_sync():
+    """Verify that ensure_model_columns_for_existing_tables adds year_of_study and semester columns."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Create legacy papers table without year_of_study
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE papers (
+                id INTEGER PRIMARY KEY,
+                user_id VARCHAR(128) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                course_code VARCHAR(32) NOT NULL,
+                year INTEGER NOT NULL,
+                paper_type VARCHAR(64) NOT NULL,
+                semester VARCHAR(64)
+            )
+        """))
+        # Create legacy books table without year_of_study and semester
+        await conn.execute(text("""
+            CREATE TABLE books (
+                id INTEGER PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                uploaded_by VARCHAR(128) NOT NULL,
+                status VARCHAR(32) NOT NULL DEFAULT 'active',
+                visibility VARCHAR(32) NOT NULL DEFAULT 'public'
+            )
+        """))
+        await conn.execute(text("INSERT INTO papers (id, user_id, title, course_code, year, paper_type, semester) VALUES (1, 'u1', 'Sample Exam', 'CS101', 2024, 'Final Exam', 'Semester 1')"))
+        await conn.execute(text("INSERT INTO books (id, title, uploaded_by) VALUES (1, 'Sample Textbook', 'u1')"))
+
+    manager = DatabaseManager()
+    manager.engine = engine
+    manager.async_session_maker = session_factory
+
+    # Run column synchronization
+    await manager.ensure_model_columns_for_existing_tables("papers", "books")
+
+    # Verify Papers and Books ORM can query and populate year_of_study and semester
+    async with session_factory() as session:
+        paper = await session.get(Papers, 1)
+        assert paper is not None
+        assert paper.semester == 'Semester 1'
+        assert paper.year_of_study is None
+
+        paper.year_of_study = 'Year 2'
+        await session.commit()
+
+        book = await session.get(Book, 1)
+        assert book is not None
+        assert book.year_of_study is None
+        assert book.semester is None
+
+        book.year_of_study = 'Year 3'
+        book.semester = 'Semester 2'
+        await session.commit()
+
+    async with session_factory() as session:
+        refreshed_paper = await session.get(Papers, 1)
+        assert refreshed_paper.year_of_study == 'Year 2'
+        assert refreshed_paper.semester == 'Semester 1'
+
+        refreshed_book = await session.get(Book, 1)
+        assert refreshed_book.year_of_study == 'Year 3'
+        assert refreshed_book.semester == 'Semester 2'

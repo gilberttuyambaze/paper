@@ -13,12 +13,16 @@ import { toast } from '@/lib/messages';
 
 type Props = { book: Book; canManage: boolean; onUpdated: (book: Book) => void };
 const languages = [['en', 'English'], ['fr', 'French'], ['rw', 'Kinyarwanda'], ['sw', 'Swahili'], ['ar', 'Arabic'], ['zh', 'Chinese'], ['es', 'Spanish'], ['pt', 'Portuguese'], ['de', 'German'], ['it', 'Italian'], ['ja', 'Japanese'], ['ko', 'Korean'], ['hi', 'Hindi'], ['ru', 'Russian'], ['other', 'Other']];
+const STUDY_YEARS = ['Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Postgraduate'];
+const SEMESTERS = ['Semester 1', 'Semester 2', 'Trimester 1', 'Trimester 2', 'Trimester 3', 'Annual'];
 
 export default function BookManagementEditor({ book, canManage, onUpdated }: Props) {
   const [title, setTitle] = useState(book.title);
   const [description, setDescription] = useState(book.description || '');
   const [isbn, setIsbn] = useState(book.isbn || '');
   const [language, setLanguage] = useState(book.language || 'other');
+  const [yearOfStudy, setYearOfStudy] = useState(book.year_of_study || '');
+  const [semester, setSemester] = useState(book.semester || '');
   const [authors, setAuthors] = useState(book.authors);
   const [authorInput, setAuthorInput] = useState('');
   const [courses, setCourses] = useState(book.courses || []);
@@ -45,7 +49,14 @@ export default function BookManagementEditor({ book, canManage, onUpdated }: Pro
     if (!title.trim() || (isbn.trim() && !isbnValue) || !authors.length || !courses.length) return;
     setSaving(true);
     try {
-      let updated = await updateBook(book.id, { title: normalizeText(title), description: normalizeText(description) || null, isbn: isbnValue || null, language });
+      let updated = await updateBook(book.id, {
+        title: normalizeText(title),
+        description: normalizeText(description) || null,
+        isbn: isbnValue || null,
+        language,
+        year_of_study: yearOfStudy || null,
+        semester: semester || null,
+      });
       updated = await updateBookAuthors(updated.id, normalizeUnique(authors));
       updated = await updateBookCourses(updated.id, courses.map((course) => course.id));
       updated = await updateBookModules(updated.id, normalizeUnique(modules.map((module) => module.id)));
@@ -82,6 +93,36 @@ export default function BookManagementEditor({ book, canManage, onUpdated }: Pro
       <div className="sm:col-span-2"><Label htmlFor="book-edit-title">Title</Label><Input id="book-edit-title" value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => markTouched('title')} aria-invalid={Boolean(titleError)} aria-describedby="book-edit-title-error" disabled={!canManage || saving} /><InlineFieldMessage id="book-edit-title-error" message={titleError} /></div>
       <div><Label htmlFor="book-edit-isbn">ISBN</Label><Input id="book-edit-isbn" value={isbn} onChange={(event) => setIsbn(event.target.value)} onBlur={() => markTouched('isbn')} aria-invalid={Boolean(isbnError)} aria-describedby="book-edit-isbn-error" disabled={!canManage || saving} /><InlineFieldMessage id="book-edit-isbn-error" message={isbnError} />{isbn.trim() && isbnValue && isbnValue !== isbn.trim() && <InlineFieldMessage tone="info" automatic message="ISBN formatted automatically." />}</div>
       <div><Label htmlFor="book-edit-language">Language</Label><select id="book-edit-language" value={language} onChange={(event) => setLanguage(event.target.value)} disabled={!canManage || saving} className="theme-form-input mt-2 h-10 w-full rounded-md border px-3">{languages.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+      <div>
+        <Label htmlFor="book-edit-year-study">Study Year / Academic Level</Label>
+        <select
+          id="book-edit-year-study"
+          value={yearOfStudy}
+          onChange={(event) => setYearOfStudy(event.target.value)}
+          disabled={!canManage || saving}
+          className="theme-form-input mt-2 h-10 w-full rounded-md border px-3"
+        >
+          <option value="">Select study year (optional)</option>
+          {STUDY_YEARS.map((yr) => (
+            <option key={yr} value={yr}>{yr}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <Label htmlFor="book-edit-semester">Semester / Term</Label>
+        <select
+          id="book-edit-semester"
+          value={semester}
+          onChange={(event) => setSemester(event.target.value)}
+          disabled={!canManage || saving}
+          className="theme-form-input mt-2 h-10 w-full rounded-md border px-3"
+        >
+          <option value="">Select semester (optional)</option>
+          {SEMESTERS.map((sem) => (
+            <option key={sem} value={sem}>{sem}</option>
+          ))}
+        </select>
+      </div>
       <div className="sm:col-span-2"><Label htmlFor="book-edit-description">Description</Label><Textarea id="book-edit-description" value={description} onChange={(event) => setDescription(event.target.value)} disabled={!canManage || saving} /></div>
     </div></section>
     <section className="space-y-3"><h3 className="theme-title text-base font-semibold">Authors</h3><div className="flex gap-2"><Input value={authorInput} onChange={(event) => setAuthorInput(event.target.value)} placeholder="Add author" disabled={!canManage || saving} /><Button type="button" variant="outline" onClick={() => { const value = normalizeText(authorInput); if (value) { setAuthors((current) => normalizeUnique([...current, value])); setAuthorInput(''); } }} disabled={!canManage || saving}><Plus className="mr-1 h-4 w-4" />Add</Button></div><InlineFieldMessage message={authorsError} /><div className="flex flex-wrap gap-2">{authors.map((author) => <span key={author} className="rounded-full bg-muted px-3 py-1 text-sm">{author}<button type="button" className="ml-2" aria-label={`Remove ${author}`} onClick={() => setAuthors((current) => current.filter((item) => item !== author))} disabled={!canManage || saving}><X className="inline h-3 w-3" /></button></span>)}</div></section>

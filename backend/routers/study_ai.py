@@ -13,7 +13,7 @@ from core.database import get_db
 from core.config import settings
 from dependencies.auth import get_current_user
 from models.comments import Comments
-from models.papers import Papers
+from models.papers import Papers, PaperPassage
 from models.solutions import Solutions
 from schemas.auth import UserResponse
 from services.ai.base import AIGenerationRequest, AIMessage
@@ -22,7 +22,12 @@ from services.ai.service import AIService, AIProviderFactory
 from services.pdf_text import extract_pdf_text
 from services.storage import StorageService
 from services.passage_indexing import PassageIndexService
-from services.retrieval import HybridRetrievalService
+from services.retrieval import (
+    HybridRetrievalService,
+    QuestionIntent,
+    classify_question_intent,
+    is_question_collection_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,23 @@ router = APIRouter(prefix="/api/v1/study-ai", tags=["study-ai"])
 # In-memory fast cache for extracted text to prevent slow redundant network downloads
 _paper_text_cache: dict[int, str] = {}
 
+STUDY_AI_SYSTEM_PROMPT = (
+    "DOCUMENT-GROUNDED ACADEMIC ASSISTANT MODE\n"
+    "You help a student interact naturally with one authorised academic paper. Interpret the student's request yourself; do not require commands or a fixed task taxonomy.\n\n"
+    "Strict Grounding Rules (Grounding contract):\n"
+    "1. Ground all document answers directly in the retrieved excerpts provided in the context.\n"
+    "2. NEVER invent, hallucinate, or fabricate exam questions, question numbers, sections, passages, quotations, or page numbers.\n"
+    "3. NEVER assume the paper follows a 'typical' or 'usual' format unless established by the retrieved document text.\n"
+    "4. If a requested question was not found in the paper (e.g. asking for Question 99 on a 13-question paper), state clearly: 'I could not find Question X in this examination paper.' Do NOT invent an alternative question.\n"
+    "5. If a page or question is marked as unreadable or cannot be extracted from the scan, state clearly: 'Page X could not be reliably extracted from this document.'\n"
+    "6. Cite each material paper claim using a supplied source label such as [Page 3 • Section II • Question 2].\n"
+    "7. Clearly distinguish what the paper says, reasoning from it, and general academic knowledge. State when evidence is absent, ambiguous, omitted by budget, or low-confidence.\n"
+    "8. The question index is derived extraction, not proof; verify source text before claiming an inventory or answer.\n"
+    "9. Give an educational response in the shape requested: explanation, navigation, comparison, revision material, solution, table, or follow-up.\n"
+    "10. Never output UI, OCR scanner, SVG, or internal retrieval artifacts."
+)
+
+
 
 class ChatHistoryMessage(BaseModel):
     role: str
@@ -38,8 +60,9 @@ class ChatHistoryMessage(BaseModel):
 
 
 class AIActionRequest(BaseModel):
-    action: str  # explain, summarize, question, quiz, formulas, pitfalls
+    action: str = "ask"  # retained for backwards-compatible clients; not an intent classifier
     question: str | None = None
+    message: str | None = None
     chat_history: list[ChatHistoryMessage] | None = None
     preferred_provider: str | None = None
 
@@ -154,6 +177,56 @@ def _build_fallback_response(
             f"- C) Memorize question numbers only\n"
             f"- D) Wait until the night before the exam\n\n"
             f"**Explanation**: Timed active recall and peer discussion provide the strongest retention for University of Rwanda exams."
+        )
+    elif is_question_collection_query(question or ""):
+        inventory_blocks: list[str] = []
+        current_sec = None
+        pages_seen: set[int] = set()
+        if sources:
+            for s in sources:
+                sec = s.get("section_title")
+                q = s.get("question_number")
+                text_content = s.get("passage", "").strip()
+                page = s.get("page_number", 1)
+                pages_seen.add(page)
+
+                if sec and sec != current_sec:
+                    current_sec = sec
+                    inventory_blocks.append(f"\n### {sec}\n")
+
+                if q:
+                    inventory_blocks.append(f"**Question {q}**:\n{text_content}\n")
+                elif text_content and not text_content.startswith(("MODULE WEIGHTING", "DATE:", "LEVEL OF STUDY")):
+                    inventory_blocks.append(f"{text_content}\n")
+
+        pages_sorted = sorted(list(pages_seen)) if pages_seen else [1]
+        page_str = f"Page {pages_sorted[0]}" if len(pages_sorted) == 1 else f"Pages {pages_sorted[0]}–{pages_sorted[-1]}"
+        sec_label = current_sec or "Exam Paper"
+
+        content = (
+            "\n".join(inventory_blocks).strip()
+            + f"\n\n**Source:** {page_str} • {sec_label}"
+            if inventory_blocks
+            else "No questions indexed for this section."
+        )
+    elif classify_question_intent(question or "") == QuestionIntent.DIRECT_ANSWER and sources:
+        top_s = sources[0]
+        page = top_s.get("page_number", 1)
+        sec = top_s.get("section_title") or "Exam Paper"
+        q_num = top_s.get("question_number") or ""
+        q_label = f" • Question {q_num}" if q_num else ""
+        passage_text = top_s.get("passage", "").strip()
+
+        content = (
+            f"**Answer:** [Refer to document excerpt]\n\n"
+            f"**Why:** {passage_text[:200]}...\n\n"
+            f"**Source:** Page {page} • {sec}{q_label}"
+        )
+    elif classify_question_intent(question or "") == QuestionIntent.RESOURCE_EXPLAIN:
+        source_label = f"Page {sources[0].get('page_number', 1)} • {sources[0].get('section_title', 'Exam Paper')}" if sources else f"{paper.course_code} - {paper.course_name}"
+        content = (
+            f"**Why this resource:** It directly covers concepts, questions, and curriculum requirements tested in {paper.course_code} ({paper.course_name}).\n\n"
+            f"**Source:** {source_label}"
         )
     else:
         query_words = _keywords(question or "")
@@ -321,6 +394,20 @@ async def get_ai_status(
         }
 
 
+def _clean_direct_answer_noise(text: str) -> str:
+    """Strips unnecessary trailing generic advice, tutorial tables, or step numbers from direct exam answers."""
+    noise_patterns = [
+        re.compile(r"\n+##?\s*(?:Step[- ]by[- ]Step|Distractor Analysis|Generic Tips|Study Advice|Summary|Pedagogical Note).*$", re.DOTALL | re.IGNORECASE),
+        re.compile(r"\n+When answering multiple[- ]choice.*$", re.DOTALL | re.IGNORECASE),
+        re.compile(r"\n+Underline key(?:words| sentences).*$", re.DOTALL | re.IGNORECASE),
+        re.compile(r"\n+This systematic approach.*$", re.DOTALL | re.IGNORECASE),
+    ]
+    cleaned = text
+    for pattern in noise_patterns:
+        cleaned = pattern.sub("", cleaned)
+    return cleaned.strip()
+
+
 @router.post("/papers/{paper_id}")
 async def study_paper(
     paper_id: int,
@@ -342,119 +429,54 @@ async def study_paper(
     solutions = solutions_result.scalars().all()
 
     action = payload.action.lower().strip()
-    if action == "explain":
-        prompt = (
-            f"Please provide a comprehensive study breakdown and revision guide for this University of Rwanda exam paper:\n"
-            f"Course: {paper.course_code} - {paper.course_name} ({paper.year}, {paper.paper_type})\n"
-            f"Department: {paper.department} | College: {paper.college}\n\n"
-            "Structure your response with:\n"
-            "## 1. Exam Overview & Core Syllabus Areas\n"
-            "- Key topics, themes, and competencies assessed in this paper.\n\n"
-            "## 2. Topic & Question Breakdown\n"
-            "- Analysis of question types, complexity, and key concepts tested.\n\n"
-            "## 3. High-Yield Revision Strategy\n"
-            "- Essential definitions, formulas, theories, or algorithms students must master.\n\n"
-            "## 4. Common Exam Pitfalls & Technique\n"
-            "- Frequent student errors to avoid and best-practice exam time management."
-        )
-    elif action == "summarize":
-        prompt = (
-            f"Please generate a comprehensive study brief and summary for this paper:\n"
-            f"Course: {paper.course_code} - {paper.course_name} ({paper.year}, {paper.paper_type})\n\n"
-            "Structure your response with:\n"
-            "## 1. Paper Summary & Key Themes\n"
-            "- Summary of core topics covered in this examination and difficulty level.\n\n"
-            "## 2. Key Concepts & Formulas Tested\n"
-            "- Primary definitions, formulas, and principles tested.\n\n"
-            "## 3. Community Solutions & Discussion Synthesis\n"
-            "- Summary of key solution insights, alternative approaches, and discussion highlights.\n\n"
-            "## 4. Recommended Action Checklist\n"
-            "- 3-5 concrete study action items for students preparing for this subject."
-        )
-    elif action == "formulas":
-        prompt = (
-            f"Please compile a complete reference sheet of all essential formulas, mathematical equations, definitions, and theorems tested or required for this exam:\n"
-            f"Course: {paper.course_code} - {paper.course_name} ({paper.year}, {paper.paper_type})\n\n"
-            "Include LaTeX formatting for all formulas, state variable definitions, and describe when to use each formula."
-        )
-    elif action == "pitfalls":
-        prompt = (
-            f"Please analyze the most common student mistakes, grading pitfalls, and tricky edge cases for this exam:\n"
-            f"Course: {paper.course_code} - {paper.course_name} ({paper.year}, {paper.paper_type})\n\n"
-            "Highlight specific conceptual traps, computational mistakes, and time-management risks."
-        )
-    elif action == "quiz":
-        prompt = (
-            f"Generate a 3-question practice quiz with step-by-step solutions based on the content of this exam paper:\n"
-            f"Course: {paper.course_code} - {paper.course_name} ({paper.year}, {paper.paper_type})\n\n"
-            "Format each question clearly, provide multiple choice options (A, B, C, D), and include a detailed explanation and answer key for each."
-        )
-    elif action == "question" and payload.question and payload.question.strip():
-        prompt = (
-            f"Student Question: {payload.question.strip()}\n\n"
-            f"Course: {paper.course_code} - {paper.course_name} ({paper.year}, {paper.paper_type})\n\n"
-            "Please provide a thorough, step-by-step pedagogical answer to the student's question based on the exam paper context, including detailed explanations, mathematical formulas (if applicable), derivations, and practical examples."
-        )
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported AI action")
+    student_request = (payload.message or payload.question or "").strip()
+    # Legacy preset buttons are converted into ordinary user utterances at the
+    # boundary. They never select a different retrieval or reasoning pipeline.
+    legacy_prompts = {
+        "explain": "Give me a grounded study guide for this paper.",
+        "summarize": "Summarize this paper and its assessed topics.",
+        "formulas": "Create revision material for formulas, definitions, and concepts in this paper.",
+        "pitfalls": "Identify likely conceptual pitfalls in this paper, grounding them in its questions.",
+        "quiz": "Create a practice quiz based on this paper and explain its relationship to the source.",
+    }
+    prompt = student_request or legacy_prompts.get(action, "Help me understand this paper.")
 
-    # Fast retrieval & text extraction with in-memory caching
-    source_items = []
-    extracted_text = _paper_text_cache.get(paper.id)
-
-    if not extracted_text:
-        retrieval_query = payload.question.strip() if action == "question" and payload.question else f"{paper.course_code} {paper.course_name} {action}"
+    # Load the whole authorised paper first. Context selection happens after a
+    # complete manifest exists; retrieval is not allowed to redefine the paper.
+    extracted_text = None
+    result = await db.execute(select(PaperPassage).where(PaperPassage.paper_id == paper.id).order_by(PaperPassage.page_number, PaperPassage.passage_index))
+    passages = result.scalars().all()
+    if not passages and paper.file_key:
         try:
-            retrieval = HybridRetrievalService(db)
-            retrieved = await asyncio.wait_for(
-                retrieval.retrieve(retrieval_query, paper_id=paper.id, course_code=paper.course_code, limit=settings.rag_context_limit),
-                timeout=1.5,
-            )
-            if retrieved:
-                source_items = [{"paper_id": paper.id, "paper_title": paper.title, "page_number": item.passage.page_number, "passage": item.passage.text, "score": round(item.score, 3)} for item in retrieved]
-                extracted_text = "\n\n".join(f"[Page {item.passage.page_number}] {item.passage.text}" for item in retrieved)
+            indexer = PassageIndexService(db)
+            await asyncio.wait_for(indexer.index_paper(paper), timeout=30.0)
+            result = await db.execute(select(PaperPassage).where(PaperPassage.paper_id == paper.id).order_by(PaperPassage.page_number, PaperPassage.passage_index))
+            passages = result.scalars().all()
         except Exception as exc:
-            logger.info("Fast passage retrieval skipped for paper_id=%s: %s", paper_id, exc)
+            logger.info("Auto-indexing fallback on study_paper: %s", exc)
 
-        # If passages were not yet stored, extract text directly from PDF with strict 2.5s timeout
-        if not extracted_text and paper.file_key:
-            try:
-                pdf_bytes = await asyncio.wait_for(StorageService().download_file("papers", paper.file_key), timeout=2.5)
-                direct_text = extract_pdf_text(pdf_bytes, max_pages=12, max_chars=24_000)
-                if direct_text:
-                    extracted_text = direct_text
-                    _paper_text_cache[paper.id] = direct_text
-                    if not source_items:
-                        source_items = [{"paper_id": paper.id, "paper_title": paper.title, "page_number": 1, "passage": direct_text[:300] + "...", "score": 1.0}]
-            except Exception as exc:
-                logger.warning("Could not extract direct PDF text for paper_id=%s: %s", paper_id, exc)
-
+    context_tokens = max(1, min(12000, settings.ai_max_context_tokens))
     context = build_paper_context(
         paper=paper,
         comments=comments,
         solutions=solutions,
-        max_tokens=max(1, min(6000, settings.ai_max_context_tokens // 2)),
+        max_tokens=context_tokens,
+        passages=passages,
         extracted_text=extracted_text,
+        query=prompt,
     )
+    source_items = [
+        {"paper_id": paper.id, "paper_title": paper.title, "page_number": p.page_number, "question_number": p.question_number, "section_title": p.section_title, "passage": p.text}
+        for p in passages if p.id in context.source_ids
+    ]
 
     # Check if any server-side AI provider is enabled and configured
     if not AIService.is_configured():
-        return _build_fallback_response(action, paper, comments, solutions, payload.question, extracted_text, source_items, "cloud_ai_not_configured")
+        return _build_fallback_response("question", paper, comments, solutions, prompt, extracted_text, source_items, "cloud_ai_not_configured")
 
     try:
-        system_prompt = (
-            "You are an expert Academic Study Assistant and Tutor specialized in higher education at the University of Rwanda.\n"
-            "Your objective is to provide comprehensive, highly educational, accurate, and structured study guidance to students.\n\n"
-            "Guidelines:\n"
-            "1. Structure your answers clearly using Markdown headers (##, ###), bullet points, and bold text for key concepts.\n"
-            "2. For problem-solving or questions: Provide step-by-step methodologies, clear explanations of principles, relevant mathematical formulas (in LaTeX or standard notation), and final answers.\n"
-            "3. For exam preparation: Highlight core syllabus competencies, frequent exam patterns, common student pitfalls, and revision tips.\n"
-            "4. Base your explanations primarily on the provided paper context, course details, questions, and discussion.\n"
-            "5. If certain parts of a question are missing from the scanned text, state reasonable academic assumptions and proceed with complete, sound educational guidance.\n"
-            "6. Maintain an encouraging, scholarly, and professional academic tone."
-        )
-
-        max_tokens = min(settings.ai_max_output_tokens, 2048)
+        system_prompt = STUDY_AI_SYSTEM_PROMPT
+        max_tokens = min(settings.ai_max_output_tokens, 4096)
 
         messages = [
             AIMessage(role="system", content=system_prompt),
@@ -476,16 +498,19 @@ async def study_paper(
         # Use fast multi-provider waterfall (fails over in milliseconds if preferred/primary fails)
         response = await AIService().generate_with_waterfall(
             AIGenerationRequest(
-                temperature=0.4,
+                temperature=0.2,
                 max_output_tokens=max_tokens,
                 user_id=str(_current_user.id),
                 messages=messages,
             ),
             preferred_provider=payload.preferred_provider,
-            per_provider_timeout=8.0,
+            per_provider_timeout=20.0,
         )
+
+        final_content = response.content
+
         return {
-            "content": response.content,
+            "content": final_content,
             "model": response.model,
             "provider": response.provider,
             "usage": response.usage.__dict__ if response.usage else None,
@@ -495,4 +520,31 @@ async def study_paper(
     except Exception as exc:
         logger.warning("Study AI request failed across providers, using fallback summary: %s", exc)
         raw_reason = str(exc) if str(exc) else getattr(exc, "code", "cloud_ai_unavailable")
-        return _build_fallback_response(action, paper, comments, solutions, payload.question, extracted_text, source_items, raw_reason)
+        return _build_fallback_response("question", paper, comments, solutions, prompt, extracted_text, source_items, raw_reason)
+
+
+@router.post("/papers/{paper_id}/reprocess")
+async def reprocess_paper(
+    paper_id: int,
+    _current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reprocesses document extraction and re-indexes passages without data duplication."""
+    paper = await db.get(Papers, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if not paper.file_key:
+        raise HTTPException(status_code=400, detail="Paper has no document file to reprocess")
+
+    indexer = PassageIndexService(db)
+    result = await indexer.index_paper(paper)
+    return {
+        "success": True,
+        "paper_id": paper_id,
+        "extraction_status": paper.extraction_status,
+        "extraction_method": paper.extraction_method,
+        "extraction_quality": paper.extraction_quality,
+        "ocr_used": paper.ocr_used,
+        "passages_indexed": result.get("passages", 0),
+        "embedded_count": result.get("embedded", 0),
+    }

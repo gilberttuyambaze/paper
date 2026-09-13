@@ -314,3 +314,118 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Comprehensive Revision Guide", response["content"])
             self.assertEqual(response["usage"]["total_tokens"], 150)
             mock_ai.generate_with_waterfall.assert_called_once()
+
+    def test_intent_classification(self):
+        from services.retrieval import QuestionIntent, classify_question_intent, _extract_target_question_id, _extract_target_section_id, _section_matches
+
+        self.assertEqual(classify_question_intent("solve question 2 on section 1"), QuestionIntent.DIRECT_ANSWER)
+        self.assertEqual(classify_question_intent("what is the answer to question 5?"), QuestionIntent.DIRECT_ANSWER)
+        self.assertEqual(classify_question_intent("explain question 4"), QuestionIntent.DIRECT_ANSWER)
+        self.assertEqual(classify_question_intent("which option is correct for Q10"), QuestionIntent.DIRECT_ANSWER)
+
+        self.assertEqual(classify_question_intent("why is question 2 B?"), QuestionIntent.EXPLAIN)
+        self.assertEqual(classify_question_intent("why is it B?"), QuestionIntent.EXPLAIN)
+        self.assertEqual(classify_question_intent("why option C?"), QuestionIntent.EXPLAIN)
+
+        self.assertEqual(classify_question_intent("solve question 2 step by step"), QuestionIntent.STEP_BY_STEP)
+        self.assertEqual(classify_question_intent("show all steps for problem 3"), QuestionIntent.STEP_BY_STEP)
+
+        self.assertEqual(classify_question_intent("teach me how to answer questions like this"), QuestionIntent.TEACH_ME)
+        self.assertEqual(classify_question_intent("exam technique for this section"), QuestionIntent.TEACH_ME)
+
+        self.assertEqual(classify_question_intent("explain this resource"), QuestionIntent.RESOURCE_EXPLAIN)
+        self.assertEqual(classify_question_intent("why did you choose this resource?"), QuestionIntent.RESOURCE_EXPLAIN)
+
+        self.assertEqual(classify_question_intent("collect all questions"), QuestionIntent.COLLECTION)
+        self.assertEqual(classify_question_intent("list all questions from the paper"), QuestionIntent.COLLECTION)
+
+        self.assertEqual(_extract_target_question_id("solve question 2 on section 1"), "2")
+        self.assertEqual(_extract_target_section_id("solve question 2 on section 1"), "1")
+        self.assertEqual(_extract_target_section_id("solve question 2 section ii"), "ii")
+
+        self.assertTrue(_section_matches("1", "SECTIONI: READINGCOMPREHENSION"))
+        self.assertFalse(_section_matches("1", "SECTIONII: GRAMMAR(20marks)"))
+        self.assertTrue(_section_matches("2", "SECTIONII: GRAMMAR(20marks)"))
+        self.assertTrue(_section_matches("i", "SECTIONI: READINGCOMPREHENSION"))
+
+    def test_direct_answer_noise_cleaning(self):
+        from routers.study_ai import _clean_direct_answer_noise
+
+        dirty_response = (
+            "**Answer: B — insufficient without accompanying pedagogical knowledge.**\n\n"
+            "**Why:** The author argues that pure subject mastery cannot produce effective teaching without pedagogical expertise.\n\n"
+            "**Source:** Page 2 • Section I • Reading Comprehension\n\n"
+            "## Distractor Analysis\n"
+            "| Option | Evaluation |\n"
+            "| --- | --- |\n"
+            "| A | Incorrect because not universally agreed |\n"
+            "| B | Correct option |\n\n"
+            "When answering multiple-choice questions, always identify the main thesis."
+        )
+
+        cleaned = _clean_direct_answer_noise(dirty_response)
+        self.assertIn("**Answer: B — insufficient without accompanying pedagogical knowledge.**", cleaned)
+        self.assertIn("**Why:** The author argues", cleaned)
+        self.assertIn("**Source:** Page 2 • Section I • Reading Comprehension", cleaned)
+        self.assertNotIn("Distractor Analysis", cleaned)
+        self.assertNotIn("When answering multiple-choice", cleaned)
+        self.assertNotIn("| Option |", cleaned)
+
+    def test_section_and_scope_extraction(self):
+        from services.retrieval import _extract_target_section_id, _extract_target_question_id, is_question_collection_query, classify_question_intent, QuestionIntent
+
+        # Section-wide queries
+        self.assertEqual(_extract_target_section_id("i need answer for section 2 questions"), "2")
+        self.assertIsNone(_extract_target_question_id("i need answer for section 2 questions"))
+        self.assertEqual(classify_question_intent("i need answer for section 2 questions"), QuestionIntent.GENERAL)
+
+        self.assertEqual(_extract_target_section_id("i need answer for sectionII questions"), "ii")
+        self.assertIsNone(_extract_target_question_id("i need answer for sectionII questions"))
+
+        self.assertEqual(_extract_target_section_id("solve the grammar section"), "grammar")
+        self.assertIsNone(_extract_target_question_id("solve the grammar section"))
+
+        # Collection queries with scope
+        self.assertTrue(is_question_collection_query("collect all questions in vocabulary section"))
+        self.assertEqual(_extract_target_section_id("collect all questions in vocabulary section"), "vocab")
+        self.assertEqual(classify_question_intent("collect all questions in vocabulary section"), QuestionIntent.COLLECTION)
+
+        self.assertTrue(is_question_collection_query("collect all questions in section 1"))
+        self.assertEqual(_extract_target_section_id("collect all questions in section 1"), "1")
+
+        # Solving vs Collecting distinction
+        self.assertFalse(is_question_collection_query("solve all questions in vocabulary section"))
+
+    def test_build_paper_intelligence_context(self):
+        from models.papers import Papers, PaperPassage
+        from services.ai.papers import build_paper_intelligence_context
+
+        dummy_paper = Papers(
+            id=1,
+            title="English for General Purposes",
+            course_code="CL80111",
+            course_name="English For General Purposes",
+            department="Applied Physics",
+            college="CST",
+            year=2026,
+            paper_type="Exam",
+        )
+
+        dummy_passages = [
+            PaperPassage(id=1, paper_id=1, page_number=1, passage_index=0, section_title="SECTION I: READING", question_number=None, text="Reading text about education..."),
+            PaperPassage(id=2, paper_id=1, page_number=3, passage_index=1, section_title="SECTION I: READING", question_number="1", text="1. What is the purpose?\nA. ...\nB. ..."),
+            PaperPassage(id=3, paper_id=1, page_number=5, passage_index=2, section_title="VOCABULARY", question_number=None, text="Fill in the blanks (1)-(4)..."),
+            PaperPassage(id=4, paper_id=1, page_number=5, passage_index=3, section_title="SECTION II: GRAMMAR", question_number="1", text="1. Every Friday lecturer (gives)..."),
+        ]
+
+        ctx = build_paper_intelligence_context(paper=dummy_paper, passages=dummy_passages, max_tokens=4000)
+        self.assertIn("=== 1. PAPER METADATA ===", ctx.text)
+        self.assertIn("Course: CL80111 - English For General Purposes", ctx.text)
+        self.assertIn("=== 2. DOCUMENT STRUCTURE & SECTIONS ===", ctx.text)
+        self.assertIn("SECTION I: READING", ctx.text)
+        self.assertIn("VOCABULARY", ctx.text)
+        self.assertIn("SECTION II: GRAMMAR", ctx.text)
+        self.assertIn("=== 3. STRUCTURED QUESTION & SECTION CONTENT ===", ctx.text)
+        self.assertIn("=== 4. QUESTION PROVENANCE INDEX ===", ctx.text)
+        self.assertIn("Question 1 → SECTION I: READING (Page 3)", ctx.text)
+        self.assertIn("Question 1 → SECTION II: GRAMMAR (Page 5)", ctx.text)

@@ -5,6 +5,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
 from dependencies.auth import get_optional_current_user
+from models.auth import User
 from models.books import Author, Book, BookAuthor, BookCourse, BookModule, Module
 from models.courses import Course
 from models.papers import Papers
@@ -14,8 +15,17 @@ from schemas.auth import UserResponse
 router = APIRouter(prefix="/api/v1/resources", tags=["resources"])
 
 async def _profile(db, user_id):
-    row = (await db.execute(select(User_profiles).where(User_profiles.user_id == user_id))).scalar_one_or_none()
-    return {"id": user_id, "name": row.display_name if row else user_id}
+    if not user_id:
+        return {"id": None, "name": "Contributor"}
+    uid = str(user_id)
+    row = (await db.execute(select(User_profiles).where(User_profiles.user_id == uid))).scalar_one_or_none()
+    if row and row.display_name:
+        return {"id": uid, "name": row.display_name}
+    user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+    if user:
+        name = user.name or (user.email.split('@')[0] if user.email else None) or f"Student {uid}"
+        return {"id": uid, "name": name}
+    return {"id": uid, "name": f"Student {uid}"}
 
 @router.get("")
 async def list_resources(type: Literal["all", "paper", "book"] = "all", q: Optional[str] = None, course_id: Optional[int] = None, module_id: Optional[int] = None, year: Optional[int] = None, skip: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100), _user: UserResponse | None = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):

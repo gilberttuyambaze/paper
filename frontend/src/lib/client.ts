@@ -55,6 +55,7 @@ export interface Paper {
   academic_department_id?: string | null;
   programme_id?: string | null;
   programme_name_other?: string | null;
+  year_of_study?: string | null;
   semester?: string | null;
   examination_session?: string | null;
   year: number;
@@ -86,6 +87,12 @@ export interface Paper {
   created_at: string | null;
   uploader_display_name?: string | null;
   uploader_profile_picture_key?: string | null;
+  extraction_status?: 'pending' | 'completed' | 'failed' | 'partial' | string | null;
+  extraction_method?: 'native_text' | 'ocr' | 'vision_fallback' | 'mixed' | string | null;
+  extraction_quality?: number | null;
+  ocr_used?: boolean | null;
+  failed_pages?: number[] | string | null;
+  extraction_version?: string | number | null;
 }
 
 export interface PaperListResponse {
@@ -287,12 +294,21 @@ export interface AdminOverview {
   }>;
 }
 
+export interface AISourceCitation {
+  page_number: number;
+  question_number?: string | null;
+  section_title?: string | null;
+  score?: number | null;
+  preview?: string | null;
+}
+
 export interface AIStudyResponse {
   content: string;
   model: string;
   provider?: string;
   fallback_reason?: string | null;
   duration_ms?: number | null;
+  sources?: AISourceCitation[];
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -669,7 +685,7 @@ export async function deleteMyPaper(paperId: number): Promise<void> {
 }
 
 /** Uses the existing Paper endpoint; the server remains authoritative for Admin/CP access. */
-export async function updatePaper(paperId: number, data: Partial<Pick<Paper, 'title' | 'course_code' | 'course_name' | 'college' | 'department' | 'year' | 'paper_type' | 'lecturer' | 'description' | 'file_key' | 'solution_key' | 'verification_status' | 'is_hidden'>>): Promise<Paper> {
+export async function updatePaper(paperId: number, data: Partial<Pick<Paper, 'title' | 'course_code' | 'course_name' | 'college' | 'department' | 'year' | 'year_of_study' | 'semester' | 'examination_session' | 'paper_type' | 'lecturer' | 'description' | 'file_key' | 'solution_key' | 'verification_status' | 'is_hidden'>>): Promise<Paper> {
   const response = await apiClient.put(apiUrl(`/api/v1/entities/papers/${paperId}`), data);
   return response.data as Paper;
 }
@@ -1176,4 +1192,22 @@ export async function getOfflineDocumentUrl(kind: 'paper' | 'solution', id: numb
   const key = offlineCacheKey(kind, id);
   const cached = await cache.match(key);
   return cached ? key : null;
+}
+
+export interface ReprocessPaperResponse {
+  success: boolean;
+  paper_id: number;
+  extraction_status: string;
+  extraction_method?: string | null;
+  extraction_quality?: number | null;
+  ocr_used?: boolean | null;
+  failed_pages?: number[] | string | null;
+  passages_indexed?: number;
+  embedded_count?: number;
+  message?: string;
+}
+
+export async function reprocessPaper(paperId: number): Promise<ReprocessPaperResponse> {
+  const response = await apiClient.post(apiUrl(`/api/v1/study-ai/papers/${paperId}/reprocess`));
+  return response.data as ReprocessPaperResponse;
 }

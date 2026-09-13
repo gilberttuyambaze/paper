@@ -1,5 +1,5 @@
 from core.database import Base
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint, func
 
 
 class Papers(Base):
@@ -25,6 +25,7 @@ class Papers(Base):
     academic_programme_status = Column(String, nullable=True)
     semester = Column(String, nullable=True)
     examination_session = Column(String, nullable=True)
+    year_of_study = Column(String, nullable=True, index=True)
     year = Column(Integer, nullable=False)
     paper_type = Column(String, nullable=False)
     lecturer = Column(String, nullable=True)
@@ -51,6 +52,12 @@ class Papers(Base):
     download_count = Column(Integer, nullable=True)
     report_count = Column(Integer, nullable=True)
     is_hidden = Column(Boolean, nullable=True)
+    extraction_status = Column(String(32), nullable=True, default="completed")
+    extraction_method = Column(String(32), nullable=True)
+    extraction_quality = Column(Float, nullable=True)
+    ocr_used = Column(Boolean, nullable=True, default=False)
+    failed_pages = Column(Text, nullable=True)
+    extraction_version = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -63,6 +70,11 @@ class PaperPassage(Base):
     paper_id = Column(Integer, nullable=False, index=True)
     page_number = Column(Integer, nullable=False)
     passage_index = Column(Integer, nullable=False)
+    question_number = Column(String(64), nullable=True, index=True)
+    section_title = Column(String(255), nullable=True)
+    extraction_method = Column(String(32), nullable=True)
+    extraction_confidence = Column(Float, nullable=True)
+    parent_passage_id = Column(Integer, nullable=True)
     text = Column(Text, nullable=False)
     text_hash = Column(String(64), nullable=False, index=True)
     course_code = Column(String, nullable=True, index=True)

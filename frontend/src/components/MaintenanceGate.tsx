@@ -33,9 +33,7 @@ export default function MaintenanceGate({ children }: { children: ReactNode }) {
 
   const bypass = hasPermission('site.maintenance.bypass');
   const authPath = !user && (location.pathname.startsWith('/login') || location.pathname.startsWith('/forgot-password') || location.pathname.startsWith('/reset-password') || location.pathname.startsWith('/auth/'));
-  if (status === null && !authPath && location.pathname !== '/locked' && location.pathname !== '/maintenance') {
-    return <main className="flex min-h-screen items-center justify-center bg-background px-6 text-center"><p className="theme-muted">Checking site availability...</p></main>;
-  }
+
   if (status?.maintenance_mode && !bypass && location.pathname === '/register') {
     return <Navigate to="/locked" replace />;
   }

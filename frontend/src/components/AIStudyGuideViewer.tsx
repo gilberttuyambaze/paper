@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/messages';
 import AcademicAiMark from './AcademicAiMark';
-import { fetchStudyAIStatus, AIStatusResponse } from '@/lib/client';
+import { fetchStudyAIStatus, AIStatusResponse, AISourceCitation } from '@/lib/client';
 
 export type AIStudyAction = 'explain' | 'summarize' | 'question' | 'quiz' | 'formulas' | 'pitfalls';
 
@@ -32,6 +32,7 @@ export interface StudyChatMessage {
   fallbackReason?: string | null;
   duration_ms?: number | null;
   timestamp?: Date | string;
+  sources?: AISourceCitation[];
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -53,6 +54,141 @@ export interface AIStudyGuideViewerProps {
   onQuickAction?: (promptText: string) => void;
 }
 
+interface LoadingStepInfo {
+  steps: string[];
+  subtitle: string;
+}
+
+function getDynamicLoadingInfo(action?: AIStudyAction | null, query?: string | null): LoadingStepInfo {
+  const q = (query || '').trim().toLowerCase();
+
+  // 1. Casual Greetings & Openers
+  if (
+    q &&
+    (
+      /^(hi|hello|hey|good\s+(morning|afternoon|evening|day)|greetings|howdy|what'?s\s+up|sup)\b/i.test(q) ||
+      (q.length <= 12 && /^(hi|hello|hey|greetings)/i.test(q))
+    )
+  ) {
+    return {
+      steps: ['Connecting to AI assistant...', 'Thinking...'],
+      subtitle: 'Ready to help you revise and explore this paper.',
+    };
+  }
+
+  // 2. Question Collection / Extraction Intent
+  if (
+    q &&
+    (
+      q.includes('collect all questions') ||
+      q.includes('list all questions') ||
+      q.includes('find all questions') ||
+      q.includes('show all questions') ||
+      q.includes('all questions in') ||
+      q.includes('extract questions') ||
+      q.includes('get all questions') ||
+      q.includes('all questions')
+    )
+  ) {
+    return {
+      steps: [
+        'Scanning document pages for question sections...',
+        'Extracting questions and text passages...',
+        'Structuring questions for review...',
+      ],
+      subtitle: 'Extracting exact questions from paper context...',
+    };
+  }
+
+  // 3. Solving specific sections or questions
+  if (
+    q &&
+    (
+      q.includes('section') ||
+      q.includes('question') ||
+      q.includes('solve') ||
+      q.includes('answer') ||
+      q.includes('calculate') ||
+      /\bq\d+\b/i.test(q)
+    )
+  ) {
+    return {
+      steps: [
+        'Locating relevant questions in paper context...',
+        'Checking verified solutions & passages...',
+        'Formulating clear step-by-step answer...',
+      ],
+      subtitle: 'Grounded in indexed paper text & verified solutions...',
+    };
+  }
+
+  // 4. Action presets
+  if (action === 'explain') {
+    return {
+      steps: [
+        'Scanning exam paper & syllabus structure...',
+        'Analyzing curriculum competencies...',
+        'Synthesizing comprehensive revision guide...',
+      ],
+      subtitle: 'Compiling step-by-step revision strategy and core concepts...',
+    };
+  }
+
+  if (action === 'summarize') {
+    return {
+      steps: [
+        'Analyzing core paper topics & themes...',
+        'Reviewing verified solutions & discussion notes...',
+        'Synthesizing concise study brief...',
+      ],
+      subtitle: 'Extracting essential paper concepts and discussion points...',
+    };
+  }
+
+  if (action === 'formulas') {
+    return {
+      steps: [
+        'Searching for equations, laws, and definitions...',
+        'Extracting mathematical & scientific relationships...',
+        'Formatting formula reference sheet...',
+      ],
+      subtitle: 'Compiling key equations and theorems from paper...',
+    };
+  }
+
+  if (action === 'pitfalls') {
+    return {
+      steps: [
+        'Analyzing common student errors & tricky questions...',
+        'Reviewing grading criteria & examiner traps...',
+        'Compiling exam pitfall warnings...',
+      ],
+      subtitle: 'Identifying tricky questions and student mistakes to avoid...',
+    };
+  }
+
+  if (action === 'quiz') {
+    return {
+      steps: [
+        'Analyzing paper question types & difficulty...',
+        'Drafting targeted practice questions...',
+        'Preparing solutions & answer explanations...',
+      ],
+      subtitle: 'Generating practice quiz based on paper topics...',
+    };
+  }
+
+  // Default fallback for any other question / prompt
+  return {
+    steps: [
+      'Reviewing paper context & indexed passages...',
+      'Analyzing your question...',
+      'Formulating response...',
+    ],
+    subtitle: 'Searching indexed paper text and syllabus material...',
+  };
+}
+
 export default function AIStudyGuideViewer({
   content,
   model,
@@ -70,14 +206,13 @@ export default function AIStudyGuideViewer({
   const [loadingStep, setLoadingStep] = useState(0);
   const [inputQuestion, setInputQuestion] = useState('');
   const [aiStatus, setAiStatus] = useState<AIStatusResponse | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
+  const prevUserMsgCountRef = useRef(0);
 
-  const loadingSteps = [
-    'Scanning exam paper & syllabus context...',
-    'Analyzing curriculum competencies & questions...',
-    'Synthesizing step-by-step revision strategy...',
-    'Formatting comprehensive academic study guide...',
-  ];
+  const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
+  const activeAction = lastUserMessage?.action || mode;
+  const activeQuery = lastUserMessage?.content;
+  const loadingInfo = getDynamicLoadingInfo(activeAction, activeQuery);
 
   // Fetch live AI connection status on mount
   const checkStatus = async () => {
@@ -105,18 +240,31 @@ export default function AIStudyGuideViewer({
       setLoadingStep(0);
       return;
     }
+    const maxSteps = loadingInfo.steps.length;
     const interval = setInterval(() => {
-      setLoadingStep((prev) => (prev < loadingSteps.length - 1 ? prev + 1 : prev));
-    }, 2000);
+      setLoadingStep((prev) => (prev < maxSteps - 1 ? prev + 1 : prev));
+    }, 1800);
     return () => clearInterval(interval);
-  }, [loading]);
+  }, [loading, loadingInfo.steps.length]);
 
-  // Auto-scroll on new messages or loading state
+  // Auto-scroll ONLY inside the chat container when a new user message is sent.
+  // Never scroll the outer window, and do not jump to the bottom when the assistant response arrives.
   useEffect(() => {
-    if (messages.length > 0 || loading) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const userMsgCount = messages.filter((m) => m.role === 'user').length;
+    if (userMsgCount === 0) {
+      prevUserMsgCountRef.current = 0;
+      return;
     }
-  }, [messages.length, loading]);
+    if (userMsgCount > prevUserMsgCountRef.current) {
+      prevUserMsgCountRef.current = userMsgCount;
+      if (chatContainerRef.current) {
+        chatContainerRef.current.scrollTo({
+          top: chatContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
+    }
+  }, [messages]);
 
   const handleCopy = async (textToCopy: string, id: string) => {
     if (!textToCopy) return;
@@ -163,8 +311,9 @@ export default function AIStudyGuideViewer({
   };
 
   const renderInlineStyles = (raw: string) => {
-    const parts = raw.split(/(\*\*.*?\*\*|\$.*?\$|`.*?`)/g);
+    const parts = raw.split(/(\*\*.*?\*\*|\$.*?\$|`.*?`|(?:📄\s*)?\[?(?:Page|Pg\.?)\s+\d+(?:\s*(?:•|,|&|-)\s*Question\s+[\w\(\)\.\-]+)?\]?|📄\s*Page\s+\d+)/gi);
     return parts.map((part, i) => {
+      if (!part) return null;
       if (part.startsWith('**') && part.endsWith('**')) {
         return (
           <strong key={i} className="font-semibold text-foreground">
@@ -190,6 +339,19 @@ export default function AIStudyGuideViewer({
           >
             {part.slice(1, -1)}
           </code>
+        );
+      }
+      if (/(?:📄|Page\s+\d+|Pg\.?\s+\d+)/i.test(part) && (part.startsWith('📄') || part.startsWith('[') || /Page\s+\d+/i.test(part))) {
+        const cleanCitation = part.replace(/^\[|\]$/g, '').trim();
+        return (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/25 px-1.5 py-0.5 text-[11px] font-semibold text-primary shadow-xs mx-0.5"
+            title="Cited from verified document page"
+          >
+            <FileText className="h-3 w-3 inline shrink-0 opacity-80" />
+            <span>{cleanCitation.replace(/^📄\s*/, '')}</span>
+          </span>
         );
       }
       return part;
@@ -356,7 +518,7 @@ export default function AIStudyGuideViewer({
               </span>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Instant revision guides, question breakdowns, and step-by-step exam solutions
+              Ask naturally about this paper; every answer is grounded in its indexed evidence
             </p>
           </div>
         </div>
@@ -438,7 +600,7 @@ export default function AIStudyGuideViewer({
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-card/40 p-2.5 overflow-x-auto">
         <span className="text-[11px] font-semibold text-muted-foreground mr-1 hidden sm:inline-flex items-center gap-1">
           <GraduationCap className="h-3.5 w-3.5" />
-          Study Presets:
+          Optional ideas:
         </span>
         <button
           type="button"
@@ -488,7 +650,10 @@ export default function AIStudyGuideViewer({
       </div>
 
       {/* 3. Conversational Message Stream */}
-      <div className="max-h-[560px] overflow-y-auto p-4 space-y-4 divide-y divide-border/30">
+      <div
+        ref={chatContainerRef}
+        className="max-h-[560px] overflow-y-auto p-4 space-y-4 divide-y divide-border/30"
+      >
         {displayMessages.length === 0 && !loading ? (
           <div className="py-10 text-center space-y-3">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-inner">
@@ -499,7 +664,7 @@ export default function AIStudyGuideViewer({
                 Start Your Paper Revision Session
               </p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Click any study preset above or type a specific question about exam problems, formulas, or derivations below.
+                Ask anything about this paper: locate a topic, compare questions, learn a concept, create revision material, or follow up on an earlier answer.
               </p>
             </div>
             {/* Quick starter chips */}
@@ -630,6 +795,34 @@ export default function AIStudyGuideViewer({
                       {renderFormattedMarkdown(msg.content)}
                     </div>
 
+                    {/* Compact Structured Source Metadata */}
+                    {msg.sources && msg.sources.length > 0 && (
+                      <details className="mt-2 text-[11px] text-muted-foreground group">
+                        <summary className="cursor-pointer font-medium hover:text-foreground inline-flex items-center gap-1">
+                          <span>Document Provenance ({Array.from(new Set(msg.sources.map((s) => s.page_number))).length} pages cited)</span>
+                        </summary>
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {Array.from(
+                            new Map(
+                              msg.sources.map((s) => [
+                                `${s.page_number}-${s.section_title || ''}-${s.question_number || ''}`,
+                                s,
+                              ])
+                            ).values()
+                          ).slice(0, 8).map((src, sIdx) => (
+                            <span
+                              key={sIdx}
+                              className="inline-flex items-center gap-1 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground border border-border/50"
+                            >
+                              Page {src.page_number}
+                              {src.section_title ? ` • ${src.section_title}` : ''}
+                              {src.question_number ? ` • Q${src.question_number}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+
                     {/* Follow-up Question Chips */}
                     <div className="pt-3 border-t border-border/30 flex flex-wrap gap-1.5 items-center">
                       <span className="text-[10px] font-semibold text-muted-foreground mr-1">
@@ -676,10 +869,10 @@ export default function AIStudyGuideViewer({
               </div>
               <div className="space-y-0.5">
                 <p className="text-xs font-bold text-foreground animate-pulse">
-                  {loadingSteps[loadingStep]}
+                  {loadingInfo.steps[Math.min(loadingStep, loadingInfo.steps.length - 1)]}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  Analyzing document text & synthesizing revision notes...
+                  {loadingInfo.subtitle}
                 </p>
               </div>
             </div>
@@ -692,8 +885,6 @@ export default function AIStudyGuideViewer({
             </div>
           </div>
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
       {/* 5. Interactive Chat Input Box */}
@@ -708,7 +899,7 @@ export default function AIStudyGuideViewer({
                 handleSendInput();
               }
             }}
-            placeholder="Ask anything about this exam paper, specific questions, or derivations..."
+            placeholder="Ask naturally about this paper…"
             rows={2}
             className="theme-form-input pr-12 text-xs sm:text-sm resize-none"
             disabled={loading}

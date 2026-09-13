@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from dependencies.auth import get_current_user, get_optional_current_user
+from models.auth import User
 from models.comments import Comments
 from models.books import Author, Book, BookActivity, BookAuthor, BookCourse, BookModule, Module
 from models.user_profiles import User_profiles
@@ -73,6 +74,8 @@ class BookCreate(BaseModel):
     publisher: Optional[str] = Field(default=None, max_length=255)
     category: Optional[str] = Field(default=None, max_length=120)
     subject: Optional[str] = Field(default=None, max_length=120)
+    year_of_study: Optional[str] = Field(default=None, max_length=50)
+    semester: Optional[str] = Field(default=None, max_length=50)
     status: Literal["draft", "active", "inactive", "archived"] = "draft"
     visibility: Literal["public", "private"] = "public"
     authors: list[str] = Field(min_length=1)
@@ -81,7 +84,7 @@ class BookCreate(BaseModel):
     cover: FileReference
     file: FileReference
 
-    @field_validator("title", "description", "edition", "publisher", "category", "subject", mode="before")
+    @field_validator("title", "description", "edition", "publisher", "category", "subject", "year_of_study", "semester", mode="before")
     @classmethod
     def normalize_metadata(cls, value):
         return normalize_text(value)
@@ -113,9 +116,11 @@ class BookUpdate(BaseModel):
     publisher: Optional[str] = Field(default=None, max_length=255)
     category: Optional[str] = Field(default=None, max_length=120)
     subject: Optional[str] = Field(default=None, max_length=120)
+    year_of_study: Optional[str] = Field(default=None, max_length=50)
+    semester: Optional[str] = Field(default=None, max_length=50)
     visibility: Optional[Literal["public", "private"]] = None
 
-    @field_validator("title", "description", "edition", "publisher", "category", "subject", mode="before")
+    @field_validator("title", "description", "edition", "publisher", "category", "subject", "year_of_study", "semester", mode="before")
     @classmethod
     def normalize_metadata(cls, value):
         return normalize_text(value)
@@ -263,10 +268,29 @@ async def _serialize(book: Book, db: AsyncSession, actor: UserResponse | None = 
     courses = (await db.execute(select(BookCourse.course_id).where(BookCourse.book_id == book.id))).scalars().all()
     course_rows = (await db.execute(select(Course).join(BookCourse, BookCourse.course_id == Course.id).where(BookCourse.book_id == book.id))).scalars().all()
     modules = (await db.execute(select(Module).join(BookModule, BookModule.module_id == Module.id).where(BookModule.book_id == book.id))).scalars().all()
-    profile = (await db.execute(select(User_profiles).where(User_profiles.user_id == book.uploaded_by))).scalar_one_or_none()
+    uid = str(book.uploaded_by) if book.uploaded_by is not None else None
+    profile = (await db.execute(select(User_profiles).where(User_profiles.user_id == uid))).scalar_one_or_none() if uid else None
+    user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none() if uid and not profile else None
+    uploader_name = (
+        (profile.display_name if profile and profile.display_name else None)
+        or (user.name if user and user.name else None)
+        or (user.email.split('@')[0] if user and user.email else None)
+        or (f"Student {uid}" if uid else "Contributor")
+    )
+    uploader_role = profile.role if profile else (user.role if user else None)
     deadline = _utc(book.created_at) + CP_WINDOW if book.created_at else None
     payload = {column.name: getattr(book, column.name) for column in Book.__table__.columns}
-    payload.update({"authors": authors, "course_ids": courses, "courses": [{"id": course.id, "code": course.code, "name": course.name} for course in course_rows], "modules": [{"id": module.id, "name": module.name, "code": module.code, "course_id": module.course_id} for module in modules], "uploader_name": profile.display_name if profile else None, "uploader_role": profile.role if profile else None, "management_deadline": deadline, "can_manage": bool(actor and can_manage_book(actor, book, await database_now(db)))})
+    payload.update({
+        "authors": authors,
+        "course_ids": courses,
+        "courses": [{"id": course.id, "code": course.code, "name": course.name} for course in course_rows],
+        "modules": [{"id": module.id, "name": module.name, "code": module.code, "course_id": module.course_id} for module in modules],
+        "uploader_name": uploader_name,
+        "uploader_role": uploader_role,
+        "uploader_profile_picture_key": profile.profile_picture_key if profile else None,
+        "management_deadline": deadline,
+        "can_manage": bool(actor and can_manage_book(actor, book, await database_now(db))),
+    })
     return payload
 
 
@@ -331,7 +355,18 @@ async def create_book(payload: BookCreate, actor: UserResponse = Depends(get_cur
 
 
 @router.get("")
-async def list_books(status_filter: Optional[str] = Query(None, alias="status"), uploaded_by: Optional[str] = None, uploader_role: Optional[str] = None, course_id: Optional[str] = None, author: Optional[str] = None, management_state: Optional[Literal["within_48h", "expired"]] = None, actor: Optional[UserResponse] = Depends(get_optional_current_user), db: AsyncSession = Depends(get_db)):
+async def list_books(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    uploaded_by: Optional[str] = None,
+    uploader_role: Optional[str] = None,
+    course_id: Optional[str] = None,
+    author: Optional[str] = None,
+    year_of_study: Optional[str] = None,
+    semester: Optional[str] = None,
+    management_state: Optional[Literal["within_48h", "expired"]] = None,
+    actor: Optional[UserResponse] = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     query = select(Book)
     # Readers only receive published books. Management users can inspect the
     # catalogue (including drafts) as part of their review responsibilities.
@@ -344,6 +379,8 @@ async def list_books(status_filter: Optional[str] = Query(None, alias="status"),
     if uploaded_by: query = query.where(Book.uploaded_by == uploaded_by)
     if course_id: query = query.where(Book.id.in_(select(BookCourse.book_id).where(BookCourse.course_id == course_id)))
     if author: query = query.where(Book.id.in_(select(BookAuthor.book_id).join(Author, Author.id == BookAuthor.author_id).where(Author.name.ilike(f"%{author}%"))))
+    if year_of_study: query = query.where(Book.year_of_study == year_of_study)
+    if semester: query = query.where(Book.semester == semester)
     if uploader_role:
         query = query.where(Book.uploaded_by.in_(select(User_profiles.user_id).where(User_profiles.role == uploader_role)))
     books = (await db.execute(query.order_by(Book.created_at.desc()))).scalars().all()
