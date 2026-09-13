@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Study AI returns trusted Markdown syntax but never raw HTML. Keep long
+   derivations usable on narrow screens instead of shrinking them into noise. */
+.study-ai-markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+}
+
+.study-ai-markdown .katex {
+  color: hsl(var(--foreground));
+}
+
 :root {
   /* Central semantic color system. Values are HSL channels for Tailwind opacity support. */
   --color-background: 36 100% 99%;
@@ -770,26 +782,27 @@ select:disabled {
 }
 
 .theme-highlight-shell {
-  border: 1px solid hsla(var(--brand), 0.12);
-  background: linear-gradient(180deg, hsla(var(--card), 0.92), hsla(var(--secondary), 0.92));
-  box-shadow: var(--shadow-strong);
+  border: 1px solid hsla(var(--brand), 0.16);
+  background: linear-gradient(180deg, hsla(var(--card), 0.96), hsla(var(--secondary), 0.94));
+  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.12), 0 4px 12px -2px rgba(0, 0, 0, 0.06);
 }
 
 .dark .theme-highlight-shell {
-  border-color: hsl(var(--color-text-primary) / 0.1);
+  border-color: hsl(var(--color-text-primary) / 0.14);
   background: hsl(var(--color-text-primary) / 0.08);
-  box-shadow: var(--shadow-strong);
+  box-shadow: 0 16px 40px -6px rgba(0, 0, 0, 0.6);
 }
 
 .theme-highlight-card {
-  border: 1px solid hsla(var(--brand), 0.12);
-  background: hsla(var(--header-card), 0.88);
-  box-shadow: var(--shadow-soft);
+  border: 1px solid hsl(var(--border) / 0.9);
+  background: hsl(var(--card) / 0.98);
+  box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
 }
 
 .dark .theme-highlight-card {
-  border-color: hsl(var(--color-text-primary) / 0.1);
-  background: hsl(var(--color-overlay) / 0.35);
+  border-color: hsl(var(--border) / 0.75);
+  background: hsl(var(--card) / 0.92);
+  box-shadow: 0 6px 20px -3px rgba(0, 0, 0, 0.45), 0 2px 8px -2px rgba(0, 0, 0, 0.3);
 }
 
 .theme-highlight-muted {

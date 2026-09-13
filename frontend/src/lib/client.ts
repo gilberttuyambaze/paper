@@ -611,6 +611,20 @@ export async function fetchPaperById(id: number): Promise<Paper> {
   return data.items[0];
 }
 
+export interface PaperProcessingStatus {
+  paper_id: number;
+  status: string;
+  message: string | null;
+  retry_available: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export async function fetchPaperProcessingStatus(id: number): Promise<PaperProcessingStatus> {
+  const response = await apiClient.get(apiUrl(`/api/v1/entities/papers/${id}/processing-status`));
+  return response.data as PaperProcessingStatus;
+}
+
 export async function createPaper(data: Partial<Paper>): Promise<Paper> {
   const response = await apiClient.post(apiUrl('/api/v1/community/papers'), data);
   invalidateResourceCaches();

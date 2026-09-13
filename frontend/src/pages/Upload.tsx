@@ -666,7 +666,7 @@ export default function UploadPage() {
         fileKey = await uploadFileObject('papers', objectKey, paperFile, (percentage) => setUploadProgress(Math.round(percentage * paperUploadEnd / 100)));
       } catch (err) {
         console.error('File upload failed:', err);
-        toast.error('Paper upload failed');
+        toast.error(normalizeApiError(err).message || 'Paper upload failed');
         return;
       }
 
@@ -709,7 +709,7 @@ export default function UploadPage() {
       toast.success('Paper uploaded successfully!');
     } catch (err) {
       console.error('Upload failed:', err);
-      toast.error('Failed to upload paper');
+      toast.error(normalizeApiError(err).message || 'Failed to upload paper');
     } finally {
       setSubmitting(false);
       setUploadStage(null);
@@ -816,12 +816,12 @@ export default function UploadPage() {
         <div className="theme-soft-panel mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full text-success-foreground">
           <CheckCircle className="h-10 w-10" />
         </div>
-        <h2 className="theme-title mb-4 text-2xl font-bold">Upload Successful!</h2>
+        <h2 className="theme-title mb-4 text-2xl font-bold">Paper received successfully</h2>
         <p className="theme-muted mb-6">
-          {uploadedBook ? `“${uploadedBook.title}” has been uploaded. Your management window is calculated securely by the server.` : `Your paper has been submitted with a ${uploadedPaper?.verification_status || inferVerificationStatus()} verification status.`}
+          {uploadedBook ? `“${uploadedBook.title}” has been uploaded. Your management window is calculated securely by the server.` : `Your paper and its metadata have been safely stored with a ${uploadedPaper?.verification_status || inferVerificationStatus()} verification status. Academic processing is continuing in the background so Study AI can understand its pages, text, questions and sections.`}
           {profile?.requested_role_status === 'pending'
             ? ` Your ${profile.requested_role || 'special access'} request is still pending, so this upload was handled as a normal community upload.`
-            : ' Thank you for contributing!'}
+            : ' You do not need to keep this page open; Study AI will become fully available when processing is complete. Thank you for contributing!'}
         </p>
         <div className="flex gap-3 justify-center">
           <Button onClick={resetForm} variant="outline">

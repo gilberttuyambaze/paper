@@ -41,6 +41,14 @@ class StorageUploadResult:
     provider_file_id: str | None = None
     storage_provider: str | None = None
 
+
+class StorageUnavailableError(ValueError):
+    """A temporary provider outage which callers may safely retry.
+
+    This is deliberately distinct from invalid uploads and permanent provider
+    errors so the API can return a retryable 503 instead of a misleading 500.
+    """
+
 ALLOWED_UPLOAD_MIME_TYPES = {
     "application/pdf",
     "application/epub+zip",
@@ -524,13 +532,50 @@ class GoogleDriveStorageService(StorageServiceBase):
             raise ValueError("Invalid Google service account credentials.") from exc
 
     async def _execute(self, request):
-        try:
-            return await asyncio.to_thread(request.execute)
-        except self.HttpError as exc:
-            detail = exc.args[0] if exc.args else str(exc)
-            status_code = getattr(getattr(exc, "resp", None), "status", None)
-            prefix = f"{status_code}: " if status_code else ""
-            raise ValueError(f"Google Drive API error: {prefix}{detail}") from exc
+        """Execute a Drive request with safe retry behaviour for reads.
+
+        Service-account token refreshes happen as part of an otherwise ordinary
+        Drive request. A short DNS outage at oauth2.googleapis.com used to
+        bubble out as an unhandled exception and make uploads appear to have
+        failed with a generic 500.  GET requests are safe to retry; mutations
+        are intentionally attempted only once, because retrying an ambiguous
+        file-create request could duplicate a contributor's document.
+        """
+        method = str(getattr(request, "method", "")).upper()
+        attempts = 3 if method in {"GET", "HEAD"} else 1
+        last_transport_error: Exception | None = None
+
+        for attempt in range(attempts):
+            try:
+                return await asyncio.to_thread(request.execute)
+            except self.HttpError as exc:
+                detail = exc.args[0] if exc.args else str(exc)
+                status_code = getattr(getattr(exc, "resp", None), "status", None)
+                prefix = f"{status_code}: " if status_code else ""
+                raise ValueError(f"Google Drive API error: {prefix}{detail}") from exc
+            except Exception as exc:
+                # httplib2 raises ServerNotFoundError for DNS failures.  Avoid
+                # importing httplib2 at module import time: Supabase-only
+                # installations must not need Google dependencies.
+                transient = isinstance(exc, (OSError, TimeoutError)) or exc.__class__.__name__ in {
+                    "ServerNotFoundError",
+                    "HttpLib2Error",
+                }
+                if not transient:
+                    raise
+                last_transport_error = exc
+                if attempt + 1 < attempts:
+                    logger.warning(
+                        "Google Drive read request failed transiently; retrying (%s/%s): %s",
+                        attempt + 1,
+                        attempts,
+                        exc.__class__.__name__,
+                    )
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+
+        raise StorageUnavailableError(
+            "Document storage is temporarily unavailable. Your file was not stored; please try again in a moment."
+        ) from last_transport_error
 
     async def _find_folder(self, folder_name: str, parent_id: str) -> Optional[str]:
         query = (

@@ -14,6 +14,7 @@ from core.config import settings
 from dependencies.auth import get_current_user
 from models.comments import Comments
 from models.papers import Papers, PaperPassage
+from models.paper_processing import PaperProcessingJob
 from models.solutions import Solutions
 from schemas.auth import UserResponse
 from services.ai.base import AIGenerationRequest, AIMessage
@@ -21,7 +22,6 @@ from services.ai.papers import build_paper_context
 from services.ai.service import AIService, AIProviderFactory
 from services.pdf_text import extract_pdf_text
 from services.storage import StorageService
-from services.passage_indexing import PassageIndexService
 from services.retrieval import (
     HybridRetrievalService,
     QuestionIntent,
@@ -45,11 +45,19 @@ STUDY_AI_SYSTEM_PROMPT = (
     "3. NEVER assume the paper follows a 'typical' or 'usual' format unless established by the retrieved document text.\n"
     "4. If a requested question was not found in the paper (e.g. asking for Question 99 on a 13-question paper), state clearly: 'I could not find Question X in this examination paper.' Do NOT invent an alternative question.\n"
     "5. If a page or question is marked as unreadable or cannot be extracted from the scan, state clearly: 'Page X could not be reliably extracted from this document.'\n"
-    "6. Cite each material paper claim using a supplied source label such as [Page 3 • Section II • Question 2].\n"
+    "6. Cite material paper claims with supplied source labels such as [Page 3 • Section II • Question 2], but consolidate citations naturally at the end of the relevant paragraph or section; do not repeat them after every sentence.\n"
     "7. Clearly distinguish what the paper says, reasoning from it, and general academic knowledge. State when evidence is absent, ambiguous, omitted by budget, or low-confidence.\n"
     "8. The question index is derived extraction, not proof; verify source text before claiming an inventory or answer.\n"
     "9. Give an educational response in the shape requested: explanation, navigation, comparison, revision material, solution, table, or follow-up.\n"
-    "10. Never output UI, OCR scanner, SVG, or internal retrieval artifacts."
+    "10. Never output UI, OCR scanner, SVG, or internal retrieval artifacts.\n\n"
+    "Tutor presentation contract:\n"
+    "11. Write as a clear academic tutor: lead with the answer, use ordinary sentences around formulas, and keep simple answers concise. Avoid generic study advice, repeated conclusions, internal-looking labels, and a wall of symbols.\n"
+    "12. Use Markdown headings, lists and real GitHub-Flavored Markdown tables only when they improve readability. Do not over-section a short answer or make fake space-aligned tables.\n"
+    "13. Use LaTeX only for mathematical expressions: inline mathematics is \\(F = ma\\), and display mathematics is \\[F = ma\\]. Ensure every delimiter is balanced. Preserve units, using forms such as \\mathrm{N} where useful.\n"
+    "14. For a numerical solution, give concise visible teaching steps such as Given, Find, Formula, Substitution, Calculation, and Answer. Do not reveal hidden chain-of-thought.\n"
+    "15. For a formula explanation, identify its quantities and then explain its meaning in normal language when helpful. Present multi-line derivations as separate readable displays.\n"
+    "16. If OCR has obviously corrupted an otherwise unambiguous mathematical symbol or notation, present a normalized notation and say it is normalized from the extracted source. Never silently repair uncertain source content.\n"
+    "17. Put provenance naturally near an exam-derived claim, for example **Source:** Page 3, Section A, Question 8."
 )
 
 
@@ -418,6 +426,20 @@ async def study_paper(
     paper = await db.get(Papers, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
+    # Receipt and intelligence readiness are intentionally different facts.
+    # Never trigger synchronous indexing from a Study AI request.
+    if (paper.extraction_status or "").upper() in {"RECEIVED", "QUEUED", "PROCESSING", "FAILED"}:
+        job = (await db.execute(select(PaperProcessingJob).where(PaperProcessingJob.paper_id == paper_id).order_by(PaperProcessingJob.id.desc()).limit(1))).scalar_one_or_none()
+        return {
+            "content": "This paper has been successfully received, but its academic content is still being processed. Study AI will become available once processing is complete.",
+            "model": None,
+            "provider": None,
+            "usage": None,
+            "duration_ms": None,
+            "sources": [],
+            "processing_status": job.status if job else (paper.extraction_status or "RECEIVED"),
+            "processing_message": job.progress_message if job else "Preparing the paper for Study AI.",
+        }
 
     comments_result = await db.execute(
         select(Comments).where(Comments.paper_id == paper_id).order_by(Comments.created_at.desc()).limit(8)
@@ -446,14 +468,15 @@ async def study_paper(
     extracted_text = None
     result = await db.execute(select(PaperPassage).where(PaperPassage.paper_id == paper.id).order_by(PaperPassage.page_number, PaperPassage.passage_index))
     passages = result.scalars().all()
-    if not passages and paper.file_key:
-        try:
-            indexer = PassageIndexService(db)
-            await asyncio.wait_for(indexer.index_paper(paper), timeout=30.0)
-            result = await db.execute(select(PaperPassage).where(PaperPassage.paper_id == paper.id).order_by(PaperPassage.page_number, PaperPassage.passage_index))
-            passages = result.scalars().all()
-        except Exception as exc:
-            logger.info("Auto-indexing fallback on study_paper: %s", exc)
+    if not passages and (paper.extraction_status or "").upper() == "READY":
+        # A READY claim without source passages is inconsistent state, not
+        # permission to perform an OCR/indexing job inside the chat request.
+        return {
+            "content": "This paper is being prepared for Study AI, but its indexed academic source material is not available yet. Please try again after processing has completed.",
+            "model": None, "provider": None, "usage": None, "duration_ms": None, "sources": [],
+            "processing_status": "PROCESSING",
+            "processing_message": "Waiting for indexed source material.",
+        }
 
     context_tokens = max(1, min(12000, settings.ai_max_context_tokens))
     context = build_paper_context(
@@ -536,15 +559,13 @@ async def reprocess_paper(
     if not paper.file_key:
         raise HTTPException(status_code=400, detail="Paper has no document file to reprocess")
 
-    indexer = PassageIndexService(db)
-    result = await indexer.index_paper(paper)
+    from services.paper_processing import PaperProcessingService
+    job = await PaperProcessingService(db).retry(paper_id)
     return {
         "success": True,
         "paper_id": paper_id,
-        "extraction_status": paper.extraction_status,
-        "extraction_method": paper.extraction_method,
-        "extraction_quality": paper.extraction_quality,
-        "ocr_used": paper.ocr_used,
-        "passages_indexed": result.get("passages", 0),
-        "embedded_count": result.get("embedded", 0),
+        "extraction_status": job.status if job else "QUEUED",
+        "message": "Paper processing has been queued.",
+        "passages_indexed": 0,
+        "embedded_count": 0,
     }

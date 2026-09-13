@@ -8,10 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.comments import Comments
 from models.paper_interactions import PaperInteractions
 from models.papers import PaperPassage, PaperQuestion, QuestionAttempt, QuestionClassification, QuestionTopic, Papers
+from models.paper_processing import PaperProcessingJob
 from models.reports import Reports
 from models.solutions import Solutions
 from services.storage import StorageService
-from services.passage_indexing import PassageIndexService
+from services.paper_processing import PaperProcessingService
+from services.contribution_communications import record_contribution_event
 from schemas.storage import ObjectRequest
 
 logger = logging.getLogger(__name__)
@@ -71,16 +73,18 @@ class PapersService:
             if user_id:
                 data['user_id'] = user_id
             await self._attach_storage_metadata(data)
+            # Receipt is deliberately small and durable. Expensive OCR/indexing
+            # is performed only by the separate paper-processing worker.
+            data.setdefault("extraction_status", "RECEIVED")
             obj = Papers(**data)
             self.db.add(obj)
+            await self.db.flush()
+            await PaperProcessingService(self.db).enqueue(obj)
+            await record_contribution_event(
+                self.db, event_type="PAPER_RECEIVED", paper=obj, user_id=str(obj.user_id)
+            )
             await self.db.commit()
             await self.db.refresh(obj)
-            try:
-                await PassageIndexService(self.db).index_paper(obj)
-            except Exception as index_error:
-                # A successful upload/paper record must never be rolled back by
-                # optional retrieval indexing.
-                logger.warning("Passage indexing failed for paper_id=%s: %s", obj.id, index_error)
             logger.info(f"Created papers with id: {obj.id}")
             return obj
         except Exception as e:
@@ -174,12 +178,10 @@ class PapersService:
             await self.db.commit()
             await self.db.refresh(obj)
 
-            # If file was replaced or newly provided, re-index passages
+            # File replacement queues a durable reprocessing run; it must not
+            # hold an HTTP request open for OCR or embeddings.
             if obj.file_key and (obj.file_key != old_file_key or update_data.get("extraction_status") == "pending"):
-                try:
-                    await PassageIndexService(self.db).index_paper(obj)
-                except Exception as index_error:
-                    logger.warning("Passage re-indexing failed for updated paper_id=%s: %s", obj.id, index_error)
+                await PaperProcessingService(self.db).retry(obj.id)
 
             logger.info(f"Updated papers {obj_id}")
             return obj
@@ -256,6 +258,7 @@ class PapersService:
             await self.db.execute(delete(QuestionAttempt).where(QuestionAttempt.question_id.in_(question_ids)))
             await self.db.execute(delete(PaperQuestion).where(PaperQuestion.paper_id == obj_id))
             await self.db.execute(delete(PaperPassage).where(PaperPassage.paper_id == obj_id))
+            await self.db.execute(delete(PaperProcessingJob).where(PaperProcessingJob.paper_id == obj_id))
             await self.db.execute(delete(Solutions).where(Solutions.paper_id == obj_id))
             await self.db.execute(delete(Comments).where(Comments.paper_id == obj_id))
             await self.db.execute(delete(PaperInteractions).where(PaperInteractions.paper_id == obj_id))

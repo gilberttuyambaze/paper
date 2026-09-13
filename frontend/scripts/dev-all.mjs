@@ -1,18 +1,38 @@
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import process from 'node:process';
 
 const dryRun = process.argv.includes('--dry-run');
+const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repositoryRoot = path.resolve(frontendRoot, '..');
+const backendRoot = path.join(repositoryRoot, 'backend');
+const python = path.join(repositoryRoot, '.venv', 'Scripts', 'python.exe');
 
 const commands = [
   {
     name: 'backend',
-    command: '.\\.venv\\Scripts\\python.exe',
+    command: python,
     args: ['-m', 'uvicorn', 'main:app', '--reload', '--app-dir', 'backend', '--host', '0.0.0.0', '--port', '8000'],
+    cwd: repositoryRoot,
+  },
+  {
+    name: 'paper-worker',
+    command: python,
+    args: ['scripts/process_paper_jobs.py'],
+    cwd: backendRoot,
+  },
+  {
+    name: 'communication-worker',
+    command: python,
+    args: ['scripts/process_communication_events.py'],
+    cwd: backendRoot,
   },
   {
     name: 'frontend',
-    command: 'node_modules\\.bin\\vite.cmd',
+    command: path.join(frontendRoot, 'node_modules', '.bin', 'vite.cmd'),
     args: ['--host', '0.0.0.0', '--port', '3000'],
+    cwd: frontendRoot,
   },
 ];
 
@@ -50,6 +70,7 @@ for (const job of commands) {
   const child = spawn(job.command, job.args, {
     stdio: 'inherit',
     shell: false,
+    cwd: job.cwd,
   });
 
   children.push(child);

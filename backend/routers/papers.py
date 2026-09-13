@@ -30,6 +30,8 @@ from services.authorization import (
 )
 from services.site_access import require_resource_upload
 from models.papers import Papers
+from models.paper_processing import PaperProcessingJob
+from services.paper_processing import PaperProcessingService
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -251,7 +253,30 @@ async def index_paper_passages(
     paper = await db.get(Papers, paper_id)
     if not paper or paper.user_id != str(current_user.id):
         raise HTTPException(status_code=404, detail="Paper not found")
-    return await PassageIndexService(db).index_paper(paper)
+    job = await PaperProcessingService(db).retry(paper_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Paper processing job not found")
+    return {"paper_id": paper_id, "status": job.status, "message": "Paper processing has been queued."}
+
+
+@router.get("/{paper_id}/processing-status")
+async def paper_processing_status(
+    paper_id: int,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    paper = await db.get(Papers, paper_id)
+    if not paper or (not has_permission(current_user, "papers.edit") and paper.user_id != str(current_user.id)):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    job = (await db.execute(select(PaperProcessingJob).where(PaperProcessingJob.paper_id == paper_id).order_by(PaperProcessingJob.id.desc()).limit(1))).scalar_one_or_none()
+    return {
+        "paper_id": paper_id,
+        "status": (job.status if job else paper.extraction_status or "RECEIVED"),
+        "message": (job.progress_message if job else "Paper receipt is being recorded."),
+        "retry_available": bool(job and job.status == "FAILED"),
+        "started_at": job.started_at if job else None,
+        "completed_at": job.completed_at if job else None,
+    }
 
 
 @router.get("/{paper_id}/index-status")

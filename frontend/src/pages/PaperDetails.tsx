@@ -22,6 +22,7 @@ import {
   resolvePublicUserProfile,
   resolvePublicUserProfiles,
   reprocessPaper,
+  fetchPaperProcessingStatus,
   Paper,
   Comment,
   Solution,
@@ -112,8 +113,18 @@ function ExtractionBadge({
   ocrUsed?: boolean | null;
 }) {
   if (!status) return null;
+  const normalized = status.toLowerCase();
 
-  if (status === 'completed') {
+  if (['received', 'queued', 'processing'].includes(normalized)) {
+    return (
+      <Badge variant="outline" className="gap-1 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30 font-medium text-xs" title="The original paper is safe; academic processing continues in the background">
+        <LoaderCircle className="h-3 w-3 animate-spin text-blue-500" />
+        <span>Preparing for Study AI</span>
+      </Badge>
+    );
+  }
+
+  if (normalized === 'completed' || normalized === 'ready') {
     if (ocrUsed || method === 'ocr' || method === 'vision_fallback') {
       return (
         <Badge
@@ -138,7 +149,7 @@ function ExtractionBadge({
     );
   }
 
-  if (status === 'partial') {
+  if (normalized === 'partial') {
     return (
       <Badge
         variant="outline"
@@ -151,7 +162,7 @@ function ExtractionBadge({
     );
   }
 
-  if (status === 'failed') {
+  if (normalized === 'failed') {
     return (
       <Badge
         variant="outline"
@@ -203,6 +214,7 @@ export default function PaperDetails() {
   const [academicNames, setAcademicNames] = useState<Record<string, string>>({});
   const [authorProfiles, setAuthorProfiles] = useState<Record<string, { display_name?: string | null; imageUrl?: string | null }>>({});
   const [isReprocessing, setIsReprocessing] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null);
 
   const handleReprocessPaper = async () => {
     if (!paper || isReprocessing) return;
@@ -231,6 +243,25 @@ export default function PaperDetails() {
   useEffect(() => {
     if (id) loadPaper(parseInt(id));
   }, [id]);
+
+  useEffect(() => {
+    if (!paper?.id || !user || ['READY', 'FAILED'].includes(String(paper.extraction_status || '').toUpperCase())) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const status = await fetchPaperProcessingStatus(paper.id);
+        if (!active) return;
+        setProcessingMessage(status.message);
+        setPaper((current) => current ? { ...current, extraction_status: status.status } : current);
+      } catch {
+        // Status is an enhancement; a paper page remains usable if its owner
+        // cannot refresh this optional endpoint.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [paper?.id, paper?.extraction_status, user]);
 
   useEffect(() => {
     void fetchAcademicTaxonomy().then((taxonomy) => {
@@ -773,6 +804,12 @@ export default function PaperDetails() {
               </Button>
             )}
           </div>
+
+          {processingMessage && ['RECEIVED', 'QUEUED', 'PROCESSING'].includes(String(paper.extraction_status || '').toUpperCase()) && (
+            <p className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">Paper received.</span> {processingMessage} You can leave this page; status updates automatically.
+            </p>
+          )}
 
           <h1 className="theme-title mb-4 text-2xl font-bold md:text-3xl">
             {paper.title}

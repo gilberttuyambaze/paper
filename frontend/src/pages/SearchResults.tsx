@@ -37,27 +37,27 @@ const SEMESTERS = ['Semester 1', 'Semester 2', 'Trimester 1', 'Trimester 2', 'Tr
 const BOOK_LANGUAGES = ['en', 'fr', 'rw', 'sw', 'ar', 'zh', 'es', 'pt', 'de', 'it', 'ja', 'ko', 'hi', 'ru', 'other'];
 const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
 
-function VerificationBadge({ status }: { status: string }) {
+function VerificationBadge({ status }: { status?: string }) {
   if (status === 'verified') {
     return (
-      <Badge className="theme-status-badge--verified hover:bg-inherit">
-        <CheckCircle className="mr-1 h-3 w-3" />
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100/90 dark:bg-emerald-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+        <CheckCircle className="h-3 w-3" />
         Verified
-      </Badge>
+      </span>
     );
   }
   if (status === 'community') {
     return (
-      <Badge className="theme-status-badge--community hover:bg-inherit">
-        <Users className="mr-1 h-3 w-3" />
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100/90 dark:bg-amber-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+        <Users className="h-3 w-3" />
         Community
-      </Badge>
+      </span>
     );
   }
   return (
-      <Badge className="bg-muted text-muted-foreground hover:bg-muted">
+    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
       Unverified
-    </Badge>
+    </span>
   );
 }
 
@@ -525,9 +525,9 @@ export default function SearchResults() {
               const uploaderName = uploaderProfiles[paper.user_id]?.profile?.display_name || paper.uploader_display_name || (paper.user_id ? `Contributor ${paper.user_id}` : 'Academic Contributor');
               const uploaderAvatar = uploaderProfiles[paper.user_id]?.imageUrl ?? (paper.uploader_profile_picture_key || undefined);
               return (
-                <Link key={paper.id} to={`/paper/${paper.id}`} className="block group">
-                  <Card className="theme-panel h-full overflow-hidden border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
-                    <div className="p-2.5 pb-0 sm:p-3 sm:pb-0">
+                <Link key={paper.id} to={`/paper/${paper.id}`} className="block group h-full focus:outline-none">
+                  <Card className="theme-panel h-full overflow-hidden rounded-2xl border border-border/70 hover:border-primary/50 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
+                    <div className="p-3 pb-0">
                       <DocumentCoverPreview
                         title={paper.title}
                         courseCode={paper.course_code}
@@ -544,60 +544,55 @@ export default function SearchResults() {
                         className="group-hover:scale-[1.01] transition-transform"
                       />
                     </div>
-                    <CardContent className="p-2.5 pt-2 sm:p-3 sm:pt-2 flex flex-col justify-between flex-1 gap-1.5">
+                    <CardContent className="p-3 pt-2.5 flex flex-col justify-between flex-1 gap-2">
                       <div>
-                        <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <Badge variant="outline" className="border-primary text-[10px] sm:text-xs font-semibold text-primary px-1.5 py-0">
-                              📄 {paper.paper_type}
-                            </Badge>
-                            {(paper.year_of_study || paper.semester) && (
-                              <Badge variant="secondary" className="text-[10px] sm:text-xs font-medium px-1.5 py-0">
-                                {[paper.year_of_study, paper.semester].filter(Boolean).join(' · ')}
-                              </Badge>
+                        <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                          <span className="inline-flex items-center rounded-full border border-orange-400/60 bg-orange-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-orange-700 dark:text-orange-400">
+                            {paper.paper_type || 'Exam'}
+                          </span>
+
+                          <div className="flex items-center gap-1">
+                            <VerificationBadge status={paper.verification_status} />
+                            {paper.solution_key && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100/90 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                                <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
+                                Solved
+                              </span>
                             )}
                           </div>
-                          <VerificationBadge status={paper.verification_status} />
                         </div>
-                        <h3 className="theme-title mb-1 line-clamp-1 font-bold transition-colors group-hover:text-primary text-sm sm:text-base" title={paper.title}>
+
+                        <h3 className="line-clamp-1 text-sm sm:text-base font-bold text-foreground group-hover:text-primary transition-colors leading-snug" title={paper.title}>
                           {paper.title}
                         </h3>
-                        <div className="theme-muted space-y-0.5 text-xs">
-                          <p className="flex items-center gap-1 font-medium text-foreground/85 truncate">
-                            <BookOpen className="h-3 w-3 shrink-0 text-primary" />
-                            <span className="truncate">{paper.course_code} - {paper.course_name}</span>
+
+                        <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                          <p className="flex items-center gap-1.5 font-medium text-foreground/85 truncate">
+                            <BookOpen className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
+                            <span className="truncate">{paper.course_code ? `${paper.course_code} - ` : ''}{paper.course_name || 'Academic Course'}</span>
                           </p>
-                          <p className="flex items-center gap-1 truncate text-muted-foreground">
-                            <Clock className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{paper.year} · {paper.department}</span>
+                          <p className="flex items-center gap-1.5 truncate text-muted-foreground">
+                            <Clock className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+                            <span className="truncate">{paper.year ? `${paper.year} · ` : ''}{paper.department || 'University of Rwanda'}</span>
                           </p>
                           {paper.lecturer && <p className="truncate text-muted-foreground">By {paper.lecturer}</p>}
                         </div>
                       </div>
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mt-1 pt-2 border-t border-border/40 text-xs">
-                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                            <div className="h-5 w-5 sm:h-6 sm:w-6 overflow-hidden rounded-full shrink-0">
-                              <AvatarFallback
-                                name={uploaderName}
-                                imageUrl={uploaderAvatar}
-                                imageAlt={`${uploaderName} avatar`}
-                              />
-                            </div>
-                            <span className="font-medium text-foreground truncate text-xs">{uploaderName}</span>
+
+                      <div className="pt-2 border-t border-border/50 flex items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <div className="h-6 w-6 overflow-hidden rounded-full shrink-0 border border-border/40">
+                            <AvatarFallback
+                              name={uploaderName}
+                              imageUrl={uploaderAvatar}
+                              imageAlt={`${uploaderName} avatar`}
+                            />
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="theme-muted flex items-center gap-1 text-[11px]">
-                              <Download className="h-3 w-3" />
-                              {paper.download_count || 0}
-                            </span>
-                            {paper.solution_key && (
-                              <Badge className="theme-status-badge--solution text-[9px] px-1.5 py-0 hover:bg-inherit">
-                                <Star className="mr-0.5 h-2.5 w-2.5" />
-                                Solution
-                              </Badge>
-                            )}
-                          </div>
+                          <span className="font-semibold text-foreground/90 truncate text-xs">{uploaderName}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-muted-foreground text-xs shrink-0">
+                          <Download className="h-3.5 w-3.5 text-muted-foreground/70" />
+                          <span>{paper.download_count || 0}</span>
                         </div>
                       </div>
                     </CardContent>
@@ -609,9 +604,9 @@ export default function SearchResults() {
               const uploaderName = uploaderProfiles[book.uploaded_by]?.profile?.display_name || book.uploader_name || (book.uploaded_by ? `Contributor ${book.uploaded_by}` : 'Academic Contributor');
               const uploaderAvatar = uploaderProfiles[book.uploaded_by]?.imageUrl ?? (book.uploader_profile_picture_key || undefined);
               return (
-                <Link key={`book-${book.id}`} to={`/book/${book.id}`} className="block group">
-                  <Card className="theme-panel h-full overflow-hidden border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
-                    <div className="p-2.5 pb-0 sm:p-3 sm:pb-0">
+                <Link key={`book-${book.id}`} to={`/book/${book.id}`} className="block group h-full focus:outline-none">
+                  <Card className="theme-panel h-full overflow-hidden rounded-2xl border border-border/70 hover:border-primary/50 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col justify-between">
+                    <div className="p-3 pb-0">
                       <DocumentCoverPreview
                         title={book.title}
                         courseCode={book.courses?.[0]?.code || undefined}
@@ -625,54 +620,49 @@ export default function SearchResults() {
                         className="group-hover:scale-[1.01] transition-transform"
                       />
                     </div>
-                    <CardContent className="p-2.5 pt-2 sm:p-3 sm:pt-2 flex flex-col justify-between flex-1 gap-1.5">
+                    <CardContent className="p-3 pt-2.5 flex flex-col justify-between flex-1 gap-2">
                       <div>
-                        <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <Badge variant="outline" className="border-primary text-[10px] sm:text-xs font-semibold text-primary px-1.5 py-0">
-                              📚 BOOK
-                            </Badge>
-                            {(book.year_of_study || book.semester) && (
-                              <Badge variant="secondary" className="text-[10px] sm:text-xs font-medium px-1.5 py-0">
-                                {[book.year_of_study, book.semester].filter(Boolean).join(' · ')}
-                              </Badge>
-                            )}
-                          </div>
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                            {book.language?.toUpperCase() || 'REF'}
-                          </Badge>
+                        <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                          <span className="inline-flex items-center rounded-full border border-purple-500/50 bg-purple-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-purple-700 dark:text-purple-400">
+                            📚 Book
+                          </span>
+
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100/90 dark:bg-amber-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                            <Users className="h-3 w-3" />
+                            Community
+                          </span>
                         </div>
-                        <h3 className="theme-title mb-1 line-clamp-1 font-bold transition-colors group-hover:text-primary text-sm sm:text-base" title={book.title}>
+
+                        <h3 className="line-clamp-1 text-sm sm:text-base font-bold text-foreground group-hover:text-primary transition-colors leading-snug" title={book.title}>
                           {book.title}
                         </h3>
-                        <div className="theme-muted space-y-0.5 text-xs">
-                          <p className="truncate font-medium text-foreground/85">
-                            {book.authors.join(', ') || 'Author not specified'}
+
+                        <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                          <p className="flex items-center gap-1.5 font-medium text-foreground/85 truncate">
+                            <BookOpen className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
+                            <span className="truncate">{book.authors?.join(', ') || 'Author not specified'}</span>
                           </p>
-                          <p className="truncate text-muted-foreground">
-                            {book.courses?.map((item) => item.code || item.name).join(' · ') || book.category || 'Reference book'}
+                          <p className="flex items-center gap-1.5 truncate text-muted-foreground">
+                            <Clock className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+                            <span className="truncate">{book.courses?.map((c) => c.code || c.name).join(' · ') || book.category || 'Reference book'}</span>
                           </p>
-                          {book.modules && book.modules.length > 0 && (
-                            <p className="truncate text-muted-foreground">{book.modules.map((m) => m.name).join(' · ')}</p>
-                          )}
                         </div>
                       </div>
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mt-1 pt-2 border-t border-border/40 text-xs">
-                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                            <div className="h-5 w-5 sm:h-6 sm:w-6 overflow-hidden rounded-full shrink-0">
-                              <AvatarFallback
-                                name={uploaderName}
-                                imageUrl={uploaderAvatar}
-                                imageAlt={`${uploaderName} avatar`}
-                              />
-                            </div>
-                            <span className="font-medium text-foreground truncate text-xs">{uploaderName}</span>
+
+                      <div className="pt-2 border-t border-border/50 flex items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <div className="h-6 w-6 overflow-hidden rounded-full shrink-0 border border-border/40">
+                            <AvatarFallback
+                              name={uploaderName}
+                              imageUrl={uploaderAvatar}
+                              imageAlt={`${uploaderName} avatar`}
+                            />
                           </div>
-                          <span className="theme-muted flex items-center gap-1 text-[11px] shrink-0">
-                            <Download className="h-3 w-3" />
-                            {book.download_count || 0}
-                          </span>
+                          <span className="font-semibold text-foreground/90 truncate text-xs">{uploaderName}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-muted-foreground text-xs shrink-0">
+                          <Download className="h-3.5 w-3.5 text-muted-foreground/70" />
+                          <span>{book.download_count || 0}</span>
                         </div>
                       </div>
                     </CardContent>

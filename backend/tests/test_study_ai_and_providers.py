@@ -42,6 +42,18 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
         for key, value in self.original_settings.items():
             setattr(settings, key, value)
 
+    def test_study_ai_prompt_requires_human_readable_math_tables_and_provenance(self):
+        """Presentation guidance is part of the provider-independent contract."""
+        from routers.study_ai import STUDY_AI_SYSTEM_PROMPT
+
+        self.assertIn("real GitHub-Flavored Markdown tables", STUDY_AI_SYSTEM_PROMPT)
+        self.assertIn("inline mathematics is \\(F = ma\\)", STUDY_AI_SYSTEM_PROMPT)
+        self.assertIn("display mathematics is \\[F = ma\\]", STUDY_AI_SYSTEM_PROMPT)
+        self.assertIn("Given, Find, Formula, Substitution, Calculation, and Answer", STUDY_AI_SYSTEM_PROMPT)
+        self.assertIn("Do not reveal hidden chain-of-thought", STUDY_AI_SYSTEM_PROMPT)
+        self.assertIn("normalized notation", STUDY_AI_SYSTEM_PROMPT)
+        self.assertIn("**Source:** Page 3", STUDY_AI_SYSTEM_PROMPT)
+
     async def test_openai_provider_uses_chat_completions(self):
         provider = OpenAIProvider(
             api_key="sk-test-key",

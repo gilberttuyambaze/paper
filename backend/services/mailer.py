@@ -29,7 +29,7 @@ def _brand_name() -> str:
 
 
 def _support_email() -> str:
-    return os.getenv("SUPPORT_EMAIL", os.getenv("SMTP_FROM_EMAIL", "support@uracademicresourcehub.com")).strip()
+    return os.getenv("SUPPORT_EMAIL", os.getenv("SMTP_FROM_EMAIL", "paperhubur@gmail.com")).strip()
 
 
 def _public_website_url() -> str:

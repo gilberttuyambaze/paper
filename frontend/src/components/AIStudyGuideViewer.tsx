@@ -1,4 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,7 +13,6 @@ import {
   Check,
   BookOpen,
   GraduationCap,
-  Lightbulb,
   FileText,
   Send,
   RotateCcw,
@@ -19,6 +23,7 @@ import {
 import { toast } from '@/lib/messages';
 import AcademicAiMark from './AcademicAiMark';
 import { fetchStudyAIStatus, AIStatusResponse, AISourceCitation } from '@/lib/client';
+import { normalizeStudyResponseMarkdown } from '@/lib/study-response-markdown';
 
 export type AIStudyAction = 'explain' | 'summarize' | 'question' | 'quiz' | 'formulas' | 'pitfalls';
 
@@ -310,159 +315,6 @@ export default function AIStudyGuideViewer({
     }
   };
 
-  const renderInlineStyles = (raw: string) => {
-    const parts = raw.split(/(\*\*.*?\*\*|\$.*?\$|`.*?`|(?:📄\s*)?\[?(?:Page|Pg\.?)\s+\d+(?:\s*(?:•|,|&|-)\s*Question\s+[\w\(\)\.\-]+)?\]?|📄\s*Page\s+\d+)/gi);
-    return parts.map((part, i) => {
-      if (!part) return null;
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return (
-          <strong key={i} className="font-semibold text-foreground">
-            {part.slice(2, -2)}
-          </strong>
-        );
-      }
-      if (part.startsWith('$') && part.endsWith('$') && part.length > 2) {
-        return (
-          <code
-            key={i}
-            className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs font-medium text-primary"
-          >
-            {part.slice(1, -1)}
-          </code>
-        );
-      }
-      if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
-        return (
-          <code
-            key={i}
-            className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
-          >
-            {part.slice(1, -1)}
-          </code>
-        );
-      }
-      if (/(?:📄|Page\s+\d+|Pg\.?\s+\d+)/i.test(part) && (part.startsWith('📄') || part.startsWith('[') || /Page\s+\d+/i.test(part))) {
-        const cleanCitation = part.replace(/^\[|\]$/g, '').trim();
-        return (
-          <span
-            key={i}
-            className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/25 px-1.5 py-0.5 text-[11px] font-semibold text-primary shadow-xs mx-0.5"
-            title="Cited from verified document page"
-          >
-            <FileText className="h-3 w-3 inline shrink-0 opacity-80" />
-            <span>{cleanCitation.replace(/^📄\s*/, '')}</span>
-          </span>
-        );
-      }
-      return part;
-    });
-  };
-
-  const renderFormattedMarkdown = (text: string) => {
-    const lines = text.split('\n');
-    const elements: React.ReactNode[] = [];
-
-    lines.forEach((line, index) => {
-      const trimmed = line.trim();
-
-      if (!trimmed) {
-        elements.push(<div key={`empty-${index}`} className="h-2" />);
-        return;
-      }
-
-      // H2 Headers
-      if (trimmed.startsWith('## ')) {
-        const title = trimmed.replace(/^##\s+/, '');
-        elements.push(
-          <div
-            key={`h2-${index}`}
-            className="mt-5 mb-2.5 pb-1.5 border-b border-border/60 flex items-center gap-2"
-          >
-            <span className="h-2 w-2 rounded-full bg-primary" />
-            <h3 className="text-base font-bold text-foreground tracking-tight">
-              {title}
-            </h3>
-          </div>
-        );
-        return;
-      }
-
-      // H3 Headers
-      if (trimmed.startsWith('### ')) {
-        const title = trimmed.replace(/^###\s+/, '');
-        elements.push(
-          <h4
-            key={`h3-${index}`}
-            className="mt-3.5 mb-1.5 text-sm font-semibold text-primary flex items-center gap-1.5"
-          >
-            <Lightbulb className="h-3.5 w-3.5 text-primary/80 shrink-0" />
-            <span>{title}</span>
-          </h4>
-        );
-        return;
-      }
-
-      // Blockquotes (> text)
-      if (trimmed.startsWith('> ')) {
-        elements.push(
-          <div
-            key={`quote-${index}`}
-            className="my-2 border-l-2 border-primary/60 bg-primary/5 pl-3 py-1.5 text-xs text-muted-foreground rounded-r-md italic"
-          >
-            {renderInlineStyles(trimmed.slice(2))}
-          </div>
-        );
-        return;
-      }
-
-      // Bullet points
-      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-        const rawContent = trimmed.substring(2);
-        elements.push(
-          <div
-            key={`bullet-${index}`}
-            className="flex items-start gap-2.5 my-1.5 pl-1.5 text-sm leading-relaxed"
-          >
-            <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary/70 shrink-0" />
-            <div className="flex-1 text-muted-foreground">
-              {renderInlineStyles(rawContent)}
-            </div>
-          </div>
-        );
-        return;
-      }
-
-      // Numbered items
-      if (/^\d+\.\s+/.test(trimmed)) {
-        const num = trimmed.match(/^(\d+)\.\s+/)?.[1] || '1';
-        const rawContent = trimmed.replace(/^\d+\.\s+/, '');
-        elements.push(
-          <div
-            key={`num-${index}`}
-            className="flex items-start gap-2.5 my-2 pl-1.5 text-sm leading-relaxed"
-          >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-              {num}
-            </span>
-            <div className="flex-1 pt-0.5 text-muted-foreground">
-              {renderInlineStyles(rawContent)}
-            </div>
-          </div>
-        );
-        return;
-      }
-
-      // Default paragraph
-      elements.push(
-        <p key={`p-${index}`} className="my-1.5 text-sm leading-relaxed text-muted-foreground">
-          {renderInlineStyles(trimmed)}
-        </p>
-      );
-    });
-
-    return elements;
-  };
-
   const displayMessages: StudyChatMessage[] =
     messages.length > 0
       ? messages
@@ -517,9 +369,7 @@ export default function AIStudyGuideViewer({
                 Academic Copilot
               </span>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              Ask naturally about this paper; every answer is grounded in its indexed evidence
-            </p>
+            <p className="text-[11px] text-muted-foreground">Ask naturally about this paper. Answers stay grounded in its source material.</p>
           </div>
         </div>
 
@@ -531,7 +381,7 @@ export default function AIStudyGuideViewer({
               className="gap-1.5 py-1 px-2.5 text-[11px] font-medium border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
             >
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>AI Assistant Active</span>
+              <span>Study AI</span>
             </Badge>
           ) : (
             <Badge
@@ -539,7 +389,7 @@ export default function AIStudyGuideViewer({
               className="gap-1.5 py-1 px-2.5 text-[11px] font-medium border-border/70 bg-card text-muted-foreground"
             >
               <span className="h-2 w-2 rounded-full bg-amber-500" />
-              <span>Paper Study Mode</span>
+              <span>Paper context</span>
             </Badge>
           )}
 
@@ -695,7 +545,7 @@ export default function AIStudyGuideViewer({
         ) : (
           displayMessages.map((msg, index) => {
             const isAssistant = msg.role === 'assistant';
-            const isLocal = msg.model === 'local-study-guide' || !msg.model;
+            const isLocal = msg.model === 'local-study-guide';
 
             return (
               <div
@@ -708,13 +558,6 @@ export default function AIStudyGuideViewer({
                 {!isAssistant ? (
                   <div className="flex items-start gap-2.5 max-w-[85%]">
                     <div className="rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
-                      <div className="flex items-center gap-1.5 mb-1 opacity-80 text-[10px]">
-                        <span>You</span>
-                        <span>•</span>
-                        <span>
-                          {msg.action ? getActionBadgeLabel(msg.action) : 'Question'}
-                        </span>
-                      </div>
                       <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                     </div>
                   </div>
@@ -728,36 +571,12 @@ export default function AIStudyGuideViewer({
                           <Sparkles className="h-4 w-4" />
                         </div>
                         <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold text-foreground">
-                              UR Academic Tutor
-                            </span>
-                            {msg.action && (
-                              <span className="text-[10px] text-muted-foreground font-medium">
-                                • {getActionBadgeLabel(msg.action)}
-                              </span>
-                            )}
-                          </div>
+                          <span className="text-xs font-bold text-foreground">Study AI</span>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <Badge
-                          variant={isLocal ? 'outline' : 'success'}
-                          className="text-[10px] tracking-tight px-2 py-0.5"
-                        >
-                          {isLocal ? (
-                            <span className="flex items-center gap-1">
-                              <BookOpen className="h-3 w-3" />
-                              Paper Context
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1">
-                              <Sparkles className="h-3 w-3 text-primary" />
-                              AI Study Guide
-                            </span>
-                          )}
-                        </Badge>
+                        {isLocal && <Badge variant="outline" className="text-[10px] tracking-tight px-2 py-0.5">Paper context</Badge>}
 
                         <Button
                           type="button"
@@ -781,25 +600,40 @@ export default function AIStudyGuideViewer({
                       </div>
                     </div>
 
-                    {/* Clean Paper-Context Note if fallback */}
-                    {isLocal && (
-                      <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                        <p className="leading-relaxed text-[11px]">
-                          💡 Generated from uploaded exam paper text, course curriculum syllabus, and community solutions.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Markdown Body */}
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      {renderFormattedMarkdown(msg.content)}
+                    {/* Safe Markdown body: GFM tables and KaTeX are deliberate
+                        response features, while raw model HTML remains inert. */}
+                    <div className="study-ai-markdown prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkMath]}
+                        rehypePlugins={[rehypeKatex]}
+                        components={{
+                          h1: ({ children }) => <h2 className="mt-5 border-b border-border/60 pb-2 text-xl font-bold text-foreground first:mt-0">{children}</h2>,
+                          h2: ({ children }) => <h3 className="mt-5 border-b border-border/60 pb-1.5 text-lg font-bold text-foreground">{children}</h3>,
+                          h3: ({ children }) => <h4 className="mt-4 text-base font-semibold text-primary">{children}</h4>,
+                          p: ({ children }) => <p className="my-2 leading-relaxed">{children}</p>,
+                          ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5 marker:text-primary">{children}</ul>,
+                          ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5 marker:font-semibold marker:text-primary">{children}</ol>,
+                          blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-primary/60 bg-primary/5 py-1 pl-3 italic">{children}</blockquote>,
+                          code: ({ className, children, ...props }) => className
+                            ? <code className={className} {...props}>{children}</code>
+                            : <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground" {...props}>{children}</code>,
+                          pre: ({ children }) => <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs text-foreground">{children}</pre>,
+                          table: ({ children }) => <div className="my-4 overflow-x-auto rounded-lg border border-border"><table className="min-w-full border-collapse text-left text-sm">{children}</table></div>,
+                          thead: ({ children }) => <thead className="bg-muted/70 text-foreground">{children}</thead>,
+                          th: ({ children }) => <th className="border-b border-border px-3 py-2 font-semibold">{children}</th>,
+                          td: ({ children }) => <td className="border-b border-border/70 px-3 py-2 align-top last:border-b-0">{children}</td>,
+                          a: ({ children, href }) => <a className="text-primary underline underline-offset-2" href={href} target="_blank" rel="noreferrer">{children}</a>,
+                        }}
+                      >
+                        {normalizeStudyResponseMarkdown(msg.content)}
+                      </ReactMarkdown>
                     </div>
 
                     {/* Compact Structured Source Metadata */}
                     {msg.sources && msg.sources.length > 0 && (
                       <details className="mt-2 text-[11px] text-muted-foreground group">
                         <summary className="cursor-pointer font-medium hover:text-foreground inline-flex items-center gap-1">
-                          <span>Document Provenance ({Array.from(new Set(msg.sources.map((s) => s.page_number))).length} pages cited)</span>
+                          <span>Sources</span>
                         </summary>
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {Array.from(
@@ -823,33 +657,6 @@ export default function AIStudyGuideViewer({
                       </details>
                     )}
 
-                    {/* Follow-up Question Chips */}
-                    <div className="pt-3 border-t border-border/30 flex flex-wrap gap-1.5 items-center">
-                      <span className="text-[10px] font-semibold text-muted-foreground mr-1">
-                        Follow-up:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleTriggerAction('formulas')}
-                        className="rounded-full border border-border bg-background/90 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-primary transition"
-                      >
-                        📐 Show formulas & theorems
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTriggerAction('quiz')}
-                        className="rounded-full border border-border bg-background/90 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-primary transition"
-                      >
-                        ❓ Generate 3 quiz questions
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTriggerAction('pitfalls')}
-                        className="rounded-full border border-border bg-background/90 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-primary transition"
-                      >
-                        ⚠️ Common exam traps
-                      </button>
-                    </div>
                   </div>
                 )}
               </div>

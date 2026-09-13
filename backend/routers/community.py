@@ -26,6 +26,8 @@ from services.site_access import require_resource_upload
 from services.auth import ensure_user_profile_record
 from services.academic_taxonomy import context_names, validate_context
 from services.programme_discovery import normalize_programme_name, record_submission
+from services.paper_processing import PaperProcessingService
+from services.contribution_communications import record_contribution_event
 
 logger = logging.getLogger(__name__)
 
@@ -708,9 +710,17 @@ async def create_paper(
         download_count=0,
         report_count=0,
         is_hidden=False,
+        extraction_status="RECEIVED",
         created_at=_utcnow(),
     )
     db.add(paper)
+    # This is the frontend's actual contribution endpoint. Create the durable
+    # job/event in the same receipt transaction; no OCR work belongs here.
+    await db.flush()
+    await PaperProcessingService(db).enqueue(paper)
+    await record_contribution_event(
+        db, event_type="PAPER_RECEIVED", paper=paper, user_id=str(current_user.id)
+    )
     profile.upload_count = (profile.upload_count or 0) + 1
     profile.trust_score = (profile.trust_score or 0) + 2
     await _refresh_trust_role(profile, db)

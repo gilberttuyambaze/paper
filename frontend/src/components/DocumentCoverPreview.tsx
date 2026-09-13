@@ -138,10 +138,10 @@ export default function DocumentCoverPreview({
 
   // Dimension scaling
   const sizeClasses = {
-    sm: 'w-16 h-22 text-[8px] p-2',
-    md: 'w-full h-28 sm:h-32 text-xs p-2.5 sm:p-3',
-    lg: 'w-full aspect-[1/1.38] min-h-[220px] p-3.5 sm:p-4',
-    hero: 'w-full aspect-[16/9] min-h-[160px] sm:min-h-[190px] p-3.5 sm:p-4',
+    sm: 'w-16 h-20 text-[8px] p-2',
+    md: 'w-full h-24 sm:h-28 text-xs p-2.5 sm:p-3',
+    lg: 'w-full aspect-[1/1.38] min-h-[200px] p-3.5 sm:p-4',
+    hero: 'w-full aspect-[16/9] min-h-[145px] sm:min-h-[170px] p-3 sm:p-3.5',
   }[size];
 
   if (resolvedCoverUrl) {
@@ -208,7 +208,7 @@ export default function DocumentCoverPreview({
       </div>
 
       {/* Top Header: University Bar & Badge */}
-      <div className="relative z-10 flex items-center justify-between gap-1 border-b pb-1.5 border-white/15">
+      <div className="relative z-10 flex items-center justify-between gap-1 border-b pb-1 border-white/15">
         <div>
           <p className={`font-black tracking-[0.2em] uppercase text-[8px] sm:text-[9px] ${theme.subtextClass}`}>
             UR PAST PAPER
@@ -231,12 +231,12 @@ export default function DocumentCoverPreview({
       </div>
 
       {/* Center Block: Code & Title snippet */}
-      <div className="relative z-10 my-auto py-1 space-y-1">
+      <div className="relative z-10 my-auto py-0.5 space-y-0.5">
         {finalCode && (
           <div className="inline-block">
             <span
               className={`inline-block font-black text-[10px] sm:text-xs tracking-wider uppercase px-1.5 py-0.5 rounded shadow-sm ${
-                isLight ? 'bg-slate-900 text-white' : 'bg-white/95 text-slate-900'
+                isLight ? 'bg-slate-900 text-white' : 'bg-white text-slate-950'
               }`}
             >
               {finalCode}
@@ -244,7 +244,7 @@ export default function DocumentCoverPreview({
           </div>
         )}
 
-        <h4 className={`font-black leading-tight line-clamp-1 text-xs sm:text-sm ${theme.textClass}`}>
+        <h4 className={`font-black leading-tight line-clamp-1 text-xs sm:text-[13px] ${theme.textClass}`}>
           {title}
         </h4>
 
@@ -269,7 +269,7 @@ export default function DocumentCoverPreview({
       </div>
 
       {/* Bottom Footer: Department/Verified, Year & Format */}
-      <div className="relative z-10 pt-1.5 border-t border-white/15 flex items-center justify-between gap-1.5 text-[8px] sm:text-[9px]">
+      <div className="relative z-10 pt-1 border-t border-white/15 flex items-center justify-between gap-1.5 text-[8px] sm:text-[9px]">
         <div className="flex items-center gap-1 font-semibold truncate">
           {verificationStatus === 'verified' ? (
             <span className="inline-flex items-center gap-1 text-emerald-400 font-bold">

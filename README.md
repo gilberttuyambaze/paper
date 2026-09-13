@@ -39,6 +39,20 @@ export URHUD_AUTO_CREATE_TABLES=true
 python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+For the complete local contribution lifecycle, run the two durable workers in
+separate terminals as well. They deliver acknowledgement emails and process
+papers after the upload response has returned:
+
+```bash
+cd backend
+PYTHONPATH=. python scripts/process_communication_events.py
+# in another terminal
+PYTHONPATH=. python scripts/process_paper_jobs.py
+```
+
+On Windows, `npm run dev:all` from `frontend/` starts the API, frontend, and
+both workers together.
+
 ### Frontend
 
 1. Install node dependencies.

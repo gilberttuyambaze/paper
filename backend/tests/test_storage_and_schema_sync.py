@@ -19,7 +19,7 @@ from models.user_profiles import User_profiles
 from routers.comments import router as comments_router
 from routers.storage import router as storage_router
 import routers.storage as storage_module
-from services.storage import GoogleDriveStorageService, storage_key_candidates
+from services.storage import GoogleDriveStorageService, StorageUnavailableError, storage_key_candidates
 
 
 def test_storage_key_candidates_preserves_case_and_underscores():
@@ -65,6 +65,52 @@ async def test_google_drive_provider_id_delete_verifies_bucket_and_deletes_id():
 
 async def _async_value(value):
     return value
+
+
+@pytest.mark.anyio
+async def test_google_drive_read_retries_transient_dns_failures(monkeypatch):
+    """A token-refresh DNS hiccup must not immediately fail an upload lookup."""
+    transient_error = type("ServerNotFoundError", (Exception,), {})
+    service = object.__new__(GoogleDriveStorageService)
+    service.HttpError = type("GoogleHttpError", (Exception,), {})
+    attempts = 0
+
+    class Request:
+        method = "GET"
+
+        def execute(self):
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise transient_error("oauth2 unavailable")
+            return {"files": []}
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr("services.storage.asyncio.sleep", no_wait)
+    assert await service._execute(Request()) == {"files": []}
+    assert attempts == 3
+
+
+@pytest.mark.anyio
+async def test_google_drive_mutation_does_not_retry_ambiguous_transport_failure():
+    transient_error = type("ServerNotFoundError", (Exception,), {})
+    service = object.__new__(GoogleDriveStorageService)
+    service.HttpError = type("GoogleHttpError", (Exception,), {})
+    attempts = 0
+
+    class Request:
+        method = "POST"
+
+        def execute(self):
+            nonlocal attempts
+            attempts += 1
+            raise transient_error("oauth2 unavailable")
+
+    with pytest.raises(StorageUnavailableError, match="temporarily unavailable"):
+        await service._execute(Request())
+    assert attempts == 1
 
 
 class FakeStorageService:

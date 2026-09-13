@@ -29,7 +29,7 @@ from schemas.storage import (
     RenameRequest,
     RenameResponse,
 )
-from services.storage import StorageService, storage_key_candidates
+from services.storage import StorageService, StorageUnavailableError, storage_key_candidates
 from services.pdf_text import extract_pdf_text
 from services.site_access import require_resource_upload
 
@@ -353,6 +353,9 @@ async def upload_file(request: FileUpDownRequest, _current_user: UserResponse = 
         return await service.create_upload_url(request)
     except HTTPException:
         raise
+    except StorageUnavailableError as e:
+        logger.warning("Storage provider temporarily unavailable during upload: %s", e)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except ValueError as e:
         logger.error(f"Invalid upload request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -395,6 +398,9 @@ async def upload_file_direct(
         )
     except HTTPException:
         raise
+    except StorageUnavailableError as e:
+        logger.warning("Storage provider temporarily unavailable during direct upload: %s", e)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except ValueError as e:
         logger.error(f"Invalid upload request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
