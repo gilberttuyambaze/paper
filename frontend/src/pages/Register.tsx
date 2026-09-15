@@ -266,7 +266,7 @@ export default function RegisterPage() {
                   <Label className="theme-form-label">Select role</Label>
                   <Select value={accountRole} onValueChange={(value) => setAccountRole(value as PublicAccountRole)}>
                     <SelectTrigger className="theme-form-input mt-2 h-12 rounded-xl">
-                      <SelectValue placeholder="Choose User, CP, or Lecturer" />
+                      <SelectValue placeholder="Choose Student, CP, or Lecturer" />
                     </SelectTrigger>
                     <SelectContent>
                       {publicAccountRoleOptions.map((option) => (
@@ -279,11 +279,6 @@ export default function RegisterPage() {
                   <p className="theme-muted mt-2 text-xs">
                     {publicAccountRoleOptions.find((option) => option.value === accountRole)?.description}
                   </p>
-                  {accountRole === 'normal' && (
-                    <p className="theme-muted mt-1 text-xs">
-                      Admin and content manager accounts are assigned later by the management team.
-                    </p>
-                  )}
                   {accountRole !== 'normal' && (
                     <div className="mt-2 rounded-xl border border-warning-border bg-warning-soft px-3 py-3 text-xs text-warning-foreground">
                       <p className="font-medium">

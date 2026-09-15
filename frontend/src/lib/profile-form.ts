@@ -8,8 +8,8 @@ export const publicAccountRoleOptions: Array<{
 }> = [
   {
     value: 'normal',
-    label: 'User',
-    description: 'Use the normal user account for browsing, discussions, downloads, and uploads.',
+    label: 'student',
+    description: 'Use the normal student account for browsing, discussions, downloads, and uploads.',
   },
   {
     value: 'cp',

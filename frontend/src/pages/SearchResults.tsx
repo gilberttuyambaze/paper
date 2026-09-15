@@ -345,13 +345,13 @@ export default function SearchResults() {
                 </Select>
               </div>
               <div>
-                <label className="theme-muted mb-1 block text-sm font-medium">Department</label>
+                <label className="theme-muted mb-1 block text-sm font-medium">programme</label>
                 <Select value={department || 'all'} onValueChange={(value) => { setDepartment(value === 'all' ? '' : value); setCourse(''); }}>
                   <SelectTrigger>
-                    <SelectValue placeholder="All Departments" />
+                    <SelectValue placeholder="All programme" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Departments</SelectItem>
+                    <SelectItem value="all">All programme</SelectItem>
                     {departments.map((item) => (
                       <SelectItem key={item} value={item}>{item}</SelectItem>
                     ))}
