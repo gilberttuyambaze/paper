@@ -88,6 +88,8 @@ export interface Paper {
   uploader_display_name?: string | null;
   uploader_profile_picture_key?: string | null;
   extraction_status?: 'pending' | 'completed' | 'failed' | 'partial' | string | null;
+  embedding_status?: string | null;
+  retrieval_mode?: string | null;
   extraction_method?: 'native_text' | 'ocr' | 'vision_fallback' | 'mixed' | string | null;
   extraction_quality?: number | null;
   ocr_used?: boolean | null;
@@ -454,12 +456,18 @@ function paperField(item: Paper, key: string): unknown {
   return (item as unknown as Record<string, unknown>)[key];
 }
 
+export interface StoredUploadObject {
+  objectKey: string;
+  providerFileId?: string | null;
+  storageProvider?: string | null;
+}
+
 export async function uploadFileObject(
   bucketName: string,
   objectKey: string,
   file: File,
   onProgress?: (percentage: number) => void
-): Promise<string> {
+): Promise<StoredUploadObject> {
   const formData = new FormData();
   formData.append('bucket_name', bucketName);
   formData.append('object_key', objectKey);
@@ -480,7 +488,11 @@ export async function uploadFileObject(
     throw new Error('Stored object key was not returned by the server');
   }
 
-  return storedObjectKey;
+  return {
+    objectKey: storedObjectKey,
+    providerFileId: typeof response.data?.provider_file_id === 'string' ? response.data.provider_file_id : null,
+    storageProvider: typeof response.data?.storage_provider === 'string' ? response.data.storage_provider : null,
+  };
 }
 
 export async function extractUploadPdfText(file: File): Promise<{ text: string; has_readable_text: boolean }> {
@@ -618,6 +630,11 @@ export interface PaperProcessingStatus {
   retry_available: boolean;
   started_at: string | null;
   completed_at: string | null;
+  current_stage: string | null;
+  pages_total: number | null;
+  pages_completed: number;
+  percent_complete: number;
+  updated_at: string | null;
 }
 
 export async function fetchPaperProcessingStatus(id: number): Promise<PaperProcessingStatus> {

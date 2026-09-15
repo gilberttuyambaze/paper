@@ -168,8 +168,8 @@ export default function RegisterPage() {
           const currentUser = await authApi.getCurrentUser();
           if (currentUser?.id) {
             const objectKey = buildProfilePictureObjectKey(currentUser.id, profileImageFile.name);
-            const storedKey = await uploadFileObject('profiles', objectKey, profileImageFile);
-            await updateUserProfile({ profile_picture_key: storedKey });
+            const stored = await uploadFileObject('profiles', objectKey, profileImageFile);
+            await updateUserProfile({ profile_picture_key: stored.objectKey });
           }
         } catch (uploadError) {
           console.error('Profile image upload failed:', uploadError);

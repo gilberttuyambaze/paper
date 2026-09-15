@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -79,9 +80,17 @@ class VisionAIOCRProvider:
         )
 
         try:
-            # Waterfall attempts best vision-capable provider
+            # Vision OCR is a quality fallback, not a reason to multiply page
+            # latency by every configured chat provider. Failed providers enter
+            # the service cooldown, so the next page naturally tries the next
+            # viable provider if needed.
+            max_attempts = max(1, int(os.getenv("OCR_VISION_MAX_PROVIDER_ATTEMPTS", "1")))
             ai_service = AIService()
-            response = await ai_service.generate_with_waterfall(req, per_provider_timeout=18.0)
+            response = await ai_service.generate_with_waterfall(
+                req,
+                per_provider_timeout=18.0,
+                max_provider_attempts=max_attempts,
+            )
             text = response.content.strip()
 
             blocks: list[OCRBlock] = []

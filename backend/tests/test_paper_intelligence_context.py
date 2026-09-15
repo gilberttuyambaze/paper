@@ -2,7 +2,8 @@
 
 from types import SimpleNamespace
 
-from services.ai.papers import build_paper_intelligence_context
+from services.ai.papers import build_paper_intelligence_context, build_question_inventory
+from services.ai.response_normalization import normalize_study_response
 
 
 def _paper():
@@ -25,13 +26,40 @@ def test_complete_context_supports_many_natural_requests_without_intent_routing(
     context = build_paper_intelligence_context(paper=_paper(), passages=_units(), max_tokens=4000, query="teach me the complexity comparison")
     assert context.selection_mode == "complete"
     assert "NAVIGATION MANIFEST (complete, ordered)" in context.text
-    assert "Question 1 → SECTION A (Page 2)" in context.text
+    assert "Inventory 2: SECTION A • Question 1 • pages 2-2" in context.text
     assert "method=ocr; confidence=0.61" in context.text
     # The same context contains evidence for navigation, explanation, comparison,
     # revision, question collection and uncertainty about the failed page.
     assert "Question 1. Explain" in context.text
     assert "Question 2. Design" in context.text
     assert "failed_pages=[4]" in context.text
+
+
+def test_question_inventory_is_ordered_complete_and_keeps_unnumbered_tasks():
+    units = _units() + [
+        SimpleNamespace(id=4, page_number=4, passage_index=3, section_title="SECTION C", question_number=None, extraction_method="ocr", extraction_confidence=0.74, text="Vocabulary matching task: match each term to its definition."),
+        SimpleNamespace(id=5, page_number=4, passage_index=4, section_title="SECTION C", question_number=None, extraction_method="ocr", extraction_confidence=0.74, text="Write a short response using three of the terms."),
+    ]
+    inventory = build_question_inventory(units)
+    assert [(item["section"], item["question_number"]) for item in inventory] == [
+        ("Instructions", None), ("SECTION A", "1"), ("SECTION B", "2"), ("SECTION C", None),
+    ]
+    # Adjacent unnumbered source units remain one ordered assessment item and
+    # are never fabricated into a question number.
+    assert inventory[-1]["question_number"] is None
+    assert len(inventory[-1]["text"]) == 2
+
+
+def test_response_normalization_preserves_markdown_and_math_without_ui_noise():
+    content, quality = normalize_study_response(
+        "# Answer\n\nsvgCopy\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n\\(E = mc^2\\)\n\nSources\n\nSources\n"
+    )
+    assert "svgCopy" not in content
+    assert "| A | B |" in content
+    assert r"\(E = mc^2\)" in content
+    assert content.count("Sources") == 1
+    assert quality.removed_ui_artifacts == 1
+    assert quality.duplicate_source_heading is True
 
 
 def test_large_context_keeps_complete_map_and_ordered_grounded_selection():

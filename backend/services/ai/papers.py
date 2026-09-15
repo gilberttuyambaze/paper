@@ -47,10 +47,44 @@ def _render_unit(p: object) -> str:
     return f"[SOURCE id={getattr(p, 'id', '?')}; {_source_label(p)}; method={method}{quality}]\n{clean_ocr_artifacts(str(getattr(p, 'text', '') or ''))}"
 
 
+def build_question_inventory(passages: Iterable[object]) -> list[dict[str, object]]:
+    """Build the ordered, source-faithful task inventory used by Study AI.
+
+    It deliberately groups only contiguous passages with the same extracted
+    section/question label.  Unnumbered instructions and assessment tasks stay
+    unnumbered rather than being fabricated as questions.
+    """
+    items: list[dict[str, object]] = []
+    for passage in passages:
+        section = str(getattr(passage, "section_title", None) or "Unsectioned content")
+        number = getattr(passage, "question_number", None)
+        text = clean_ocr_artifacts(str(getattr(passage, "text", "") or ""))
+        if not text:
+            continue
+        key = (section, str(number) if number is not None else None)
+        if items and items[-1]["group_key"] == key:
+            items[-1]["source_ids"].append(int(getattr(passage, "id", 0) or 0))
+            items[-1]["page_end"] = int(getattr(passage, "page_number", 0) or 0)
+            items[-1]["text"].append(text)
+            continue
+        items.append({
+            "group_key": key,
+            "section": section,
+            "question_number": str(number) if number is not None else None,
+            "page_start": int(getattr(passage, "page_number", 0) or 0),
+            "page_end": int(getattr(passage, "page_number", 0) or 0),
+            "source_ids": [int(getattr(passage, "id", 0) or 0)],
+            "text": [text],
+            "method": getattr(passage, "extraction_method", None) or "unknown",
+            "confidence": getattr(passage, "extraction_confidence", None),
+        })
+    return items
+
+
 def _build_manifest(paper: object, passages: list[object]) -> str:
     sections: dict[str, dict] = {}
     pages: dict[int, list[object]] = {}
-    questions: list[object] = []
+    inventory = build_question_inventory(passages)
     for p in passages:
         page = int(getattr(p, "page_number", 0) or 0)
         pages.setdefault(page, []).append(p)
@@ -59,7 +93,6 @@ def _build_manifest(paper: object, passages: list[object]) -> str:
         data["pages"].add(page)
         if getattr(p, "question_number", None):
             data["questions"].append(p)
-            questions.append(p)
     lines = [
         "=== 1. PAPER METADATA ===",
         "=== PAPER IDENTITY & EXTRACTION STATUS ===",
@@ -73,11 +106,20 @@ def _build_manifest(paper: object, passages: list[object]) -> str:
     for title, data in sections.items():
         qs = [str(getattr(p, "question_number")) for p in data["questions"]]
         lines.append(f"- Section: {title} | pages: {', '.join(str(n) for n in sorted(data['pages']))} | questions detected: {', '.join(qs) or 'none / not confidently parsed'}")
-    lines += ["", "=== 4. QUESTION PROVENANCE INDEX ===", "=== QUESTION LOCATION INDEX (derived, not authoritative) ==="]
-    if questions:
-        lines.extend(f"- Question {getattr(p, 'question_number')} → {getattr(p, 'section_title', None) or 'General'} (Page {getattr(p, 'page_number', '?')}) | {_source_label(p)} [source id={getattr(p, 'id', '?')}]" for p in questions)
+    lines += ["", "=== 4. CANONICAL ASSESSMENT INVENTORY (complete, ordered) ==="]
+    if inventory:
+        for ordinal, item in enumerate(inventory, 1):
+            label = f"Question {item['question_number']}" if item["question_number"] else "Unnumbered assessment item"
+            confidence = item["confidence"]
+            confidence_label = f"; confidence={float(confidence):.2f}" if isinstance(confidence, (int, float)) else ""
+            excerpt = " ".join(item["text"]).replace("\n", " ")[:340]
+            lines.append(
+                f"- Inventory {ordinal}: {item['section']} • {label} • pages {item['page_start']}-{item['page_end']} "
+                f"• sources={','.join(str(source_id) for source_id in item['source_ids'])} • method={item['method']}{confidence_label}\n"
+                f"  Extracted wording: {excerpt}"
+            )
     else:
-        lines.append("- No question boundaries were confidently extracted. Inspect page units before asserting an inventory.")
+        lines.append("- No assessment boundaries were confidently extracted. Inspect page units before asserting an inventory.")
     lines += ["", "=== PAGE INVENTORY ==="]
     lines.extend(f"- Page {page}: {len(units)} source units; methods: {', '.join(sorted({str(getattr(p, 'extraction_method', None) or 'unknown') for p in units}))}" for page, units in pages.items())
     return "\n".join(lines)
@@ -126,7 +168,10 @@ def build_paper_intelligence_context(
         text = prefix + (all_units or clean_ocr_artifacts(extracted_text or "No readable source units are indexed."))
         return PaperContext(text=text, estimated_tokens=max(1, len(text) // 4), truncated=False, source_ids=[int(getattr(p, "id", 0) or 0) for p in ordered])
     selected = _select_units(ordered, query, max(800, max_chars - len(prefix)))
-    text = prefix + "The full paper exceeds this request budget. The complete manifest above remains authoritative; these are relevant ordered evidence units and local neighbours. Do not claim omitted text was inspected.\n\n" + "\n\n".join(_render_unit(p) for p in selected)
+    notice = "The full paper exceeds this request budget. The inventory is authoritative where present; these are relevant ordered evidence units and local neighbours. Do not claim omitted text was inspected."
+    # Put the limitation first so it cannot be cut away by the hard context
+    # ceiling on exceptionally large manifests.
+    text = notice + "\n\n" + prefix + "\n\n".join(_render_unit(p) for p in selected)
     clipped = text[:max_chars]
     return PaperContext(text=clipped, estimated_tokens=max(1, len(clipped) // 4), truncated=True, selection_mode="structure_preserving_selection", source_ids=[int(getattr(p, "id", 0) or 0) for p in selected])
 

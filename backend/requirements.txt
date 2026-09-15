@@ -13,6 +13,11 @@ pydantic-settings
 python-dotenv
 python-multipart
 pypdf
+# Worker-side scanned and mixed-PDF support. These must be installed in the
+# paper worker image; without them scanned pages cannot be rendered or OCR'd.
+pypdfium2
+Pillow
+rapidocr_onnxruntime
 openai
 python-jose[cryptography]
 sqlalchemy

@@ -72,7 +72,14 @@ class CommunityPaperCreate(BaseModel):
     lecturer: Optional[str] = None
     description: Optional[str] = None
     file_key: Optional[str] = None
+    file_drive_file_id: Optional[str] = None
+    file_storage_provider: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    file_mime_type: Optional[str] = None
     solution_key: Optional[str] = None
+    solution_drive_file_id: Optional[str] = None
+    solution_storage_provider: Optional[str] = None
     verification_status: str = "unverified"
     download_count: int = 0
     report_count: int = 0
@@ -679,6 +686,7 @@ async def create_paper(
     current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    logger.info("PAPER_UPLOAD_START user_id=%s filename=%s size=%s mime_type=%s", current_user.id, payload.file_name, payload.file_size, payload.file_mime_type)
     await require_resource_upload(db, current_user, "paper")
     validate_context(payload.institution_id, payload.campus_id, payload.college_id, payload.school_id, payload.programme_id, payload.academic_department_id)
     if payload.programme_id == "other":
@@ -705,7 +713,14 @@ async def create_paper(
         lecturer=payload.lecturer,
         description=payload.description,
         file_key=payload.file_key,
+        file_drive_file_id=payload.file_drive_file_id,
+        file_storage_provider=payload.file_storage_provider,
+        file_name=payload.file_name,
+        file_size=payload.file_size,
+        file_mime_type=payload.file_mime_type,
         solution_key=payload.solution_key,
+        solution_drive_file_id=payload.solution_drive_file_id,
+        solution_storage_provider=payload.solution_storage_provider,
         verification_status=_verification_for_profile(profile),
         download_count=0,
         report_count=0,
@@ -717,6 +732,7 @@ async def create_paper(
     # This is the frontend's actual contribution endpoint. Create the durable
     # job/event in the same receipt transaction; no OCR work belongs here.
     await db.flush()
+    logger.info("PAPER_RECORD_CREATED paper_id=%s user_id=%s provider=%s", paper.id, current_user.id, paper.file_storage_provider)
     await PaperProcessingService(db).enqueue(paper)
     await record_contribution_event(
         db, event_type="PAPER_RECEIVED", paper=paper, user_id=str(current_user.id)
@@ -736,6 +752,7 @@ async def create_paper(
     )
     await db.commit()
     await db.refresh(paper)
+    logger.info("PAPER_UPLOAD_COMPLETE paper_id=%s user_id=%s status=%s", paper.id, current_user.id, paper.extraction_status)
     return paper
 
 

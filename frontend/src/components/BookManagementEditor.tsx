@@ -76,10 +76,10 @@ export default function BookManagementEditor({ book, canManage, onUpdated }: Pro
     try {
       const namespace = kind === 'file' ? 'books' : 'book-covers';
       const key = buildStorageKey('books', namespace, file.name, `${book.id}-${Date.now()}`);
-      const storedKey = await uploadFileObject('books', key, file);
+      const stored = await uploadFileObject('books', key, file);
       const updated = kind === 'file'
-        ? await replaceBookFile(book.id, { key: storedKey, original_filename: file.name, mime_type: file.type, size: file.size })
-        : await replaceBookCover(book.id, { key: storedKey, original_filename: file.name, mime_type: file.type, size: file.size });
+        ? await replaceBookFile(book.id, { key: stored.objectKey, original_filename: file.name, mime_type: file.type, size: file.size })
+        : await replaceBookCover(book.id, { key: stored.objectKey, original_filename: file.name, mime_type: file.type, size: file.size });
       onUpdated(updated);
       if (kind === 'file') setNewFile(null); else setNewCover(null);
       toast.success(kind === 'file' ? 'Book file updated.' : 'Book cover updated.');

@@ -656,14 +656,14 @@ export default function UploadPage() {
       setUploadStage('paper');
       setUploadProgress(0);
 
-      let fileKey = '';
-      let solutionKey = '';
+      let uploadedPaper: Awaited<ReturnType<typeof uploadFileObject>> | null = null;
+      let uploadedSolution: Awaited<ReturnType<typeof uploadFileObject>> | null = null;
       const paperUploadEnd = solutionFile ? 78 : 95;
 
       // Upload paper file
       const objectKey = buildStorageKey('papers', 'papers', paperFile.name, `${courseCode}-${paperType}-${year}-${Date.now()}`);
       try {
-        fileKey = await uploadFileObject('papers', objectKey, paperFile, (percentage) => setUploadProgress(Math.round(percentage * paperUploadEnd / 100)));
+        uploadedPaper = await uploadFileObject('papers', objectKey, paperFile, (percentage) => setUploadProgress(Math.round(percentage * paperUploadEnd / 100)));
       } catch (err) {
         console.error('File upload failed:', err);
         toast.error(normalizeApiError(err).message || 'Paper upload failed');
@@ -676,7 +676,7 @@ export default function UploadPage() {
         try {
           setUploadStage('solution');
           setUploadProgress(78);
-          solutionKey = await uploadFileObject('papers', solKey, solutionFile, (percentage) => setUploadProgress(78 + Math.round(percentage * 0.17)));
+          uploadedSolution = await uploadFileObject('papers', solKey, solutionFile, (percentage) => setUploadProgress(78 + Math.round(percentage * 0.17)));
         } catch (err) {
           console.error('Solution upload failed:', err);
         }
@@ -697,8 +697,15 @@ export default function UploadPage() {
         paper_type: paperType,
         lecturer: normalizeUserText(lecturer) || lecturer || undefined,
         description: normalizeUserText(description),
-        file_key: fileKey || undefined,
-        solution_key: solutionKey || undefined,
+        file_key: uploadedPaper?.objectKey,
+        file_drive_file_id: uploadedPaper?.providerFileId || undefined,
+        file_storage_provider: uploadedPaper?.storageProvider || undefined,
+        file_name: paperFile?.name,
+        file_size: paperFile?.size,
+        file_mime_type: paperFile?.type || 'application/pdf',
+        solution_key: uploadedSolution?.objectKey,
+        solution_drive_file_id: uploadedSolution?.providerFileId || undefined,
+        solution_storage_provider: uploadedSolution?.storageProvider || undefined,
         ...academic,
         programme_name_other: academic.programme_id === 'other' ? programmeNameOther : undefined,
       });

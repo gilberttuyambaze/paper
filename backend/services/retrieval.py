@@ -447,8 +447,9 @@ class HybridRetrievalService:
 
         # General semantic and keyword retrieval
         query_embedding = None
+        embedding_provider = next((getattr(passage, "embedding_provider", None) for passage in passages if getattr(passage, "embedding_status", None) == "ready" and getattr(passage, "embedding_provider", None)), None)
         try:
-            query_embedding = await EmbeddingService().generate_embedding(query)
+            query_embedding = await EmbeddingService().generate_embedding(query, provider=embedding_provider)
         except Exception:
             query_embedding = None
 
@@ -459,10 +460,10 @@ class HybridRetrievalService:
                 rows = await self.db.execute(
                     text(
                         "SELECT id, 1 - (embedding_vector <=> CAST(:vector AS vector)) AS score "
-                        "FROM paper_passages WHERE paper_id = :paper_id AND embedding_vector IS NOT NULL "
+                        "FROM paper_passages WHERE paper_id = :paper_id AND embedding_provider = :embedding_provider AND embedding_vector IS NOT NULL "
                         "ORDER BY embedding_vector <=> CAST(:vector AS vector) LIMIT :limit"
                     ),
-                    {"vector": vector_literal, "paper_id": paper_id, "limit": settings.hybrid_search_top_k},
+                    {"vector": vector_literal, "paper_id": paper_id, "embedding_provider": embedding_provider, "limit": settings.hybrid_search_top_k},
                 )
                 postgres_scores = {int(row.id): float(row.score) for row in rows}
             except Exception:
@@ -482,7 +483,7 @@ class HybridRetrievalService:
             p_id = getattr(passage, "id", None)
             if p_id in postgres_scores:
                 semantic_score = postgres_scores[p_id]
-            elif query_embedding and getattr(passage, "embedding_json", None) and getattr(passage, "embedding_model", None) == settings.embedding_model:
+            elif query_embedding and getattr(passage, "embedding_json", None) and getattr(passage, "embedding_provider", None) == embedding_provider:
                 try:
                     semantic_score = _cosine(query_embedding, json.loads(passage.embedding_json))
                 except (ValueError, TypeError):

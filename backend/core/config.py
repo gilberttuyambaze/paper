@@ -91,31 +91,40 @@ class Settings(BaseSettings):
     ai_enabled: bool = False
     ai_provider: str = "groq"
     ai_fallback_provider: Optional[str] = None
-    ai_fallback_chain: str = "groq,gemini,deepseek,xai,openai,openrouter"
+    ai_fallback_chain: str = "groq,groq_fallback,gemini,openai,openrouter"
 
     openai_api_key: Optional[str] = None
+    openai_embedding_api_key: Optional[str] = None
     openai_model: str = "gpt-4.1-mini"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_image_model: str = "gpt-image-1"
 
     groq_api_key: Optional[str] = None
+    # A distinct generation-only credential used after GROQ_API_KEY fails.
+    groq_fallback_api_key: Optional[str] = None
     groq_model: str = "openai/gpt-oss-120b"
 
     gemini_api_key: Optional[str] = None
+    gemini_embedding_api_key: Optional[str] = None
     gemini_model: str = "gemini-3.6-flash"
+    gemini_embedding_model: str = "gemini-embedding-001"
 
     openrouter_api_key: Optional[str] = None
+    openrouter_embedding_api_key: Optional[str] = None
     openrouter_model: str = "meta-llama/llama-3.3-70b-instruct"
+    openrouter_embedding_model: str = "text-embedding-3-small"
 
     ai_timeout_seconds: float = 12.0
     ai_max_output_tokens: int = 2048
+    study_ai_max_output_tokens: int = 6144
     ai_max_context_tokens: int = 16000
     ai_max_requests_per_user_per_minute: int = 60
     ai_compatible_base_url: Optional[str] = None
     ai_compatible_api_key: Optional[str] = None
     ai_compatible_model: Optional[str] = None
     ai_compatible_embedding_model: Optional[str] = None
-    embedding_provider: str = "openai"
+    embedding_provider: str = "openrouter"
+    embedding_fallback_providers: str = "openai,gemini"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 1536
     vector_search_top_k: int = 5

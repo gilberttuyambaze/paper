@@ -20,6 +20,7 @@ from schemas.auth import UserResponse
 from services.ai.base import AIGenerationRequest, AIMessage
 from services.ai.papers import build_paper_context
 from services.ai.service import AIService, AIProviderFactory
+from services.ai.response_normalization import normalize_study_response
 from services.pdf_text import extract_pdf_text
 from services.storage import StorageService
 from services.retrieval import (
@@ -57,7 +58,8 @@ STUDY_AI_SYSTEM_PROMPT = (
     "14. For a numerical solution, give concise visible teaching steps such as Given, Find, Formula, Substitution, Calculation, and Answer. Do not reveal hidden chain-of-thought.\n"
     "15. For a formula explanation, identify its quantities and then explain its meaning in normal language when helpful. Present multi-line derivations as separate readable displays.\n"
     "16. If OCR has obviously corrupted an otherwise unambiguous mathematical symbol or notation, present a normalized notation and say it is normalized from the extracted source. Never silently repair uncertain source content.\n"
-    "17. Put provenance naturally near an exam-derived claim, for example **Source:** Page 3, Section A, Question 8."
+    "17. Put provenance naturally near an exam-derived claim, for example **Source:** Page 3, Section A, Question 8.\n"
+    "18. The canonical assessment inventory is complete and ordered. When a student asks for a complete collection, cover every relevant inventory item exactly once in compact form; do not claim completeness if an item is absent from the supplied inventory. Preserve damaged wording and identify it as incomplete rather than repairing it."
 )
 
 
@@ -430,8 +432,15 @@ async def study_paper(
     # Never trigger synchronous indexing from a Study AI request.
     if (paper.extraction_status or "").upper() in {"RECEIVED", "QUEUED", "PROCESSING", "FAILED"}:
         job = (await db.execute(select(PaperProcessingJob).where(PaperProcessingJob.paper_id == paper_id).order_by(PaperProcessingJob.id.desc()).limit(1))).scalar_one_or_none()
+        is_failed = (job.status if job else paper.extraction_status or "").upper() == "FAILED"
         return {
-            "content": "This paper has been successfully received, but its academic content is still being processed. Study AI will become available once processing is complete.",
+            "content": (
+                "This paper was received safely, but its academic processing did not complete. "
+                "Study AI cannot use the paper until processing is retried successfully."
+                if is_failed else
+                "This paper has been successfully received, but its academic content is still being processed. "
+                "Study AI will become available once processing is complete."
+            ),
             "model": None,
             "provider": None,
             "usage": None,
@@ -499,7 +508,9 @@ async def study_paper(
 
     try:
         system_prompt = STUDY_AI_SYSTEM_PROMPT
-        max_tokens = min(settings.ai_max_output_tokens, 4096)
+        # Collections need enough room to enumerate source-backed material, but
+        # remain bounded so one request cannot monopolise a provider worker.
+        max_tokens = settings.study_ai_max_output_tokens
 
         messages = [
             AIMessage(role="system", content=system_prompt),
@@ -523,6 +534,7 @@ async def study_paper(
             AIGenerationRequest(
                 temperature=0.2,
                 max_output_tokens=max_tokens,
+                allow_extended_output=True,
                 user_id=str(_current_user.id),
                 messages=messages,
             ),
@@ -530,7 +542,14 @@ async def study_paper(
             per_provider_timeout=20.0,
         )
 
-        final_content = response.content
+        final_content, quality = normalize_study_response(response.content)
+        logger.info(
+            "STUDY_AI_RESPONSE_NORMALIZED paper_id=%s provider=%s empty=%s unclosed_fence=%s unbalanced_latex=%s duplicate_sources=%s removed_ui_artifacts=%s",
+            paper.id, response.provider, quality.empty, quality.unclosed_code_fence,
+            quality.unbalanced_latex, quality.duplicate_source_heading, quality.removed_ui_artifacts,
+        )
+        if quality.empty:
+            raise RuntimeError("Provider returned an empty Study AI response")
 
         return {
             "content": final_content,

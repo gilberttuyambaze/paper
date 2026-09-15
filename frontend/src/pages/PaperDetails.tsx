@@ -24,6 +24,7 @@ import {
   reprocessPaper,
   fetchPaperProcessingStatus,
   Paper,
+  PaperProcessingStatus,
   Comment,
   Solution,
 } from '../lib/client';
@@ -215,6 +216,7 @@ export default function PaperDetails() {
   const [authorProfiles, setAuthorProfiles] = useState<Record<string, { display_name?: string | null; imageUrl?: string | null }>>({});
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
+  const [processingStatus, setProcessingStatus] = useState<PaperProcessingStatus | null>(null);
 
   const handleReprocessPaper = async () => {
     if (!paper || isReprocessing) return;
@@ -252,6 +254,7 @@ export default function PaperDetails() {
         const status = await fetchPaperProcessingStatus(paper.id);
         if (!active) return;
         setProcessingMessage(status.message);
+        setProcessingStatus(status);
         setPaper((current) => current ? { ...current, extraction_status: status.status } : current);
       } catch {
         // Status is an enhancement; a paper page remains usable if its owner
@@ -259,7 +262,7 @@ export default function PaperDetails() {
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 15000);
+    const timer = window.setInterval(() => void refresh(), 3000);
     return () => { active = false; window.clearInterval(timer); };
   }, [paper?.id, paper?.extraction_status, user]);
 
@@ -789,6 +792,9 @@ export default function PaperDetails() {
               quality={paper.extraction_quality}
               ocrUsed={paper.ocr_used}
             />
+            {String(paper.retrieval_mode || '').toUpperCase() === 'KEYWORD_ONLY' && String(paper.extraction_status || '').toUpperCase() === 'READY' && (
+              <Badge variant="outline" className="text-[11px]">Study AI: keyword retrieval</Badge>
+            )}
             {(isAdmin || (user && user.id === paper.user_id) || paper.extraction_status === 'failed' || paper.extraction_status === 'partial') && Boolean(paper.file_key) && (
               <Button
                 type="button"
@@ -806,9 +812,25 @@ export default function PaperDetails() {
           </div>
 
           {processingMessage && ['RECEIVED', 'QUEUED', 'PROCESSING'].includes(String(paper.extraction_status || '').toUpperCase()) && (
-            <p className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">Paper received.</span> {processingMessage} You can leave this page; status updates automatically.
-            </p>
+            <div className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-muted-foreground">
+              <p><span className="font-semibold text-foreground">Paper received.</span> {processingMessage} You can leave this page; status updates automatically.</p>
+              {processingStatus && (processingStatus.pages_total !== null || processingStatus.percent_complete > 0) && (
+                <div className="mt-2 space-y-1.5" aria-live="polite">
+                  <div className="flex justify-between gap-3 text-[11px]">
+                    <span>{processingStatus.current_stage?.replaceAll('_', ' ') || 'Preparing paper intelligence'}</span>
+                    <span>{processingStatus.pages_total !== null ? `${processingStatus.pages_completed} / ${processingStatus.pages_total} pages` : `${processingStatus.percent_complete}%`}</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-blue-950/10 dark:bg-blue-100/10">
+                    <div className="h-full rounded-full bg-blue-500 transition-[width] duration-500" style={{ width: `${Math.max(2, Math.min(100, processingStatus.percent_complete))}%` }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {String(paper.extraction_status || '').toUpperCase() === 'FAILED' && (
+            <div className="mb-4 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">Paper received safely.</span> Academic processing needs attention before Study AI can use this paper. You can retry processing from the button above.
+            </div>
           )}
 
           <h1 className="theme-title mb-4 text-2xl font-bold md:text-3xl">

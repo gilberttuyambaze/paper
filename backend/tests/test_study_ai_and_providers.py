@@ -22,6 +22,7 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
             "ai_provider": settings.ai_provider,
             "openai_api_key": settings.openai_api_key,
             "groq_api_key": getattr(settings, "groq_api_key", None),
+            "groq_fallback_api_key": getattr(settings, "groq_fallback_api_key", None),
             "gemini_api_key": getattr(settings, "gemini_api_key", None),
             "openrouter_api_key": getattr(settings, "openrouter_api_key", None),
             "ai_compatible_api_key": settings.ai_compatible_api_key,
@@ -176,6 +177,16 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(groq_provider.name, "groq")
         self.assertEqual(groq_provider.default_model, "openai/gpt-oss-120b")
 
+        # The fallback lane uses only its explicitly supplied second key.
+        settings.groq_fallback_api_key = "gsk_fallback_key_456"
+        groq_fallback_provider = AIProviderFactory.create("groq_fallback")
+        self.assertEqual(groq_fallback_provider.name, "groq_fallback")
+        self.assertEqual(groq_fallback_provider.default_model, "openai/gpt-oss-120b")
+        self.assertTrue(AIProviderFactory.is_configured("groq_fallback"))
+        self.assertEqual(AIProviderFactory.detect_provider("groq_fallback")[1], "gsk_fallback_key_456")
+        settings.groq_fallback_api_key = None
+        self.assertFalse(AIProviderFactory.is_configured("groq_fallback"))
+
         # OpenRouter
         settings.openrouter_api_key = "sk-or-test"
         openrouter_provider = AIProviderFactory.create("openrouter")
@@ -219,6 +230,30 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
             res = await service.generate_with_waterfall(req)
             self.assertEqual(res.provider, "gemini")
             self.assertEqual(res.content, "Gemini successful response")
+
+    async def test_waterfall_can_bound_provider_attempts_for_vision_ocr(self):
+        from services.ai.service import _failed_provider_cooldown
+        _failed_provider_cooldown.clear()
+        failing_groq = AsyncMock()
+        failing_groq.supports = lambda cap: True
+        failing_groq.name = "groq"
+        failing_groq.generate.side_effect = Exception("provider unavailable")
+
+        unused_gemini = AsyncMock()
+        unused_gemini.supports = lambda cap: True
+        unused_gemini.name = "gemini"
+
+        def mock_create(name):
+            return failing_groq if name == "groq" else unused_gemini
+
+        with patch.object(AIProviderFactory, "create", side_effect=mock_create), \
+             patch.object(AIProviderFactory, "get_configured_providers", return_value=["groq", "gemini"]):
+            service = AIService(provider=failing_groq)
+            req = AIGenerationRequest(messages=[AIMessage(role="user", content="OCR page")], user_id="ocr_ingestion")
+            with self.assertRaises(AIProviderUnavailableError):
+                await service.generate_with_waterfall(req, max_provider_attempts=1)
+
+        unused_gemini.generate.assert_not_called()
 
     def test_fallback_response_formatting(self):
         from models.papers import Papers
@@ -438,6 +473,6 @@ class StudyAIAndProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("VOCABULARY", ctx.text)
         self.assertIn("SECTION II: GRAMMAR", ctx.text)
         self.assertIn("=== 3. STRUCTURED QUESTION & SECTION CONTENT ===", ctx.text)
-        self.assertIn("=== 4. QUESTION PROVENANCE INDEX ===", ctx.text)
-        self.assertIn("Question 1 → SECTION I: READING (Page 3)", ctx.text)
-        self.assertIn("Question 1 → SECTION II: GRAMMAR (Page 5)", ctx.text)
+        self.assertIn("=== 4. CANONICAL ASSESSMENT INVENTORY (complete, ordered) ===", ctx.text)
+        self.assertIn("Inventory 2: SECTION I: READING • Question 1 • pages 3-3", ctx.text)
+        self.assertIn("Inventory 4: SECTION II: GRAMMAR • Question 1 • pages 5-5", ctx.text)

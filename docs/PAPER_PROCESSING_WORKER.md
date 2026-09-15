@@ -25,9 +25,34 @@ QUEUED → PROCESSING → READY
 
 PostgreSQL workers use `FOR UPDATE SKIP LOCKED`; the claim transition also uses
 a conditional update so local SQLite workers cannot claim the same queued job.
-Jobs left in `PROCESSING` by an interrupted worker are reclaimed only after a
-two-hour stale lease. The original PDF and submitted metadata are never removed
-by a processing failure.
+Jobs refresh a persisted heartbeat during stages and page processing. Jobs left
+in `PROCESSING` with no heartbeat for `PAPER_PROCESSING_STALE_MINUTES` (default
+`20`) are reclaimed safely after a crash; a healthy long OCR run is not
+reclaimed merely because of elapsed time. The original PDF and submitted
+metadata are never removed by a processing failure.
+
+The worker image must include `pypdfium2`, `Pillow`, and
+`rapidocr_onnxruntime`, all of which are now pinned through
+`backend/requirements.txt`. These are required to render and OCR scanned or
+mixed PDF pages; installing only `pypdf` supports native-text extraction but
+cannot complete scanned-paper intelligence.
+
+## Benchmarking a worker image
+
+There are no committed production PDFs in this repository. To capture a
+repeatable before/after measurement with approved fixtures, run the exact
+ingestion pipeline locally or in the worker image:
+
+```text
+cd backend
+PYTHONPATH=. python scripts/benchmark_document_ingestion.py /secure/fixture.pdf
+```
+
+The JSON result includes per-page classification/method/confidence and timing
+for classification, rendering, OCR, vision fallback, structure extraction and
+the total. Run it once each for a native-text, scanned and mixed fixture. Do
+not treat queue delay as OCR time: the durable job's `started_at`,
+`heartbeat_at`, `metrics_json`, and progress fields distinguish them.
 
 Contributor communication is an outbox event in `communication_events`. The
 paper worker records `PAPER_PROCESSING_COMPLETED` only after READY. Deploy a

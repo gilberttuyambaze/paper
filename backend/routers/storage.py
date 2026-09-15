@@ -376,6 +376,7 @@ async def upload_file_direct(
     Upload a file to the configured storage backend through the backend.
     """
     try:
+        logger.info("STORAGE_UPLOAD_START bucket=%s object_key=%s content_type=%s", bucket_name, object_key, file.content_type)
         resource_type = {"books": "book", "book-covers": "book", "papers": "paper"}.get(bucket_name)
         if resource_type:
             await require_resource_upload(db, _current_user, resource_type)
@@ -391,6 +392,7 @@ async def upload_file_direct(
             file_bytes,
             file.content_type,
         )
+        logger.info("STORAGE_UPLOAD_SUCCESS bucket=%s object_key=%s provider=%s bytes=%s", request.bucket_name, upload_result.object_key, upload_result.storage_provider, len(file_bytes))
         return FileUploadResponse(
             object_key=upload_result.object_key,
             provider_file_id=upload_result.provider_file_id,
@@ -399,12 +401,14 @@ async def upload_file_direct(
     except HTTPException:
         raise
     except StorageUnavailableError as e:
+        logger.warning("STORAGE_UPLOAD_FAILED bucket=%s stage=STORAGE error_type=%s", bucket_name, type(e).__name__)
         logger.warning("Storage provider temporarily unavailable during direct upload: %s", e)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except ValueError as e:
         logger.error(f"Invalid upload request: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
+        logger.exception("STORAGE_UPLOAD_FAILED bucket=%s stage=STORAGE error_type=%s", bucket_name, type(e).__name__)
         logger.error(f"Failed to upload file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
 

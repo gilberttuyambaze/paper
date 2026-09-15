@@ -34,6 +34,9 @@ class AIGenerationRequest:
     model: str | None = None
     temperature: float | None = None
     max_output_tokens: int | None = None
+    # Only document-collection flows opt into the separately bounded extended
+    # budget. Other AI calls retain the normal concise-response ceiling.
+    allow_extended_output: bool = False
     response_schema: dict[str, Any] | None = None
     response_schema_name: str = "paper_hub_response"
     user_id: str | None = None
@@ -94,6 +97,11 @@ class AIAuthenticationError(AIError):
 class AIRateLimitError(AIError):
     code = "rate_limited"
     public_message = "The AI provider is rate limited. Please try again shortly."
+
+    def __init__(self, message: str | None = None, *, retry_after: float | None = None, quota_exhausted: bool = False):
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.quota_exhausted = quota_exhausted
 
 
 class AITimeoutError(AIError):

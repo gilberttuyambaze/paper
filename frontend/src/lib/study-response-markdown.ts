@@ -8,7 +8,11 @@
  * equations, or rewrite ordinary prose.
  */
 export function normalizeStudyResponseMarkdown(content: string): string {
-  return content.split(/(```[\s\S]*?```)/g).map((segment, index) => {
+  return content
+    // Transport/UI labels are chrome, never part of an academic answer. Only
+    // remove whole standalone lines so ordinary prose is left unchanged.
+    .replace(/^\s*(?:svg(?:copy|ai study guide|optional ideas)?|svgcopy|svgai study guide)\s*$/gim, '')
+    .split(/(```[\s\S]*?```)/g).map((segment, index) => {
     if (index % 2 === 1) return segment;
     return segment
       .replace(/\\\[([\s\S]*?)\\\]/g, (_match, expression: string) => `$$\n${expression.trim()}\n$$`)

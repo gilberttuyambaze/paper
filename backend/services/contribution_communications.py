@@ -174,9 +174,11 @@ def compose_contribution_message(event_type: str, paper: Papers, user: User, con
 async def record_contribution_event(db, *, event_type: str, paper: Papers, user_id: str) -> CommunicationEvent | None:
     user = await db.get(User, user_id)
     if not user or not user.email:
+        logger.warning("COMMUNICATION_EVENT_NOT_CREATED paper_id=%s event_type=%s reason=missing_recipient", paper.id, event_type)
         return None
     existing = (await db.execute(select(CommunicationEvent).where(CommunicationEvent.event_type == event_type, CommunicationEvent.paper_id == paper.id))).scalar_one_or_none()
     if existing:
+        logger.info("COMMUNICATION_EVENT_EXISTS event_id=%s paper_id=%s event_type=%s", existing.id, paper.id, event_type)
         return existing
     event = CommunicationEvent(
         event_type=event_type, user_id=str(user.id), paper_id=paper.id,
@@ -184,6 +186,7 @@ async def record_contribution_event(db, *, event_type: str, paper: Papers, user_
         payload_json=json.dumps({"paper_id": paper.id}),
     )
     db.add(event)
+    logger.info("COMMUNICATION_EVENT_CREATED event_id=pending paper_id=%s event_type=%s status=pending", paper.id, event_type)
     return event
 
 
@@ -212,24 +215,29 @@ async def deliver_pending_contribution_events(db, *, limit: int = 20) -> int:
             CommunicationEvent.retry_count < 3,
         ).values(status="sending", retry_count=(event.retry_count or 0) + 1, delivery_started_at=now))
         if claim.rowcount != 1:
+            logger.info("COMMUNICATION_EVENT_CLAIM_SKIPPED event_id=%s reason=owned_by_another_worker", event.id)
             continue
         await db.commit()
         await db.refresh(event)
+        logger.info("COMMUNICATION_EVENT_CLAIMED event_id=%s paper_id=%s event_type=%s attempt=%s", event.id, event.paper_id, event.event_type, event.retry_count)
         paper = await db.get(Papers, event.paper_id)
         user = await db.get(User, event.user_id) if event.user_id else None
         if not paper or not user or not user.email:
             event.status, event.error_category = "failed", "missing_recipient_or_paper"
+            logger.warning("COMMUNICATION_EVENT_PERMANENT_FAILURE event_id=%s paper_id=%s reason=missing_recipient_or_paper", event.id, event.paper_id)
             continue
         count = (await db.execute(select(CommunicationEvent).where(CommunicationEvent.user_id == user.id, CommunicationEvent.event_type == "PAPER_RECEIVED"))).scalars().all()
         msg = compose_contribution_message(event.event_type, paper, user, len(count))
         try:
+            logger.info("EMAIL_SEND_START event_id=%s paper_id=%s event_type=%s attempt=%s", event.id, event.paper_id, event.event_type, event.retry_count)
             sent = await send_transactional_email(user.email, msg["subject"], msg["text"], msg["html"])
             event.status = "sent" if sent else "failed"
             event.error_category = None if sent else "provider_failure"
             event.sent_at = datetime.now(timezone.utc) if sent else None
             delivered += int(bool(sent))
+            logger.info("EMAIL_SEND_%s event_id=%s paper_id=%s provider=brevo attempt=%s", "SUCCESS" if sent else "FAILED", event.id, event.paper_id, event.retry_count)
         except Exception as exc:
             event.status, event.error_category = "failed", type(exc).__name__[:64]
-            logger.warning("Contribution communication failed for event_id=%s", event.id)
+            logger.exception("EMAIL_SEND_FAILED event_id=%s paper_id=%s error_type=%s", event.id, event.paper_id, type(exc).__name__)
     await db.commit()
     return delivered

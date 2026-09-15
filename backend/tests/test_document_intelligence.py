@@ -11,6 +11,7 @@ from services.document_structure import DocumentStructureParser, StructuredUnit
 from services.ocr.base import OCRPageResult, OCRBlock
 from services.ocr.local_provider import LocalOCRProvider
 from services.ocr.image_preprocessor import (
+    PdfPageRenderer,
     extract_page_image_bytes,
     detect_image_mime_type,
     to_data_uri,
@@ -138,6 +139,24 @@ class DocumentIntelligenceUnitTests(unittest.TestCase):
         extracted = extract_page_image_bytes(mock_page)
         self.assertEqual(extracted, b"0" * 4096)
 
+    def test_renderer_page_count_failure_does_not_abort_ingestion(self):
+        class BrokenPdfiumDocument:
+            def __len__(self):
+                return None
+
+        renderer = PdfPageRenderer(b"not used")
+        renderer._doc = BrokenPdfiumDocument()
+        self.assertIsNone(renderer.render(1))
+
+    def test_embedded_image_without_data_is_ignored(self):
+        missing_data_image = MagicMock()
+        missing_data_image.data = None
+        valid_image = MagicMock()
+        valid_image.data = b"x" * 4096
+        page = MagicMock()
+        page.images = [missing_data_image, valid_image]
+        self.assertEqual(extract_page_image_bytes(page), b"x" * 4096)
+
     def test_question_identifier_detection(self):
         self.assertEqual(_extract_target_question_id("Solve question 4(b) step by step"), "4(b)")
         self.assertEqual(_extract_target_question_id("How do I answer Question 2?"), "2")
@@ -211,6 +230,42 @@ class DocumentIntelligenceAsyncTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(res.ocr_used)
                     self.assertIn("Ohm's Law", res.combined_text)
                     self.assertGreater(res.extraction_quality, 0.8)
+
+    async def test_ingestion_reuses_one_renderer_and_reports_page_progress(self):
+        pages = []
+        for _ in range(2):
+            page = MagicMock()
+            page.extract_text.return_value = ""
+            page.images = ["scan"]
+            pages.append(page)
+        mock_reader = MagicMock()
+        mock_reader.pages = pages
+
+        mock_ocr = AsyncMock()
+        mock_ocr.extract_page.side_effect = [
+            OCRPageResult(page_number=1, text="Question 1: Explain a concept.", confidence=0.9, provider="rapidocr"),
+            OCRPageResult(page_number=2, text="Question 2: Apply the concept.", confidence=0.9, provider="rapidocr"),
+        ]
+        renderer = MagicMock()
+        renderer.render.return_value = b"rendered page"
+        events = []
+
+        async def progress(event):
+            events.append(event)
+
+        with patch("pypdf.PdfReader", return_value=mock_reader):
+            with patch("services.document_ingestion.PdfPageRenderer", return_value=renderer) as make_renderer:
+                with patch("services.document_ingestion.get_ocr_provider", return_value=mock_ocr):
+                    result = await DocumentIngestionService.process_pdf(
+                        b"%PDF-1.4 scanned", progress_callback=progress
+                    )
+
+        make_renderer.assert_called_once_with(b"%PDF-1.4 scanned")
+        self.assertEqual(renderer.render.call_count, 2)
+        renderer.close.assert_called_once()
+        self.assertEqual(result.metrics["ocr_calls"], 2)
+        self.assertEqual(len(result.metrics["page_metrics"]), 2)
+        self.assertTrue(any(event.get("pages_completed") == 2 for event in events))
 
     async def test_hybrid_retrieval_prioritizes_exact_question_match(self):
         p1 = MagicMock()

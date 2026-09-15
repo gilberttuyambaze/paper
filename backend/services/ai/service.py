@@ -39,6 +39,16 @@ class AIProviderFactory:
             "key_prefixes": ("gsk_",),
             "env_vars": ("GROQ_API_KEY",),
         },
+        # This is a second credential lane for the same Groq generation API,
+        # not a separate model provider and never an embedding provider.
+        "groq_fallback": {
+            "label": "Groq (Fallback key)",
+            "default_url": "https://api.groq.com/openai/v1",
+            "default_model": "openai/gpt-oss-120b",
+            "key_prefixes": ("gsk_",),
+            "env_vars": ("GROQ_FALLBACK_API_KEY",),
+            "allow_generic_key_fallback": False,
+        },
         "gemini": {
             "label": "Google Gemini 3.6",
             "default_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -82,6 +92,8 @@ class AIProviderFactory:
         # 1. Check direct config settings
         if name == "groq" and getattr(settings, "groq_api_key", None):
             return settings.groq_api_key.strip()
+        if name == "groq_fallback" and getattr(settings, "groq_fallback_api_key", None):
+            return settings.groq_fallback_api_key.strip()
         if name == "gemini" and getattr(settings, "gemini_api_key", None):
             return settings.gemini_api_key.strip()
         if name == "openrouter" and getattr(settings, "openrouter_api_key", None):
@@ -97,6 +109,9 @@ class AIProviderFactory:
             val = os.environ.get(env_var, "").strip()
             if val:
                 return val
+
+        if not spec.get("allow_generic_key_fallback", True):
+            return ""
 
         # 3. Check generic fallback keys by prefix matching
         generic_keys = [
@@ -127,7 +142,7 @@ class AIProviderFactory:
 
         # Specific model settings
         model = spec["default_model"]
-        if name == "groq" and getattr(settings, "groq_model", None):
+        if name in {"groq", "groq_fallback"} and getattr(settings, "groq_model", None):
             model = settings.groq_model
         elif name == "gemini" and getattr(settings, "gemini_model", None):
             model = settings.gemini_model
@@ -139,11 +154,13 @@ class AIProviderFactory:
             model = custom_model
 
         base_url = spec["default_url"]
-        if name in ("openai_compatible", "openai") and custom_base_url:
+        # A custom OpenAI-compatible endpoint is an explicit provider choice.
+        # Never redirect the real OpenAI provider (including embeddings) to it.
+        if name == "openai_compatible" and custom_base_url:
             base_url = custom_base_url
 
         # Fallback auto-detection if no key was found for requested provider:
-        if not api_key:
+        if not api_key and spec.get("allow_generic_key_fallback", True):
             generic_key = (settings.ai_compatible_api_key or settings.openai_api_key or "").strip()
             if generic_key.startswith("gsk_"):
                 return ("groq", generic_key, "https://api.groq.com/openai/v1", "openai/gpt-oss-120b")
@@ -168,7 +185,7 @@ class AIProviderFactory:
     @staticmethod
     def get_configured_providers() -> list[str]:
         """Returns list of configured provider names ordered by preferences."""
-        order_raw = getattr(settings, "ai_fallback_chain", "groq,gemini,deepseek,xai,openai,openrouter")
+        order_raw = getattr(settings, "ai_fallback_chain", "groq,groq_fallback,gemini,openai,openrouter")
         chain_order = [p.strip().lower() for p in order_raw.split(",") if p.strip()]
 
         primary = (settings.ai_provider or "").strip().lower()
@@ -221,6 +238,30 @@ class AIProviderFactory:
             timeout_seconds=min(settings.ai_timeout_seconds, 15.0),
             base_url=base_url or None,
             name=p_name,
+        )
+
+    @staticmethod
+    def is_embedding_configured(provider_name: str) -> bool:
+        """Embedding credentials are separate from generation credentials."""
+        return bool((getattr(settings, f"{provider_name}_embedding_api_key", None) or "").strip())
+
+    @staticmethod
+    def create_embedding(provider_name: str, model: str) -> AIProvider:
+        """Create a provider using its dedicated embedding key only."""
+        name = provider_name.strip().lower()
+        if name not in AIProviderFactory.PROVIDERS_CATALOG:
+            raise AIProviderUnavailableError(f"Unsupported embedding provider: {name}")
+        api_key = (getattr(settings, f"{name}_embedding_api_key", None) or "").strip()
+        if not api_key:
+            raise AIProviderUnavailableError(f"Embedding API key is not configured for provider '{name}'")
+        spec = AIProviderFactory.PROVIDERS_CATALOG[name]
+        return OpenAIProvider(
+            api_key=api_key,
+            default_model=spec["default_model"],
+            embedding_model=model,
+            timeout_seconds=min(settings.ai_timeout_seconds, 15.0),
+            base_url=spec["default_url"],
+            name=name,
         )
 
 
@@ -293,7 +334,8 @@ class AIService:
         if self.estimate_tokens(request.messages) > settings.ai_max_context_tokens:
             raise AIContextTooLargeError()
         _limiter.check(request.user_id, settings.ai_max_requests_per_user_per_minute)
-        max_output = min(request.max_output_tokens or settings.ai_max_output_tokens, settings.ai_max_output_tokens)
+        ceiling = settings.study_ai_max_output_tokens if request.allow_extended_output else settings.ai_max_output_tokens
+        max_output = min(request.max_output_tokens or settings.ai_max_output_tokens, ceiling)
         return AIGenerationRequest(**{**request.__dict__, "max_output_tokens": max_output})
 
     async def generate(self, request: AIGenerationRequest) -> AIGeneration:
@@ -305,6 +347,7 @@ class AIService:
         request: AIGenerationRequest,
         preferred_provider: str | None = None,
         per_provider_timeout: float = 10.0,
+        max_provider_attempts: int | None = None,
     ) -> AIGeneration:
         """Attempts healthy providers first, noting failures so subsequent prompts don't retry failed providers."""
         request = self._prepare(request, AICapability.STRUCTURED_OUTPUT if request.response_schema else AICapability.TEXT_GENERATION)
@@ -328,7 +371,9 @@ class AIService:
         ordered_candidates = active_candidates + cooldown_candidates
 
         errors: list[str] = []
-        for prov_name in ordered_candidates:
+        for attempt_index, prov_name in enumerate(ordered_candidates):
+            if max_provider_attempts is not None and attempt_index >= max(1, max_provider_attempts):
+                break
             started = monotonic()
             try:
                 prov = AIProviderFactory.create(prov_name)

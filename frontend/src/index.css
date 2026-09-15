@@ -5,6 +5,7 @@
 /* Study AI returns trusted Markdown syntax but never raw HTML. Keep long
    derivations usable on narrow screens instead of shrinking them into noise. */
 .study-ai-markdown .katex-display {
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0.5rem 0;
@@ -12,6 +13,38 @@
 
 .study-ai-markdown .katex {
   color: hsl(var(--foreground));
+}
+
+/* Keep rich AI answers inside the message card on narrow devices. Individual
+   rich elements may scroll horizontally; the document/page never should. */
+.study-ai-markdown {
+  overflow-wrap: anywhere;
+}
+
+.study-ai-table-wrapper {
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.study-ai-table-wrapper table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.study-ai-markdown pre {
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .study-ai-markdown :is(th, td) {
+    min-width: 8rem;
+    vertical-align: top;
+  }
+
+  .study-ai-markdown .katex-display {
+    margin-left: 0;
+    margin-right: 0;
+  }
 }
 
 :root {

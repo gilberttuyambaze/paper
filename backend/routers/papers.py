@@ -29,8 +29,9 @@ from services.authorization import (
     require_upload_permission,
 )
 from services.site_access import require_resource_upload
-from models.papers import Papers
+from models.papers import Papers, PaperPageExtraction
 from models.paper_processing import PaperProcessingJob
+from models.communications import CommunicationEvent
 from services.paper_processing import PaperProcessingService
 
 # Set up logging
@@ -143,6 +144,9 @@ class PapersResponse(BaseModel):
     ocr_used: Optional[bool] = None
     failed_pages: Optional[str] = None
     extraction_version: Optional[str] = None
+    embedding_status: Optional[str] = None
+    embedding_error: Optional[str] = None
+    retrieval_mode: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -269,6 +273,8 @@ async def paper_processing_status(
     if not paper or (not has_permission(current_user, "papers.edit") and paper.user_id != str(current_user.id)):
         raise HTTPException(status_code=404, detail="Paper not found")
     job = (await db.execute(select(PaperProcessingJob).where(PaperProcessingJob.paper_id == paper_id).order_by(PaperProcessingJob.id.desc()).limit(1))).scalar_one_or_none()
+    metrics = json.loads(job.metrics_json) if job and job.metrics_json else {}
+    events = (await db.execute(select(CommunicationEvent).where(CommunicationEvent.paper_id == paper_id).order_by(CommunicationEvent.id.desc()))).scalars().all()
     return {
         "paper_id": paper_id,
         "status": (job.status if job else paper.extraction_status or "RECEIVED"),
@@ -276,6 +282,47 @@ async def paper_processing_status(
         "retry_available": bool(job and job.status == "FAILED"),
         "started_at": job.started_at if job else None,
         "completed_at": job.completed_at if job else None,
+        "current_stage": job.current_stage if job else "RECEIVED",
+        "pages_total": job.pages_total if job else None,
+        "pages_completed": job.pages_completed if job else 0,
+        "percent_complete": job.percent_complete if job else 0,
+        "updated_at": job.updated_at if job else None,
+        "last_heartbeat": job.heartbeat_at if job else None,
+        "attempt": job.attempt_count if job else 0,
+        "error": job.error_summary if job and (has_permission(current_user, "papers.edit") or paper.user_id == str(current_user.id)) else None,
+        "progress": {"current": job.pages_completed if job else 0, "total": job.pages_total if job else None, "percent": job.percent_complete if job else 0},
+        "native_pages": metrics.get("native_pages", 0),
+        "ocr_pages": metrics.get("ocr_calls", 0),
+        "failed_pages": metrics.get("failed_pages", 0),
+        "embedding": {"status": metrics.get("embedding_status", "pending"), "error": metrics.get("embedding_error"), "provider": metrics.get("embedding_provider"), "model": metrics.get("embedding_model"), "resumed": bool(metrics.get("embedding_resumed"))},
+        "retrieval_mode": paper.retrieval_mode or "KEYWORD_ONLY",
+        "communication_events": [{"event_type": event.event_type, "status": event.status, "attempt": event.retry_count, "error": event.error_category} for event in events],
+    }
+
+
+@router.get("/{paper_id}/page-extractions")
+async def paper_page_extractions(
+    paper_id: int,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner/admin diagnostic evidence; never infer page success from READY."""
+    paper = await db.get(Papers, paper_id)
+    if not paper or (not has_permission(current_user, "papers.edit") and paper.user_id != str(current_user.id)):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    pages = (await db.execute(select(PaperPageExtraction).where(
+        PaperPageExtraction.paper_id == paper_id,
+    ).order_by(PaperPageExtraction.page_number))).scalars().all()
+    return {
+        "paper_id": paper_id,
+        "pages": [{
+            "page": page.page_number,
+            "status": page.status,
+            "extraction_method": page.extraction_method,
+            "text_length": page.text_length,
+            "confidence": page.extraction_confidence,
+            "error": page.error_message,
+        } for page in pages],
     }
 
 

@@ -58,6 +58,12 @@ class Papers(Base):
     ocr_used = Column(Boolean, nullable=True, default=False)
     failed_pages = Column(Text, nullable=True)
     extraction_version = Column(String(32), nullable=True)
+    # Extraction and vectorization are deliberately independent.  A paper with
+    # durable passages remains useful to keyword retrieval during an embedding
+    # provider outage.
+    embedding_status = Column(String(32), nullable=True, default="PENDING")
+    embedding_error = Column(String(500), nullable=True)
+    retrieval_mode = Column(String(32), nullable=True, default="KEYWORD_ONLY")
     created_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -83,9 +89,30 @@ class PaperPassage(Base):
     source_file_key = Column(String, nullable=True)
     embedding_json = Column(Text, nullable=True)
     embedding_model = Column(String, nullable=True)
+    embedding_provider = Column(String(32), nullable=True)
     embedding_dimension = Column(Integer, nullable=True)
     embedding_status = Column(String, nullable=False, default="pending")
     embedding_updated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PaperPageExtraction(Base):
+    """Durable per-page extraction evidence for diagnosis and provenance."""
+    __tablename__ = "paper_page_extractions"
+    __table_args__ = (UniqueConstraint("paper_id", "processing_version", "page_number", name="uq_paper_page_extraction_run"),)
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    paper_id = Column(Integer, nullable=False, index=True)
+    processing_version = Column(String(64), nullable=False, default="v2_structured")
+    page_number = Column(Integer, nullable=False)
+    status = Column(String(32), nullable=False, index=True)
+    extraction_method = Column(String(32), nullable=True)
+    extraction_confidence = Column(Float, nullable=True)
+    text = Column(Text, nullable=True)
+    text_length = Column(Integer, nullable=False, default=0)
+    error_message = Column(String(500), nullable=True)
+    source_file_key = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

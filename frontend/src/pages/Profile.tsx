@@ -287,7 +287,7 @@ export default function ProfilePage() {
 
       if (profileImageFile) {
         const objectKey = buildProfilePictureObjectKey(user.id, profileImageFile.name);
-        updatePayload.profile_picture_key = await uploadFileObject('profiles', objectKey, profileImageFile);
+        updatePayload.profile_picture_key = (await uploadFileObject('profiles', objectKey, profileImageFile)).objectKey;
       } else if (profileImageUrlInput.trim()) {
         updatePayload.profile_picture_key = profileImageUrlInput.trim();
       }

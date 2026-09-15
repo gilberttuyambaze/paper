@@ -62,6 +62,8 @@ class OpenAIProvider(AIProvider):
         self.default_model = default_model
         self.embedding_model = embedding_model
         self.timeout_seconds = timeout_seconds
+        self._api_key = api_key
+        self._base_url = base_url or "https://api.openai.com/v1"
         # Endpoint-level fallbacks are faster and more useful than SDK retries
         # for interactive study help, which has a strict response budget.
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds, max_retries=0)
@@ -302,12 +304,28 @@ class OpenAIProvider(AIProvider):
             raise self._normalize_error(exc) from exc
 
     async def embed(self, request: AIEmbeddingRequest) -> AIEmbeddingResult:
+        if self.name == "gemini":
+            return await self._embed_gemini_native(request)
         try:
             response = await self.client.embeddings.create(
                 model=request.model or self.embedding_model,
                 input=request.input,
             )
-            vectors = [item.embedding for item in response.data]
+            items = getattr(response, "data", None)
+            if not isinstance(items, list):
+                raise AIMalformedResponseError("EMBEDDING_INVALID_RESPONSE: response.data is missing or invalid")
+            indexed = []
+            for item in items:
+                vector = getattr(item, "embedding", None)
+                index = getattr(item, "index", None)
+                if not isinstance(vector, list) or not vector or not all(isinstance(value, (int, float)) for value in vector):
+                    raise AIMalformedResponseError("EMBEDDING_INVALID_RESPONSE: response data contained an invalid vector")
+                indexed.append((index, vector))
+            if all(isinstance(index, int) for index, _ in indexed):
+                indexed.sort(key=lambda pair: pair[0])
+                if [index for index, _ in indexed] != list(range(len(request.input))):
+                    raise AIMalformedResponseError("EMBEDDING_INVALID_RESPONSE: response indexes did not match request order")
+            vectors = [vector for _, vector in indexed]
             if len(vectors) != len(request.input):
                 raise AIMalformedResponseError("OpenAI embedding response had an unexpected item count")
             return AIEmbeddingResult(
@@ -319,6 +337,60 @@ class OpenAIProvider(AIProvider):
         except Exception as exc:
             raise self._normalize_error(exc) from exc
 
+    async def _embed_gemini_native(self, request: AIEmbeddingRequest) -> AIEmbeddingResult:
+        """Use Gemini's native batch endpoint to request the database dimension.
+
+        Gemini's OpenAI compatibility endpoint is valid, but does not expose the
+        native outputDimensionality control this application's pgvector schema
+        requires.  Gemini otherwise defaults to 3072 values, while this project
+        uses a 1536-dimensional index.
+        """
+        from core.config import settings
+
+        model = request.model or self.embedding_model
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents"
+        payload = {
+            "requests": [
+                {
+                    "model": f"models/{model}",
+                    "content": {"parts": [{"text": value}]},
+                    "outputDimensionality": settings.embedding_dimension,
+                }
+                for value in request.input
+            ]
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(endpoint, headers={"x-goog-api-key": self._api_key}, json=payload)
+            if response.status_code == 429:
+                retry_after = response.headers.get("retry-after")
+                raise AIRateLimitError(
+                    "Gemini embedding request was rate limited.",
+                    retry_after=float(retry_after) if retry_after and retry_after.replace(".", "", 1).isdigit() else None,
+                    quota_exhausted="quota" in response.text.lower() or "billing" in response.text.lower(),
+                )
+            if response.status_code in (401, 403):
+                raise AIAuthenticationError("Gemini embedding authentication failed.")
+            if response.status_code == 404:
+                raise AIModelUnavailableError("Gemini embedding model is unavailable.")
+            response.raise_for_status()
+            body = response.json()
+            embeddings = body.get("embeddings") if isinstance(body, dict) else None
+            if not isinstance(embeddings, list) or len(embeddings) != len(request.input):
+                actual = len(embeddings) if isinstance(embeddings, list) else "missing"
+                raise AIMalformedResponseError(
+                    f"GEMINI_INVALID_EMBEDDING_RESPONSE expected_vectors={len(request.input)} actual_vectors={actual}"
+                )
+            vectors = []
+            for embedding in embeddings:
+                vector = embedding.get("values") if isinstance(embedding, dict) else None
+                if not isinstance(vector, list) or not vector or not all(isinstance(value, (int, float)) for value in vector):
+                    raise AIMalformedResponseError("GEMINI_INVALID_EMBEDDING_RESPONSE invalid_embedding_values")
+                vectors.append(vector)
+            return AIEmbeddingResult(vectors=vectors, model=model, provider=self.name)
+        except Exception as exc:
+            raise self._normalize_error(exc) from exc
+
     @staticmethod
     def _normalize_error(exc: Exception) -> AIError:
         if isinstance(exc, AIError):
@@ -326,9 +398,16 @@ class OpenAIProvider(AIProvider):
         raw_msg = str(exc)
         if isinstance(exc, RateLimitError):
             msg_lower = raw_msg.lower()
-            if "quota" in msg_lower or "credit" in msg_lower or "billing" in msg_lower or "balance" in msg_lower:
-                return AIRateLimitError("OpenAI account balance is exhausted (429 Insufficient Quota). Add credits at platform.openai.com or switch AI_PROVIDER in backend/.env.local.")
-            return AIRateLimitError("AI provider is temporarily rate limited. Please try again shortly.")
+            quota_exhausted = any(token in msg_lower for token in ("quota", "credit", "billing", "balance"))
+            headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
+            retry_after_raw = headers.get("retry-after")
+            try:
+                retry_after = float(retry_after_raw) if retry_after_raw else None
+            except (TypeError, ValueError):
+                retry_after = None
+            if quota_exhausted:
+                return AIRateLimitError("OpenAI embedding quota is exhausted.", retry_after=retry_after, quota_exhausted=True)
+            return AIRateLimitError("OpenAI embedding request is temporarily rate limited.", retry_after=retry_after)
         if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
             return AIAuthenticationError(f"AI authentication failed: {raw_msg}")
         if isinstance(exc, (APITimeoutError, asyncio.TimeoutError, httpx.TimeoutException)):

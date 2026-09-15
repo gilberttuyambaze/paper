@@ -97,11 +97,11 @@ function getDynamicLoadingInfo(action?: AIStudyAction | null, query?: string | n
   ) {
     return {
       steps: [
-        'Scanning document pages for question sections...',
-        'Extracting questions and text passages...',
-        'Structuring questions for review...',
+        'Reviewing the paper’s question inventory...',
+        'Organizing sections, questions, and tasks...',
+        'Preparing the complete collection...',
       ],
-      subtitle: 'Extracting exact questions from paper context...',
+      subtitle: 'Using the paper’s saved academic evidence—no document reprocessing.',
     };
   }
 
@@ -563,7 +563,7 @@ export default function AIStudyGuideViewer({
                   </div>
                 ) : (
                   /* Assistant Message Card */
-                  <div className="rounded-xl border border-border/60 bg-card/60 p-4 shadow-sm space-y-3">
+                  <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/60 bg-card/60 p-4 shadow-sm space-y-3">
                     {/* Header with Role, Assistant Badge & Copy Button */}
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2.5">
                       <div className="flex items-center gap-2">
@@ -602,7 +602,7 @@ export default function AIStudyGuideViewer({
 
                     {/* Safe Markdown body: GFM tables and KaTeX are deliberate
                         response features, while raw model HTML remains inert. */}
-                    <div className="study-ai-markdown prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+                    <div className="study-ai-markdown min-w-0 max-w-full break-words prose prose-sm dark:prose-invert text-muted-foreground">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex]}
@@ -617,11 +617,11 @@ export default function AIStudyGuideViewer({
                           code: ({ className, children, ...props }) => className
                             ? <code className={className} {...props}>{children}</code>
                             : <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground" {...props}>{children}</code>,
-                          pre: ({ children }) => <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs text-foreground">{children}</pre>,
-                          table: ({ children }) => <div className="my-4 overflow-x-auto rounded-lg border border-border"><table className="min-w-full border-collapse text-left text-sm">{children}</table></div>,
+                          pre: ({ children }) => <pre className="max-w-full overflow-x-auto rounded-lg bg-muted p-3 text-xs text-foreground">{children}</pre>,
+                          table: ({ children }) => <div className="study-ai-table-wrapper my-4 max-w-full overflow-x-auto rounded-lg border border-border"><table className="min-w-full border-collapse text-left text-sm">{children}</table></div>,
                           thead: ({ children }) => <thead className="bg-muted/70 text-foreground">{children}</thead>,
-                          th: ({ children }) => <th className="border-b border-border px-3 py-2 font-semibold">{children}</th>,
-                          td: ({ children }) => <td className="border-b border-border/70 px-3 py-2 align-top last:border-b-0">{children}</td>,
+                          th: ({ children }) => <th className="border-b border-border px-3 py-2 font-semibold break-words">{children}</th>,
+                          td: ({ children }) => <td className="border-b border-border/70 px-3 py-2 align-top break-words last:border-b-0">{children}</td>,
                           a: ({ children, href }) => <a className="text-primary underline underline-offset-2" href={href} target="_blank" rel="noreferrer">{children}</a>,
                         }}
                       >
