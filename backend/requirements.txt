@@ -20,5 +20,6 @@ Pillow
 rapidocr_onnxruntime
 openai
 python-jose[cryptography]
-sqlalchemy
+greenlet
+sqlalchemy[asyncio]
 uvicorn[standard]
