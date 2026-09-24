@@ -98,3 +98,4 @@ The frontend uses Tailwind CSS for a clean, responsive user interface. Styles ar
 ## Contact
 
 If you need help running the project, check the `frontend/package.json` scripts and backend startup commands in `backend/scripts/bootstrap_backend.py`.
+# paper
